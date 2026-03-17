@@ -168,4 +168,58 @@ router.get('/me', authenticate, async (req, res) => {
   }
 });
 
+// PUT /api/auth/me — update own profile
+router.put('/me', authenticate, async (req, res) => {
+  try {
+    const { firstName, lastName, email, currentPassword, newPassword } = req.body;
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const data = {};
+    if (firstName) data.firstName = firstName;
+    if (lastName) data.lastName = lastName;
+
+    if (email && email !== user.email) {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        return res.status(409).json({ error: 'Email already in use' });
+      }
+      data.email = email;
+    }
+
+    if (newPassword) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Current password required to set new password' });
+      }
+      const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      data.passwordHash = await bcrypt.hash(newPassword, 12);
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data,
+      include: { organization: true },
+    });
+
+    res.json({
+      id: updated.id,
+      email: updated.email,
+      firstName: updated.firstName,
+      lastName: updated.lastName,
+      role: updated.role,
+      orgId: updated.orgId,
+      orgName: updated.organization.name,
+    });
+  } catch (err) {
+    console.error('Update profile error:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
 module.exports = router;

@@ -12,6 +12,7 @@ const coisRoutes = require('./routes/cois');
 const portalRoutes = require('./routes/portal');
 const reportsRoutes = require('./routes/reports');
 const notificationsRoutes = require('./routes/notifications');
+const organizationRoutes = require('./routes/organization');
 const { startExpirationCron } = require('./services/cron');
 
 const prisma = new PrismaClient();
@@ -36,6 +37,7 @@ app.use('/api/cois', coisRoutes);
 app.use('/api/portal', portalRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/organization', organizationRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
