@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  REVIEWER
+  VIEWER
+}
+
+enum CoiStatus {
+  COMPLIANT
+  NON_COMPLIANT
+  EXPIRING_SOON
+  EXPIRED
+  PENDING
+  NO_COI
+}
+
+enum CoiReviewStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum NotificationType {
+  EXPIRATION_REMINDER
+  UPLOAD_REQUEST
+  REVIEW_COMPLETE
+  COI_REJECTED
+}
+
+enum NotificationStatus {
+  SENT
+  FAILED
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  email     String
+  phone     String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings      OrganizationSettings?
+  users         User[]
+  vendors       Vendor[]
+  cois          Coi[]
+  notifications NotificationLog[]
+}
+
+model OrganizationSettings {
+  id    String @id @default(uuid())
+  orgId String @unique
+
+  minGeneralLiability Int @default(100000000)
+  minWorkersComp      Int @default(50000000)
+  minUmbrella         Int @default(100000000)
+  minAutomobile       Int @default(100000000)
+
+  reminderDaysBefore  Json    @default("[30, 14, 7, 0]")
+  notifyOnUpload      Boolean @default(true)
+  notifyOnExpiration  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id           String   @id @default(uuid())
+  orgId        String
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         UserRole @default(ADMIN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reviewedCois Coi[]        @relation("ReviewedBy")
+}
+
+model Vendor {
+  id          String    @id @default(uuid())
+  orgId       String
+  name        String
+  email       String
+  phone       String?
+  address     String?
+  uploadToken String    @unique @default(uuid())
+  coiStatus   CoiStatus @default(NO_COI)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization  Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  cois          Coi[]
+  notifications NotificationLog[]
+}
+
+model Coi {
+  id       String @id @default(uuid())
+  vendorId String
+  orgId    String
+
+  // General Liability
+  glPolicyNumber   String?
+  glCoverageAmount Int?
+  glExpirationDate DateTime?
+
+  // Workers Compensation
+  wcPolicyNumber   String?
+  wcCoverageAmount Int?
+  wcExpirationDate DateTime?
+
+  // Umbrella
+  umbPolicyNumber   String?
+  umbCoverageAmount Int?
+  umbExpirationDate DateTime?
+
+  // Automobile
+  autoPolicyNumber   String?
+  autoCoverageAmount Int?
+  autoExpirationDate DateTime?
+
+  // Insurance Agent
+  agentName        String?
+  agentEmail       String?
+  agentPhone       String?
+  insuranceCompany String?
+
+  // Meta
+  pdfPath         String
+  status          CoiReviewStatus @default(PENDING_REVIEW)
+  aiExtractedData Json?
+  complianceFlags Json?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  reviewNotes     String?
+  submittedAt     DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  vendor       Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reviewedBy   User?        @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  notifications NotificationLog[]
+}
+
+model NotificationLog {
+  id             String             @id @default(uuid())
+  orgId          String
+  vendorId       String?
+  coiId          String?
+  type           NotificationType
+  recipientEmail String
+  sentAt         DateTime           @default(now())
+  status         NotificationStatus
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  vendor       Vendor?      @relation(fields: [vendorId], references: [id])
+  coi          Coi?         @relation(fields: [coiId], references: [id])
+}
