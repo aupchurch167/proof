@@ -5,6 +5,7 @@ const nav = [
   { path: '/', label: 'Dashboard' },
   { path: '/vendors', label: 'Vendors' },
   { path: '/cois', label: 'COIs' },
+  { path: '/import', label: 'Import' },
   { path: '/reports', label: 'Reports' },
   { path: '/settings', label: 'Settings' },
 ];

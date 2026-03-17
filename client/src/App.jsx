@@ -11,6 +11,7 @@ import CoiDetail from './pages/CoiDetail';
 import Settings from './pages/Settings';
 import Reports from './pages/Reports';
 import Portal from './pages/Portal';
+import Import from './pages/Import';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -37,6 +38,7 @@ export default function App() {
                 <Route path="/cois/:id" element={<CoiDetail />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/reports" element={<Reports />} />
+                <Route path="/import" element={<Import />} />
               </Routes>
             </Layout>
           </PrivateRoute>
