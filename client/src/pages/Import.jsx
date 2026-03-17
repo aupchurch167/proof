@@ -479,7 +479,6 @@ export default function Import() {
                 <p className="text-sm text-orange-600">Compliance issues flagged</p>
               </div>
             )}
-            </div>
           </div>
 
           {results.errors.length > 0 && (
