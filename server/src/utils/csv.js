@@ -90,6 +90,7 @@ function generateCsv(headers, rows = []) {
 // Expected template headers
 const VENDOR_HEADERS = [
   'name',
+  'contact_name',
   'email',
   'phone',
   'address',

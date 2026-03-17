@@ -23,7 +23,7 @@ export default function Portal() {
       })
       .then((v) => {
         setVendor(v);
-        setForm({ name: v.name, email: v.email, phone: v.phone || '', address: v.address || '' });
+        setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '' });
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -144,6 +144,8 @@ export default function Portal() {
             <form onSubmit={handleUpdateInfo} className="space-y-3">
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg" placeholder="Company Name" />
+              <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg" placeholder="Contact Name" />
               <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg" placeholder="Email" />
               <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
@@ -158,6 +160,7 @@ export default function Portal() {
           ) : (
             <div className="text-sm space-y-1">
               <p><span className="text-gray-500">Company:</span> {vendor.name}</p>
+              {vendor.contactName && <p><span className="text-gray-500">Contact:</span> {vendor.contactName}</p>}
               <p><span className="text-gray-500">Email:</span> {vendor.email}</p>
               {vendor.phone && <p><span className="text-gray-500">Phone:</span> {vendor.phone}</p>}
               {vendor.address && <p><span className="text-gray-500">Address:</span> {vendor.address}</p>}

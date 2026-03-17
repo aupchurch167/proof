@@ -41,14 +41,14 @@ router.get('/', authenticate, async (req, res) => {
 // POST /api/vendors
 router.post('/', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
   try {
-    const { name, email, phone, address } = req.body;
+    const { name, contactName, email, phone, address } = req.body;
 
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email required' });
     }
 
     const vendor = await prisma.vendor.create({
-      data: { orgId: req.user.orgId, name, email, phone, address },
+      data: { orgId: req.user.orgId, name, contactName, email, phone, address },
     });
 
     res.status(201).json(vendor);
@@ -81,7 +81,7 @@ router.get('/:id', authenticate, async (req, res) => {
 // PUT /api/vendors/:id
 router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
   try {
-    const { name, email, phone, address } = req.body;
+    const { name, contactName, email, phone, address } = req.body;
 
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
@@ -95,6 +95,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res
       where: { id: req.params.id },
       data: {
         ...(name && { name }),
+        ...(contactName !== undefined && { contactName }),
         ...(email && { email }),
         ...(phone !== undefined && { phone }),
         ...(address !== undefined && { address }),

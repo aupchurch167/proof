@@ -20,7 +20,7 @@ export default function VendorDetail() {
 
   useEffect(() => {
     api.get(`/vendors/${id}`)
-      .then((v) => { setVendor(v); setForm({ name: v.name, email: v.email, phone: v.phone || '', address: v.address || '' }); })
+      .then((v) => { setVendor(v); setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '' }); })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [id]);
@@ -53,6 +53,8 @@ export default function VendorDetail() {
               <div className="space-y-3">
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
                   className="px-3 py-2 border rounded-lg text-lg font-bold" />
+                <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
+                  className="px-3 py-2 border rounded-lg w-full" placeholder="Contact Name" />
                 <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
                   className="px-3 py-2 border rounded-lg w-full" placeholder="Email" />
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
@@ -67,6 +69,7 @@ export default function VendorDetail() {
             ) : (
               <>
                 <h1 className="text-2xl font-bold">{vendor.name}</h1>
+                {vendor.contactName && <p className="text-gray-600 mt-1">{vendor.contactName}</p>}
                 <p className="text-gray-600 mt-1">{vendor.email}</p>
                 {vendor.phone && <p className="text-gray-600">{vendor.phone}</p>}
                 {vendor.address && <p className="text-gray-600">{vendor.address}</p>}

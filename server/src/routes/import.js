@@ -13,6 +13,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 router.get('/template/vendors', authenticate, (req, res) => {
   const sample = [{
     name: 'Acme Plumbing LLC',
+    contact_name: 'John Doe',
     email: 'billing@acmeplumbing.com',
     phone: '555-0101',
     address: '456 Oak St, Austin, TX 78702',
@@ -101,6 +102,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const name = row[headerMap.name]?.trim();
+      const contactName = headerMap.contact_name ? row[headerMap.contact_name]?.trim() : null;
       const email = row[headerMap.email]?.trim();
       const phone = headerMap.phone ? row[headerMap.phone]?.trim() : null;
       const address = headerMap.address ? row[headerMap.address]?.trim() : null;
@@ -127,6 +129,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
           data: {
             orgId: req.user.orgId,
             name,
+            contactName: contactName || null,
             email,
             phone: phone || null,
             address: address || null,

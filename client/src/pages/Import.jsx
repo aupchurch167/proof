@@ -5,6 +5,7 @@ const API_BASE = '/api';
 
 const VENDOR_TEMPLATE_FIELDS = [
   { key: 'name', label: 'Vendor Name', required: true },
+  { key: 'contact_name', label: 'Contact Name', required: false },
   { key: 'email', label: 'Email', required: true },
   { key: 'phone', label: 'Phone', required: false },
   { key: 'address', label: 'Address', required: false },
@@ -263,7 +264,7 @@ export default function Import() {
                   {templateFields.map(f => (
                     <td key={f.key} className="px-3 py-1.5 whitespace-nowrap italic">
                       {importType === 'vendors'
-                        ? { name: 'Acme Plumbing', email: 'billing@acme.com', phone: '555-0101', address: '123 Main St' }[f.key] || ''
+                        ? { name: 'Acme Plumbing', contact_name: 'John Doe', email: 'billing@acme.com', phone: '555-0101', address: '123 Main St' }[f.key] || ''
                         : { vendor_email: 'billing@acme.com', gl_policy_number: 'GL-123', gl_coverage_amount: '1000000', gl_expiration_date: '2026-12-31' }[f.key] || '...'}
                     </td>
                   ))}

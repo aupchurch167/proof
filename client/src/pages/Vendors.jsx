@@ -26,7 +26,7 @@ export default function Vendors() {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', phone: '', address: '' });
+  const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState('');
@@ -52,7 +52,7 @@ export default function Vendors() {
     setError('');
     try {
       await api.post('/vendors', form);
-      setForm({ name: '', email: '', phone: '', address: '' });
+      setForm({ name: '', contactName: '', email: '', phone: '', address: '' });
       setShowAdd(false);
       fetchVendors();
     } catch (err) {
@@ -91,6 +91,11 @@ export default function Vendors() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required
+                className="w-full px-3 py-2 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
+              <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
             <div>

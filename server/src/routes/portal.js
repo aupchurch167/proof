@@ -34,7 +34,7 @@ router.get('/:uploadToken', async (req, res) => {
   try {
     const vendor = await prisma.vendor.findUnique({
       where: { uploadToken: req.params.uploadToken },
-      select: { id: true, name: true, email: true, phone: true, address: true },
+      select: { id: true, name: true, contactName: true, email: true, phone: true, address: true },
     });
 
     if (!vendor) {
@@ -50,7 +50,7 @@ router.get('/:uploadToken', async (req, res) => {
 // PUT /api/portal/:uploadToken/info
 router.put('/:uploadToken/info', async (req, res) => {
   try {
-    const { name, email, phone, address } = req.body;
+    const { name, contactName, email, phone, address } = req.body;
 
     const vendor = await prisma.vendor.findUnique({
       where: { uploadToken: req.params.uploadToken },
@@ -64,11 +64,12 @@ router.put('/:uploadToken/info', async (req, res) => {
       where: { id: vendor.id },
       data: {
         ...(name && { name }),
+        ...(contactName !== undefined && { contactName }),
         ...(email && { email }),
         ...(phone !== undefined && { phone }),
         ...(address !== undefined && { address }),
       },
-      select: { id: true, name: true, email: true, phone: true, address: true },
+      select: { id: true, name: true, contactName: true, email: true, phone: true, address: true },
     });
 
     res.json(updated);
