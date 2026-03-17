@@ -3,6 +3,7 @@ const multer = require('multer');
 const { PrismaClient } = require('@prisma/client');
 const { authenticate, authorize } = require('../middleware/auth');
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
+const { checkCompliance } = require('../services/compliance');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -153,6 +154,7 @@ router.post('/cois', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single
     }
 
     const headerMap = JSON.parse(req.body.headerMap || '{}');
+    const runComplianceCheck = req.body.runComplianceCheck === 'true';
     const text = req.file.buffer.toString('utf-8');
     const { rows } = parseCsv(text);
 
@@ -164,7 +166,15 @@ router.post('/cois', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single
       return res.status(400).json({ error: 'Vendor email header mapping is required' });
     }
 
-    const results = { created: 0, skipped: 0, errors: [] };
+    // Load org settings if compliance check requested
+    let orgSettings = null;
+    if (runComplianceCheck) {
+      orgSettings = await prisma.organizationSettings.findUnique({
+        where: { orgId: req.user.orgId },
+      });
+    }
+
+    const results = { created: 0, skipped: 0, errors: [], flagged: 0 };
 
     // Helper to parse dollar amount to cents
     const toCents = (val) => {
@@ -205,35 +215,55 @@ router.post('/cois', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single
       }
 
       try {
-        await prisma.coi.create({
-          data: {
-            vendorId: vendor.id,
-            orgId: req.user.orgId,
-            pdfPath: '',
-            status: 'PENDING_REVIEW',
+        const coiData = {
+          vendorId: vendor.id,
+          orgId: req.user.orgId,
+          pdfPath: '',
+          status: 'PENDING_REVIEW',
 
-            glPolicyNumber: getVal(row, 'gl_policy_number'),
-            glCoverageAmount: toCents(getVal(row, 'gl_coverage_amount')),
-            glExpirationDate: toDate(getVal(row, 'gl_expiration_date')),
+          glPolicyNumber: getVal(row, 'gl_policy_number'),
+          glCoverageAmount: toCents(getVal(row, 'gl_coverage_amount')),
+          glExpirationDate: toDate(getVal(row, 'gl_expiration_date')),
 
-            wcPolicyNumber: getVal(row, 'wc_policy_number'),
-            wcCoverageAmount: toCents(getVal(row, 'wc_coverage_amount')),
-            wcExpirationDate: toDate(getVal(row, 'wc_expiration_date')),
+          wcPolicyNumber: getVal(row, 'wc_policy_number'),
+          wcCoverageAmount: toCents(getVal(row, 'wc_coverage_amount')),
+          wcExpirationDate: toDate(getVal(row, 'wc_expiration_date')),
 
-            umbPolicyNumber: getVal(row, 'umb_policy_number'),
-            umbCoverageAmount: toCents(getVal(row, 'umb_coverage_amount')),
-            umbExpirationDate: toDate(getVal(row, 'umb_expiration_date')),
+          umbPolicyNumber: getVal(row, 'umb_policy_number'),
+          umbCoverageAmount: toCents(getVal(row, 'umb_coverage_amount')),
+          umbExpirationDate: toDate(getVal(row, 'umb_expiration_date')),
 
-            autoPolicyNumber: getVal(row, 'auto_policy_number'),
-            autoCoverageAmount: toCents(getVal(row, 'auto_coverage_amount')),
-            autoExpirationDate: toDate(getVal(row, 'auto_expiration_date')),
+          autoPolicyNumber: getVal(row, 'auto_policy_number'),
+          autoCoverageAmount: toCents(getVal(row, 'auto_coverage_amount')),
+          autoExpirationDate: toDate(getVal(row, 'auto_expiration_date')),
 
-            agentName: getVal(row, 'agent_name'),
-            agentEmail: getVal(row, 'agent_email'),
-            agentPhone: getVal(row, 'agent_phone'),
-            insuranceCompany: getVal(row, 'insurance_company'),
-          },
-        });
+          agentName: getVal(row, 'agent_name'),
+          agentEmail: getVal(row, 'agent_email'),
+          agentPhone: getVal(row, 'agent_phone'),
+          insuranceCompany: getVal(row, 'insurance_company'),
+        };
+
+        // Run compliance check if enabled
+        if (runComplianceCheck && orgSettings) {
+          const extractedForCheck = {
+            glCoverageAmount: coiData.glCoverageAmount,
+            wcCoverageAmount: coiData.wcCoverageAmount,
+            umbCoverageAmount: coiData.umbCoverageAmount,
+            autoCoverageAmount: coiData.autoCoverageAmount,
+            glExpirationDate: coiData.glExpirationDate?.toISOString?.() || getVal(row, 'gl_expiration_date'),
+            wcExpirationDate: coiData.wcExpirationDate?.toISOString?.() || getVal(row, 'wc_expiration_date'),
+            umbExpirationDate: coiData.umbExpirationDate?.toISOString?.() || getVal(row, 'umb_expiration_date'),
+            autoExpirationDate: coiData.autoExpirationDate?.toISOString?.() || getVal(row, 'auto_expiration_date'),
+          };
+
+          const flags = checkCompliance(extractedForCheck, orgSettings);
+          if (flags.length > 0) {
+            coiData.complianceFlags = flags;
+            results.flagged++;
+          }
+        }
+
+        await prisma.coi.create({ data: coiData });
 
         // Update vendor status to pending
         await prisma.vendor.update({

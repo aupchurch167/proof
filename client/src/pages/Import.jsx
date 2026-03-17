@@ -84,6 +84,7 @@ export default function Import() {
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
+  const [runComplianceCheck, setRunComplianceCheck] = useState(true);
 
   const templateFields = importType === 'vendors' ? VENDOR_TEMPLATE_FIELDS : COI_TEMPLATE_FIELDS;
 
@@ -96,6 +97,7 @@ export default function Import() {
     setHeaderMap({});
     setResults(null);
     setError('');
+    setRunComplianceCheck(true);
   };
 
   const handleTypeChange = (type) => {
@@ -162,6 +164,9 @@ export default function Import() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('headerMap', JSON.stringify(headerMap));
+      if (importType === 'cois') {
+        formData.append('runComplianceCheck', runComplianceCheck.toString());
+      }
 
       const token = localStorage.getItem('accessToken');
       const endpoint = importType === 'vendors' ? '/import/vendors' : '/import/cois';
@@ -428,6 +433,21 @@ export default function Import() {
             </p>
           </div>
 
+          {importType === 'cois' && (
+            <label className="flex items-center gap-3 mb-6 p-4 bg-white border rounded-lg cursor-pointer hover:bg-gray-50">
+              <input type="checkbox" checked={runComplianceCheck}
+                onChange={(e) => setRunComplianceCheck(e.target.checked)}
+                className="rounded w-4 h-4 text-blue-600" />
+              <div>
+                <span className="text-sm font-medium text-gray-900">Run compliance check during import</span>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Each COI will be checked against your organization's minimum coverage requirements.
+                  Missing or insufficient coverage will be flagged for review.
+                </p>
+              </div>
+            </label>
+          )}
+
           <div className="flex gap-3">
             <button onClick={() => { setStep(1); setError(''); }}
               className="px-4 py-2 border rounded-lg text-sm">Back</button>
@@ -444,7 +464,7 @@ export default function Import() {
         <div className="bg-white rounded-xl border p-6">
           <h2 className="text-lg font-semibold mb-4">Import Complete</h2>
 
-          <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className={`grid gap-4 mb-6 ${results.flagged > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <div className="bg-green-50 p-4 rounded-lg border border-green-200">
               <p className="text-2xl font-bold text-green-700">{results.created}</p>
               <p className="text-sm text-green-600">Successfully imported</p>
@@ -452,6 +472,13 @@ export default function Import() {
             <div className={`p-4 rounded-lg border ${results.skipped > 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
               <p className={`text-2xl font-bold ${results.skipped > 0 ? 'text-yellow-700' : 'text-gray-400'}`}>{results.skipped}</p>
               <p className={`text-sm ${results.skipped > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>Skipped</p>
+            </div>
+            {results.flagged > 0 && (
+              <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                <p className="text-2xl font-bold text-orange-700">{results.flagged}</p>
+                <p className="text-sm text-orange-600">Compliance issues flagged</p>
+              </div>
+            )}
             </div>
           </div>
 
