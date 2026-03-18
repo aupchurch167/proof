@@ -108,7 +108,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res
   }
 });
 
-// DELETE /api/vendors/bulk (soft delete multiple)
+// DELETE /api/vendors/bulk (soft delete multiple, hard delete COIs first)
 router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { ids } = req.body;
@@ -116,6 +116,12 @@ router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
       return res.status(400).json({ error: 'ids must be a non-empty array' });
     }
 
+    // First, delete all COIs for these vendors (hard delete)
+    await prisma.coi.deleteMany({
+      where: { vendorId: { in: ids }, orgId: req.user.orgId },
+    });
+
+    // Then, soft-delete the vendors
     const { count } = await prisma.vendor.updateMany({
       where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null },
       data: { deletedAt: new Date() },
@@ -128,7 +134,7 @@ router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// DELETE /api/vendors/:id (soft delete)
+// DELETE /api/vendors/:id (soft delete, hard delete COIs first)
 router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
@@ -139,6 +145,12 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
+    // Delete all COIs for this vendor (hard delete)
+    await prisma.coi.deleteMany({
+      where: { vendorId: req.params.id, orgId: req.user.orgId },
+    });
+
+    // Then soft-delete the vendor
     await prisma.vendor.update({
       where: { id: req.params.id },
       data: { deletedAt: new Date() },
