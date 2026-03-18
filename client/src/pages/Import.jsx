@@ -192,9 +192,23 @@ export default function Import() {
     }
   };
 
-  const handleDownloadTemplate = (type) => {
+  const handleDownloadTemplate = async (type) => {
     const token = localStorage.getItem('accessToken');
-    window.open(`${API_BASE}/import/template/${type}?token=${token}`, '_blank');
+    try {
+      const res = await fetch(`${API_BASE}/import/template/${type}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${type}-import-template.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Failed to download template: ' + err.message);
+    }
   };
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
@@ -239,11 +253,10 @@ export default function Import() {
                   : 'Required column: vendor_email (must match existing vendor). All other coverage fields optional.'}
               </p>
             </div>
-            <a href={`${API_BASE}/import/template/${importType}`}
-              className="text-sm text-blue-600 hover:underline font-medium"
-              download>
+            <button onClick={() => handleDownloadTemplate(importType)}
+              className="text-sm text-blue-600 hover:underline font-medium">
               Download Template
-            </a>
+            </button>
           </div>
 
           {/* Template preview */}
