@@ -1,33 +1,27 @@
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 
-let transporter = null;
+let initialized = false;
 
-function getTransporter() {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
+function init() {
+  if (!initialized && process.env.SENDGRID_API_KEY) {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+    initialized = true;
   }
-  return transporter;
 }
 
 async function sendEmail(to, subject, html) {
-  // Skip if SMTP not configured
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+  // Skip if SendGrid not configured
+  if (!process.env.SENDGRID_API_KEY || !process.env.FROM_EMAIL) {
     console.log(`[Email] Would send to ${to}: ${subject}`);
     return;
   }
 
+  init();
+
   try {
-    await getTransporter().sendMail({
-      from: process.env.SMTP_USER,
+    await sgMail.send({
       to,
+      from: process.env.FROM_EMAIL,
       subject,
       html,
     });
