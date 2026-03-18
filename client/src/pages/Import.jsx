@@ -99,6 +99,7 @@ export default function Import() {
 
   // COI PDF bulk import state
   const [vendors, setVendors] = useState([]);
+  const [selectedVendorId, setSelectedVendorId] = useState('');
   const [pdfFiles, setPdfFiles] = useState([]);
   const [processingPdfs, setProcessingPdfs] = useState(false);
   const [pdfResults, setPdfResults] = useState(null); // { success, failed }
@@ -122,6 +123,7 @@ export default function Import() {
     setResults(null);
     setError('');
     setRunComplianceCheck(true);
+    setSelectedVendorId('');
     setPdfFiles([]);
     setPdfResults(null);
   };
@@ -225,7 +227,6 @@ export default function Import() {
   const handlePdfFilesSelected = (newFiles) => {
     const entries = newFiles.map(f => ({
       file: f,
-      vendorId: '',
       status: 'pending', // pending | processing | success | error
       error: null,
       coiId: null,
@@ -238,9 +239,8 @@ export default function Import() {
   };
 
   const handleProcessPdfs = async () => {
-    const unassigned = pdfFiles.filter(pf => !pf.vendorId && pf.status === 'pending');
-    if (unassigned.length > 0) {
-      setError('Please assign a vendor to each PDF before processing.');
+    if (!selectedVendorId) {
+      setError('Please select a vendor before processing.');
       return;
     }
 
@@ -259,7 +259,7 @@ export default function Import() {
         const formData = new FormData();
         formData.append('pdf', pdfFiles[i].file);
 
-        const result = await api.upload(`/vendors/${pdfFiles[i].vendorId}/coi/upload`, formData);
+        const result = await api.upload(`/vendors/${selectedVendorId}/coi/upload`, formData);
 
         setPdfFiles(prev => prev.map((p, j) =>
           j === i ? { ...p, status: 'success', coiId: result.coiId } : p
@@ -609,85 +609,92 @@ export default function Import() {
 
           <h2 className="text-lg font-semibold mb-2">Upload COI PDFs</h2>
           <p className="text-sm text-gray-500 mb-6">
-            Drop one or more PDF files. Each will be processed through AI extraction and checked against your compliance requirements.
-            Assign a vendor to each PDF before processing.
+            Select a vendor, then drop one or more PDF files. Each will be processed through AI extraction
+            and checked against your compliance requirements.
           </p>
 
-          <PdfUploadZone
-            accept=".pdf"
-            multiple
-            maxSizeMB={10}
-            label="Drag and drop COI PDFs here"
-            sublabel="or click to browse files"
-            sizeLabel="Max 10MB per file, PDF only"
-            onFileSelect={handlePdfFilesSelected}
-          />
+          {/* Vendor selector */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Vendor</label>
+            <select
+              value={selectedVendorId}
+              onChange={(e) => setSelectedVendorId(e.target.value)}
+              className={`w-full px-3 py-2.5 border rounded-lg text-sm ${
+                !selectedVendorId ? 'border-gray-300' : 'border-green-300 bg-green-50'
+              }`}
+              disabled={processingPdfs}
+            >
+              <option value="">-- Select a vendor --</option>
+              {vendors.map(v => (
+                <option key={v.id} value={v.id}>{v.name} ({v.email})</option>
+              ))}
+            </select>
+          </div>
 
-          {/* File list with vendor assignment */}
+          {/* Drop zone — only enabled when vendor is selected */}
+          <div className={!selectedVendorId ? 'opacity-50 pointer-events-none' : ''}>
+            <PdfUploadZone
+              accept=".pdf"
+              multiple
+              maxSizeMB={10}
+              label="Drag and drop COI PDFs here"
+              sublabel="or click to browse files"
+              sizeLabel="Max 10MB per file, PDF only"
+              onFileSelect={handlePdfFilesSelected}
+            />
+          </div>
+          {!selectedVendorId && (
+            <p className="text-xs text-gray-400 mt-1">Select a vendor above to enable file upload.</p>
+          )}
+
+          {/* File list */}
           {pdfFiles.length > 0 && (
             <div className="mt-6">
               <h3 className="text-sm font-medium text-gray-700 mb-3">
                 {pdfFiles.length} file(s) queued
               </h3>
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {pdfFiles.map((pf, i) => (
-                  <div key={i} className={`flex items-center gap-4 p-3 rounded-lg border ${
+                  <div key={i} className={`flex items-center gap-4 px-4 py-3 rounded-lg border ${
                     pf.status === 'success' ? 'border-green-200 bg-green-50' :
                     pf.status === 'error' ? 'border-red-200 bg-red-50' :
                     pf.status === 'processing' ? 'border-blue-200 bg-blue-50' :
                     'border-gray-200'
                   }`}>
+                    {/* File icon */}
+                    <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+
                     {/* File info */}
-                    <div className="flex items-center gap-3 min-w-0 flex-shrink-0" style={{ width: '220px' }}>
-                      <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-700 truncate">{pf.file.name}</p>
-                        <p className="text-xs text-gray-400">{(pf.file.size / 1024 / 1024).toFixed(2)} MB</p>
-                      </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-700 truncate">{pf.file.name}</p>
+                      <p className="text-xs text-gray-400">{(pf.file.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
 
-                    {/* Vendor selector */}
-                    <select
-                      value={pf.vendorId}
-                      onChange={(e) => {
-                        setPdfFiles(prev => prev.map((p, j) => j === i ? { ...p, vendorId: e.target.value } : p));
-                      }}
-                      className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
-                        !pf.vendorId && pf.status === 'pending' ? 'border-red-300' : 'border-gray-300'
-                      }`}
-                      disabled={pf.status !== 'pending'}
-                    >
-                      <option value="">-- Select vendor --</option>
-                      {vendors.map(v => (
-                        <option key={v.id} value={v.id}>{v.name} ({v.email})</option>
-                      ))}
-                    </select>
-
-                    {/* Status */}
+                    {/* Status badge */}
                     <PdfStatusBadge status={pf.status} error={pf.error} />
 
                     {/* Error detail */}
                     {pf.status === 'error' && pf.error && (
-                      <span className="text-xs text-red-500 max-w-[150px] truncate" title={pf.error}>{pf.error}</span>
+                      <span className="text-xs text-red-500 max-w-[200px] truncate" title={pf.error}>{pf.error}</span>
                     )}
 
-                    {/* Remove button (only when pending) */}
+                    {/* COI link on success */}
+                    {pf.status === 'success' && pf.coiId && (
+                      <a href={`/cois/${pf.coiId}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">
+                        View COI
+                      </a>
+                    )}
+
+                    {/* Remove button */}
                     {pf.status === 'pending' && (
                       <button onClick={() => handleRemovePdf(i)} className="text-gray-400 hover:text-red-500 flex-shrink-0">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                       </button>
-                    )}
-
-                    {/* COI link (on success) */}
-                    {pf.status === 'success' && pf.coiId && (
-                      <a href={`/cois/${pf.coiId}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">
-                        View COI
-                      </a>
                     )}
                   </div>
                 ))}
@@ -712,7 +719,7 @@ export default function Import() {
                 {pdfFiles.some(pf => pf.status === 'pending') && (
                   <button
                     onClick={handleProcessPdfs}
-                    disabled={processingPdfs || pdfFiles.filter(pf => pf.status === 'pending').some(pf => !pf.vendorId)}
+                    disabled={processingPdfs}
                     className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
                   >
                     {processingPdfs ? 'Processing...' : `Process ${pdfFiles.filter(pf => pf.status === 'pending').length} PDF(s)`}
