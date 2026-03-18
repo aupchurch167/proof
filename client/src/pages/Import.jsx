@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { api } from '../utils/api';
 
 const API_BASE = '/api';
 
@@ -193,19 +194,8 @@ export default function Import() {
   };
 
   const handleDownloadTemplate = async (type) => {
-    const token = localStorage.getItem('accessToken');
     try {
-      const res = await fetch(`${API_BASE}/import/template/${type}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Download failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${type}-import-template.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await api.download(`/import/template/${type}`, `${type}-import-template.csv`);
     } catch (err) {
       alert('Failed to download template: ' + err.message);
     }

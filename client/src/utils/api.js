@@ -45,6 +45,8 @@ async function request(path, options = {}) {
     throw new Error(error.error || 'Request failed');
   }
 
+  if (options._raw) return res;
+
   return res.json();
 }
 
@@ -54,4 +56,14 @@ export const api = {
   put: (path, body) => request(path, { method: 'PUT', body }),
   delete: (path) => request(path, { method: 'DELETE' }),
   upload: (path, formData) => request(path, { method: 'POST', body: formData }),
+  download: async (path, filename) => {
+    const res = await request(path, { _raw: true });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 };
