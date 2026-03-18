@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { api } from '../utils/api';
+import PdfUploadZone from '../components/PdfUploadZone';
 
 const API_BASE = '/api';
 
@@ -73,9 +75,17 @@ function StepIndicator({ step, labels }) {
   );
 }
 
+function PdfStatusBadge({ status, error: errorMsg }) {
+  if (status === 'pending') return <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">Pending</span>;
+  if (status === 'processing') return <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded animate-pulse">Processing...</span>;
+  if (status === 'success') return <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded">Success</span>;
+  if (status === 'error') return <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded" title={errorMsg}>Failed</span>;
+  return null;
+}
+
 export default function Import() {
   const { user } = useAuth();
-  const [importType, setImportType] = useState('vendors'); // 'vendors' | 'cois'
+  const [importType, setImportType] = useState('vendors'); // 'vendors' | 'cois' | 'coi-pdfs'
   const [step, setStep] = useState(0); // 0=upload, 1=map headers, 2=preview, 3=results
   const [file, setFile] = useState(null);
   const [csvHeaders, setCsvHeaders] = useState([]);
@@ -87,7 +97,20 @@ export default function Import() {
   const [error, setError] = useState('');
   const [runComplianceCheck, setRunComplianceCheck] = useState(true);
 
+  // COI PDF bulk import state
+  const [vendors, setVendors] = useState([]);
+  const [pdfFiles, setPdfFiles] = useState([]);
+  const [processingPdfs, setProcessingPdfs] = useState(false);
+  const [pdfResults, setPdfResults] = useState(null); // { success, failed }
+
   const templateFields = importType === 'vendors' ? VENDOR_TEMPLATE_FIELDS : COI_TEMPLATE_FIELDS;
+
+  // Fetch vendors when COI PDF tab is selected
+  useEffect(() => {
+    if (importType === 'coi-pdfs') {
+      api.get('/vendors').then(setVendors).catch(() => {});
+    }
+  }, [importType]);
 
   const reset = () => {
     setStep(0);
@@ -99,6 +122,8 @@ export default function Import() {
     setResults(null);
     setError('');
     setRunComplianceCheck(true);
+    setPdfFiles([]);
+    setPdfResults(null);
   };
 
   const handleTypeChange = (type) => {
@@ -196,13 +221,71 @@ export default function Import() {
     window.location.href = `${API_BASE}/import/template/${type}`;
   };
 
+  // --- COI PDF bulk import ---
+  const handlePdfFilesSelected = (newFiles) => {
+    const entries = newFiles.map(f => ({
+      file: f,
+      vendorId: '',
+      status: 'pending', // pending | processing | success | error
+      error: null,
+      coiId: null,
+    }));
+    setPdfFiles(prev => [...prev, ...entries]);
+  };
+
+  const handleRemovePdf = (index) => {
+    setPdfFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleProcessPdfs = async () => {
+    const unassigned = pdfFiles.filter(pf => !pf.vendorId && pf.status === 'pending');
+    if (unassigned.length > 0) {
+      setError('Please assign a vendor to each PDF before processing.');
+      return;
+    }
+
+    setError('');
+    setProcessingPdfs(true);
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < pdfFiles.length; i++) {
+      if (pdfFiles[i].status !== 'pending') continue;
+
+      // Mark as processing
+      setPdfFiles(prev => prev.map((p, j) => j === i ? { ...p, status: 'processing' } : p));
+
+      try {
+        const formData = new FormData();
+        formData.append('pdf', pdfFiles[i].file);
+
+        const result = await api.upload(`/vendors/${pdfFiles[i].vendorId}/coi/upload`, formData);
+
+        setPdfFiles(prev => prev.map((p, j) =>
+          j === i ? { ...p, status: 'success', coiId: result.coiId } : p
+        ));
+        successCount++;
+      } catch (err) {
+        setPdfFiles(prev => prev.map((p, j) =>
+          j === i ? { ...p, status: 'error', error: err.message } : p
+        ));
+        failedCount++;
+      }
+    }
+
+    setPdfResults({ success: successCount, failed: failedCount });
+    setProcessingPdfs(false);
+  };
+
   const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
   if (!canManage) return <div className="text-center py-12 text-gray-500">Admin or Reviewer access required</div>;
+
+  const isCsvImport = importType === 'vendors' || importType === 'cois';
 
   return (
     <div>
       <h1 className="text-2xl font-bold mb-2">Bulk Import</h1>
-      <p className="text-gray-500 text-sm mb-6">Import vendors and COIs from CSV files</p>
+      <p className="text-gray-500 text-sm mb-6">Import vendors and COIs from CSV or PDF files</p>
 
       {/* Import type toggle */}
       <div className="flex gap-2 mb-6">
@@ -216,304 +299,440 @@ export default function Import() {
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             importType === 'cois' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
           }`}>
-          Import COIs
+          Import COIs (CSV)
+        </button>
+        <button onClick={() => handleTypeChange('coi-pdfs')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            importType === 'coi-pdfs' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}>
+          Import COI PDFs
         </button>
       </div>
 
-      <StepIndicator step={step} labels={['Upload CSV', 'Map Headers', 'Preview & Import', 'Results']} />
+      {/* ===== CSV Import Flow (Vendors / COIs) ===== */}
+      {isCsvImport && (
+        <>
+          <StepIndicator step={step} labels={['Upload CSV', 'Map Headers', 'Preview & Import', 'Results']} />
 
-      {error && (
-        <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-6 text-sm">{error}</div>
-      )}
-
-      {/* Step 0: Upload */}
-      {step === 0 && (
-        <div className="bg-white rounded-xl border p-6">
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <h2 className="text-lg font-semibold">Upload {importType === 'vendors' ? 'Vendor' : 'COI'} CSV</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                {importType === 'vendors'
-                  ? 'Required columns: name, email. Optional: phone, address.'
-                  : 'Required column: vendor_email (must match existing vendor). All other coverage fields optional.'}
-              </p>
-            </div>
-            <button onClick={() => handleDownloadTemplate(importType)}
-              className="text-sm text-blue-600 hover:underline font-medium">
-              Download Template
-            </button>
-          </div>
-
-          {/* Template preview */}
-          <div className="bg-gray-50 rounded-lg p-4 mb-6 overflow-x-auto">
-            <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">Expected Template Format</p>
-            <table className="text-xs">
-              <thead>
-                <tr>
-                  {templateFields.map(f => (
-                    <th key={f.key} className={`px-3 py-1.5 text-left whitespace-nowrap ${f.required ? 'text-gray-900 font-semibold' : 'text-gray-500 font-medium'}`}>
-                      {f.key}{f.required ? ' *' : ''}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="text-gray-400">
-                  {templateFields.map(f => (
-                    <td key={f.key} className="px-3 py-1.5 whitespace-nowrap italic">
-                      {importType === 'vendors'
-                        ? { name: 'Acme Plumbing', contact_name: 'John Doe', email: 'billing@acme.com', phone: '555-0101', address: '123 Main St' }[f.key] || ''
-                        : { vendor_email: 'billing@acme.com', gl_policy_number: 'GL-123', gl_coverage_amount: '1000000', gl_expiration_date: '2026-12-31' }[f.key] || '...'}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div className="border-2 border-dashed rounded-xl p-8 text-center mb-4">
-            <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files[0])}
-              className="hidden" id="csv-upload" />
-            <label htmlFor="csv-upload" className="cursor-pointer">
-              {file ? (
-                <div>
-                  <p className="font-medium">{file.name}</p>
-                  <p className="text-sm text-gray-500 mt-1">{(file.size / 1024).toFixed(1)} KB</p>
-                </div>
-              ) : (
-                <div>
-                  <svg className="w-10 h-10 text-gray-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <p className="text-gray-600">Click to select CSV file</p>
-                </div>
-              )}
-            </label>
-          </div>
-
-          <button onClick={handleFileUpload} disabled={!file}
-            className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-            Parse &amp; Continue
-          </button>
-        </div>
-      )}
-
-      {/* Step 1: Map Headers */}
-      {step === 1 && (
-        <div className="bg-white rounded-xl border p-6">
-          <h2 className="text-lg font-semibold mb-2">Verify Header Mapping</h2>
-          <p className="text-sm text-gray-500 mb-1">
-            We detected <strong>{csvHeaders.length}</strong> columns and <strong>{rowCount}</strong> data rows.
-          </p>
-          <p className="text-sm text-gray-500 mb-6">
-            Match each required field to the correct column from your CSV. Auto-matched fields are pre-selected.
-          </p>
-
-          <div className="space-y-3 mb-6">
-            {templateFields.map((field) => {
-              const mapped = headerMap[field.key];
-              const isMatched = !!mapped;
-              return (
-                <div key={field.key}
-                  className={`flex items-center gap-4 p-3 rounded-lg border ${
-                    field.required && !isMatched ? 'border-red-300 bg-red-50' :
-                    isMatched ? 'border-green-200 bg-green-50' :
-                    'border-gray-200'
-                  }`}>
-                  <div className="w-56 flex-shrink-0">
-                    <span className="text-sm font-medium">{field.label}</span>
-                    {field.required && <span className="text-red-500 ml-1">*</span>}
-                    <p className="text-xs text-gray-400">{field.key}</p>
-                  </div>
-                  <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                  </svg>
-                  <select
-                    value={mapped || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setHeaderMap(prev => {
-                        const next = { ...prev };
-                        if (val) {
-                          next[field.key] = val;
-                        } else {
-                          delete next[field.key];
-                        }
-                        return next;
-                      });
-                    }}
-                    className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
-                      isMatched ? 'border-green-300' : field.required ? 'border-red-300' : ''
-                    }`}
-                  >
-                    <option value="">-- Skip (don't import) --</option>
-                    {csvHeaders.map(h => (
-                      <option key={h} value={h}>{h}</option>
-                    ))}
-                  </select>
-                  {isMatched && (
-                    <span className="text-green-600 text-sm flex-shrink-0">Matched</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Show detected CSV headers for reference */}
-          <div className="bg-gray-50 rounded-lg p-4 mb-6">
-            <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">Your CSV Headers</p>
-            <div className="flex flex-wrap gap-2">
-              {csvHeaders.map(h => {
-                const isUsed = Object.values(headerMap).includes(h);
-                return (
-                  <span key={h} className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                    isUsed ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
-                  }`}>
-                    {h} {isUsed ? '\u2713' : ''}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button onClick={() => { setStep(0); setError(''); }}
-              className="px-4 py-2 border rounded-lg text-sm">Back</button>
-            <button onClick={handleConfirmHeaders}
-              className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium">
-              Confirm Mapping &amp; Preview
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 2: Preview & Import */}
-      {step === 2 && (
-        <div className="bg-white rounded-xl border p-6">
-          <h2 className="text-lg font-semibold mb-2">Preview Import</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Showing first {Math.min(5, previewRows.length)} of {rowCount} rows with your header mapping applied.
-          </p>
-
-          <div className="overflow-x-auto mb-6">
-            <table className="text-sm w-full">
-              <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">#</th>
-                  {templateFields.filter(f => headerMap[f.key]).map(f => (
-                    <th key={f.key} className="px-3 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">
-                      {f.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {previewRows.map((row, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                    {templateFields.filter(f => headerMap[f.key]).map(f => (
-                      <td key={f.key} className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                        {row[headerMap[f.key]] || <span className="text-gray-300">empty</span>}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-            <p className="text-sm text-blue-800">
-              Ready to import <strong>{rowCount}</strong> {importType === 'vendors' ? 'vendor(s)' : 'COI(s)'}.
-              {importType === 'vendors'
-                ? ' Duplicates (same email) will be skipped.'
-                : ' Vendor email must match an existing vendor in your organization.'}
-            </p>
-          </div>
-
-          {importType === 'cois' && (
-            <label className="flex items-center gap-3 mb-6 p-4 bg-white border rounded-lg cursor-pointer hover:bg-gray-50">
-              <input type="checkbox" checked={runComplianceCheck}
-                onChange={(e) => setRunComplianceCheck(e.target.checked)}
-                className="rounded w-4 h-4 text-blue-600" />
-              <div>
-                <span className="text-sm font-medium text-gray-900">Run compliance check during import</span>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Each COI will be checked against your organization's minimum coverage requirements.
-                  Missing or insufficient coverage will be flagged for review.
-                </p>
-              </div>
-            </label>
+          {error && (
+            <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-6 text-sm">{error}</div>
           )}
 
-          <div className="flex gap-3">
-            <button onClick={() => { setStep(1); setError(''); }}
-              className="px-4 py-2 border rounded-lg text-sm">Back</button>
-            <button onClick={handleImport} disabled={importing}
-              className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">
-              {importing ? 'Importing...' : `Import ${rowCount} ${importType === 'vendors' ? 'Vendor(s)' : 'COI(s)'}`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 3: Results */}
-      {step === 3 && results && (
-        <div className="bg-white rounded-xl border p-6">
-          <h2 className="text-lg font-semibold mb-4">Import Complete</h2>
-
-          <div className={`grid gap-4 mb-6 ${results.flagged > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <p className="text-2xl font-bold text-green-700">{results.created}</p>
-              <p className="text-sm text-green-600">Successfully imported</p>
-            </div>
-            <div className={`p-4 rounded-lg border ${results.skipped > 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
-              <p className={`text-2xl font-bold ${results.skipped > 0 ? 'text-yellow-700' : 'text-gray-400'}`}>{results.skipped}</p>
-              <p className={`text-sm ${results.skipped > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>Skipped</p>
-            </div>
-            {results.flagged > 0 && (
-              <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
-                <p className="text-2xl font-bold text-orange-700">{results.flagged}</p>
-                <p className="text-sm text-orange-600">Compliance issues flagged</p>
+          {/* Step 0: Upload */}
+          {step === 0 && (
+            <div className="bg-white rounded-xl border p-6">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h2 className="text-lg font-semibold">Upload {importType === 'vendors' ? 'Vendor' : 'COI'} CSV</h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {importType === 'vendors'
+                      ? 'Required columns: name, email. Optional: phone, address.'
+                      : 'Required column: vendor_email (must match existing vendor). All other coverage fields optional.'}
+                  </p>
+                </div>
+                <button onClick={() => handleDownloadTemplate(importType)}
+                  className="text-sm text-blue-600 hover:underline font-medium">
+                  Download Template
+                </button>
               </div>
-            )}
-          </div>
 
-          {results.errors.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Skipped Rows</h3>
-              <div className="bg-gray-50 rounded-lg border max-h-60 overflow-y-auto">
-                <table className="w-full text-sm">
+              {/* Template preview */}
+              <div className="bg-gray-50 rounded-lg p-4 mb-6 overflow-x-auto">
+                <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">Expected Template Format</p>
+                <table className="text-xs">
                   <thead>
-                    <tr className="border-b">
-                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">CSV Row</th>
-                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Reason</th>
+                    <tr>
+                      {templateFields.map(f => (
+                        <th key={f.key} className={`px-3 py-1.5 text-left whitespace-nowrap ${f.required ? 'text-gray-900 font-semibold' : 'text-gray-500 font-medium'}`}>
+                          {f.key}{f.required ? ' *' : ''}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {results.errors.map((err, i) => (
+                    <tr className="text-gray-400">
+                      {templateFields.map(f => (
+                        <td key={f.key} className="px-3 py-1.5 whitespace-nowrap italic">
+                          {importType === 'vendors'
+                            ? { name: 'Acme Plumbing', contact_name: 'John Doe', email: 'billing@acme.com', phone: '555-0101', address: '123 Main St' }[f.key] || ''
+                            : { vendor_email: 'billing@acme.com', gl_policy_number: 'GL-123', gl_coverage_amount: '1000000', gl_expiration_date: '2026-12-31' }[f.key] || '...'}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <PdfUploadZone
+                key={importType}
+                accept=".csv"
+                maxSizeMB={5}
+                label="Drag and drop your CSV here"
+                sublabel="or click to select a file"
+                sizeLabel="Max 5MB, CSV only"
+                onFileSelect={(selectedFile) => setFile(selectedFile)}
+              />
+
+              <button onClick={handleFileUpload} disabled={!file}
+                className="mt-4 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                Parse &amp; Continue
+              </button>
+            </div>
+          )}
+
+          {/* Step 1: Map Headers */}
+          {step === 1 && (
+            <div className="bg-white rounded-xl border p-6">
+              <h2 className="text-lg font-semibold mb-2">Verify Header Mapping</h2>
+              <p className="text-sm text-gray-500 mb-1">
+                We detected <strong>{csvHeaders.length}</strong> columns and <strong>{rowCount}</strong> data rows.
+              </p>
+              <p className="text-sm text-gray-500 mb-6">
+                Match each required field to the correct column from your CSV. Auto-matched fields are pre-selected.
+              </p>
+
+              <div className="space-y-3 mb-6">
+                {templateFields.map((field) => {
+                  const mapped = headerMap[field.key];
+                  const isMatched = !!mapped;
+                  return (
+                    <div key={field.key}
+                      className={`flex items-center gap-4 p-3 rounded-lg border ${
+                        field.required && !isMatched ? 'border-red-300 bg-red-50' :
+                        isMatched ? 'border-green-200 bg-green-50' :
+                        'border-gray-200'
+                      }`}>
+                      <div className="w-56 flex-shrink-0">
+                        <span className="text-sm font-medium">{field.label}</span>
+                        {field.required && <span className="text-red-500 ml-1">*</span>}
+                        <p className="text-xs text-gray-400">{field.key}</p>
+                      </div>
+                      <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                      <select
+                        value={mapped || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setHeaderMap(prev => {
+                            const next = { ...prev };
+                            if (val) {
+                              next[field.key] = val;
+                            } else {
+                              delete next[field.key];
+                            }
+                            return next;
+                          });
+                        }}
+                        className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
+                          isMatched ? 'border-green-300' : field.required ? 'border-red-300' : ''
+                        }`}
+                      >
+                        <option value="">-- Skip (don't import) --</option>
+                        {csvHeaders.map(h => (
+                          <option key={h} value={h}>{h}</option>
+                        ))}
+                      </select>
+                      {isMatched && (
+                        <span className="text-green-600 text-sm flex-shrink-0">Matched</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Show detected CSV headers for reference */}
+              <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">Your CSV Headers</p>
+                <div className="flex flex-wrap gap-2">
+                  {csvHeaders.map(h => {
+                    const isUsed = Object.values(headerMap).includes(h);
+                    return (
+                      <span key={h} className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                        isUsed ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                      }`}>
+                        {h} {isUsed ? '\u2713' : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => { setStep(0); setError(''); }}
+                  className="px-4 py-2 border rounded-lg text-sm">Back</button>
+                <button onClick={handleConfirmHeaders}
+                  className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium">
+                  Confirm Mapping &amp; Preview
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Preview & Import */}
+          {step === 2 && (
+            <div className="bg-white rounded-xl border p-6">
+              <h2 className="text-lg font-semibold mb-2">Preview Import</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Showing first {Math.min(5, previewRows.length)} of {rowCount} rows with your header mapping applied.
+              </p>
+
+              <div className="overflow-x-auto mb-6">
+                <table className="text-sm w-full">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">#</th>
+                      {templateFields.filter(f => headerMap[f.key]).map(f => (
+                        <th key={f.key} className="px-3 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">
+                          {f.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((row, i) => (
                       <tr key={i} className="border-b last:border-0">
-                        <td className="px-4 py-2 text-gray-600">{err.row}</td>
-                        <td className="px-4 py-2 text-gray-600">{err.message}</td>
+                        <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                        {templateFields.filter(f => headerMap[f.key]).map(f => (
+                          <td key={f.key} className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                            {row[headerMap[f.key]] || <span className="text-gray-300">empty</span>}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <p className="text-sm text-blue-800">
+                  Ready to import <strong>{rowCount}</strong> {importType === 'vendors' ? 'vendor(s)' : 'COI(s)'}.
+                  {importType === 'vendors'
+                    ? ' Duplicates (same email) will be skipped.'
+                    : ' Vendor email must match an existing vendor in your organization.'}
+                </p>
+              </div>
+
+              {importType === 'cois' && (
+                <label className="flex items-center gap-3 mb-6 p-4 bg-white border rounded-lg cursor-pointer hover:bg-gray-50">
+                  <input type="checkbox" checked={runComplianceCheck}
+                    onChange={(e) => setRunComplianceCheck(e.target.checked)}
+                    className="rounded w-4 h-4 text-blue-600" />
+                  <div>
+                    <span className="text-sm font-medium text-gray-900">Run compliance check during import</span>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Each COI will be checked against your organization's minimum coverage requirements.
+                      Missing or insufficient coverage will be flagged for review.
+                    </p>
+                  </div>
+                </label>
+              )}
+
+              <div className="flex gap-3">
+                <button onClick={() => { setStep(1); setError(''); }}
+                  className="px-4 py-2 border rounded-lg text-sm">Back</button>
+                <button onClick={handleImport} disabled={importing}
+                  className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">
+                  {importing ? 'Importing...' : `Import ${rowCount} ${importType === 'vendors' ? 'Vendor(s)' : 'COI(s)'}`}
+                </button>
+              </div>
             </div>
           )}
 
-          <div className="flex gap-3">
-            <button onClick={reset}
-              className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium">
-              Import More
-            </button>
-            <a href={importType === 'vendors' ? '/vendors' : '/cois'}
-              className="px-4 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-50">
-              View {importType === 'vendors' ? 'Vendors' : 'COIs'}
-            </a>
-          </div>
+          {/* Step 3: Results */}
+          {step === 3 && results && (
+            <div className="bg-white rounded-xl border p-6">
+              <h2 className="text-lg font-semibold mb-4">Import Complete</h2>
+
+              <div className={`grid gap-4 mb-6 ${results.flagged > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                  <p className="text-2xl font-bold text-green-700">{results.created}</p>
+                  <p className="text-sm text-green-600">Successfully imported</p>
+                </div>
+                <div className={`p-4 rounded-lg border ${results.skipped > 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
+                  <p className={`text-2xl font-bold ${results.skipped > 0 ? 'text-yellow-700' : 'text-gray-400'}`}>{results.skipped}</p>
+                  <p className={`text-sm ${results.skipped > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>Skipped</p>
+                </div>
+                {results.flagged > 0 && (
+                  <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                    <p className="text-2xl font-bold text-orange-700">{results.flagged}</p>
+                    <p className="text-sm text-orange-600">Compliance issues flagged</p>
+                  </div>
+                )}
+              </div>
+
+              {results.errors.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Skipped Rows</h3>
+                  <div className="bg-gray-50 rounded-lg border max-h-60 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">CSV Row</th>
+                          <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {results.errors.map((err, i) => (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="px-4 py-2 text-gray-600">{err.row}</td>
+                            <td className="px-4 py-2 text-gray-600">{err.message}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button onClick={reset}
+                  className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium">
+                  Import More
+                </button>
+                <a href={importType === 'vendors' ? '/vendors' : '/cois'}
+                  className="px-4 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-50">
+                  View {importType === 'vendors' ? 'Vendors' : 'COIs'}
+                </a>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ===== COI PDF Bulk Import Flow ===== */}
+      {importType === 'coi-pdfs' && (
+        <div className="bg-white rounded-xl border p-6">
+          {error && (
+            <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-6 text-sm">{error}</div>
+          )}
+
+          <h2 className="text-lg font-semibold mb-2">Upload COI PDFs</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Drop one or more PDF files. Each will be processed through AI extraction and checked against your compliance requirements.
+            Assign a vendor to each PDF before processing.
+          </p>
+
+          <PdfUploadZone
+            accept=".pdf"
+            multiple
+            maxSizeMB={10}
+            label="Drag and drop COI PDFs here"
+            sublabel="or click to browse files"
+            sizeLabel="Max 10MB per file, PDF only"
+            onFileSelect={handlePdfFilesSelected}
+          />
+
+          {/* File list with vendor assignment */}
+          {pdfFiles.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">
+                {pdfFiles.length} file(s) queued
+              </h3>
+              <div className="space-y-3">
+                {pdfFiles.map((pf, i) => (
+                  <div key={i} className={`flex items-center gap-4 p-3 rounded-lg border ${
+                    pf.status === 'success' ? 'border-green-200 bg-green-50' :
+                    pf.status === 'error' ? 'border-red-200 bg-red-50' :
+                    pf.status === 'processing' ? 'border-blue-200 bg-blue-50' :
+                    'border-gray-200'
+                  }`}>
+                    {/* File info */}
+                    <div className="flex items-center gap-3 min-w-0 flex-shrink-0" style={{ width: '220px' }}>
+                      <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-700 truncate">{pf.file.name}</p>
+                        <p className="text-xs text-gray-400">{(pf.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                      </div>
+                    </div>
+
+                    {/* Vendor selector */}
+                    <select
+                      value={pf.vendorId}
+                      onChange={(e) => {
+                        setPdfFiles(prev => prev.map((p, j) => j === i ? { ...p, vendorId: e.target.value } : p));
+                      }}
+                      className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
+                        !pf.vendorId && pf.status === 'pending' ? 'border-red-300' : 'border-gray-300'
+                      }`}
+                      disabled={pf.status !== 'pending'}
+                    >
+                      <option value="">-- Select vendor --</option>
+                      {vendors.map(v => (
+                        <option key={v.id} value={v.id}>{v.name} ({v.email})</option>
+                      ))}
+                    </select>
+
+                    {/* Status */}
+                    <PdfStatusBadge status={pf.status} error={pf.error} />
+
+                    {/* Error detail */}
+                    {pf.status === 'error' && pf.error && (
+                      <span className="text-xs text-red-500 max-w-[150px] truncate" title={pf.error}>{pf.error}</span>
+                    )}
+
+                    {/* Remove button (only when pending) */}
+                    {pf.status === 'pending' && (
+                      <button onClick={() => handleRemovePdf(i)} className="text-gray-400 hover:text-red-500 flex-shrink-0">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+
+                    {/* COI link (on success) */}
+                    {pf.status === 'success' && pf.coiId && (
+                      <a href={`/cois/${pf.coiId}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">
+                        View COI
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Summary after processing */}
+              {pdfResults && (
+                <div className="mt-4 grid grid-cols-2 gap-4">
+                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                    <p className="text-2xl font-bold text-green-700">{pdfResults.success}</p>
+                    <p className="text-sm text-green-600">Successfully processed</p>
+                  </div>
+                  <div className={`p-4 rounded-lg border ${pdfResults.failed > 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <p className={`text-2xl font-bold ${pdfResults.failed > 0 ? 'text-red-700' : 'text-gray-400'}`}>{pdfResults.failed}</p>
+                    <p className={`text-sm ${pdfResults.failed > 0 ? 'text-red-600' : 'text-gray-400'}`}>Failed</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex gap-3 mt-4">
+                {pdfFiles.some(pf => pf.status === 'pending') && (
+                  <button
+                    onClick={handleProcessPdfs}
+                    disabled={processingPdfs || pdfFiles.filter(pf => pf.status === 'pending').some(pf => !pf.vendorId)}
+                    className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+                  >
+                    {processingPdfs ? 'Processing...' : `Process ${pdfFiles.filter(pf => pf.status === 'pending').length} PDF(s)`}
+                  </button>
+                )}
+                {pdfResults && (
+                  <>
+                    <button onClick={reset}
+                      className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium">
+                      Import More
+                    </button>
+                    <a href="/cois"
+                      className="px-4 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-50">
+                      View COIs
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

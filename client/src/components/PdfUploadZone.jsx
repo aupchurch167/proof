@@ -1,25 +1,64 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useId } from 'react';
 
 export default function PdfUploadZone({
   onUpload,
+  onFileSelect,
   loading = false,
   error = null,
+  accept = '.pdf',
+  multiple = false,
+  maxSizeMB = 10,
+  label,
+  sublabel,
+  sizeLabel,
+  buttonLabel = 'Upload COI',
+  loadingMessage,
 }) {
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
+  const inputId = useId();
 
-  const handleFile = (selectedFile) => {
-    if (!selectedFile) return;
-    if (selectedFile.type !== 'application/pdf') {
-      alert('Only PDF files are allowed');
-      return;
+  const validateFile = (file) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const acceptExts = accept.split(',').map(a => a.trim().replace('.', ''));
+    if (!acceptExts.includes(ext)) {
+      return `Only ${accept} files are allowed`;
     }
-    if (selectedFile.size > 10 * 1024 * 1024) {
-      alert('File size must be less than 10MB');
-      return;
+    if (file.size > maxSizeMB * 1024 * 1024) {
+      return `File size must be less than ${maxSizeMB}MB`;
     }
-    setFile(selectedFile);
+    return null;
+  };
+
+  const handleFiles = (newFiles) => {
+    const validFiles = [];
+    for (const file of newFiles) {
+      const err = validateFile(file);
+      if (err) {
+        alert(err);
+      } else {
+        validFiles.push(file);
+      }
+    }
+    if (validFiles.length === 0) return;
+
+    if (onFileSelect) {
+      // Parent manages state — report new files, keep drop zone ready
+      onFileSelect(multiple ? validFiles : validFiles[0]);
+      // Reset input so the same file can be re-selected
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (!multiple) {
+        setFiles([validFiles[0]]);
+      }
+    } else {
+      // Internal state management (original behavior)
+      if (multiple) {
+        setFiles(prev => [...prev, ...validFiles]);
+      } else {
+        setFiles([validFiles[0]]);
+      }
+    }
   };
 
   const handleDrag = (e) => {
@@ -36,27 +75,34 @@ export default function PdfUploadZone({
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile) {
-      handleFile(droppedFile);
-    }
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length) handleFiles(droppedFiles);
   };
 
   const handleInputChange = (e) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      handleFile(selectedFile);
-    }
+    const selected = Array.from(e.target.files || []);
+    if (selected.length) handleFiles(selected);
+  };
+
+  const removeFile = (index) => {
+    const updated = files.filter((_, i) => i !== index);
+    setFiles(updated);
   };
 
   const handleUploadClick = async () => {
-    if (!file || !onUpload) return;
-    await onUpload(file);
-    setFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (files.length === 0 || !onUpload) return;
+    await onUpload(multiple ? files : files[0]);
+    setFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  const file = files[0];
+  const hasFiles = files.length > 0;
+  const isPdf = accept.includes('.pdf');
+  const defaultLabel = isPdf ? 'Drag and drop your PDF here' : 'Drag and drop your CSV here';
+  const defaultSublabel = 'or click to select a file';
+  const defaultSizeLabel = `Max ${maxSizeMB}MB, ${accept.replace(/\./g, '').toUpperCase()} only`;
+  const defaultLoadingMsg = `We're processing your file${multiple ? 's' : ''}. This may take a moment...`;
 
   return (
     <div className="space-y-4">
@@ -74,7 +120,7 @@ export default function PdfUploadZone({
         className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
           dragActive
             ? 'border-blue-500 bg-blue-50'
-            : file
+            : hasFiles && !onFileSelect
             ? 'border-gray-300 bg-gray-50'
             : 'border-gray-300 hover:border-blue-400'
         } ${loading ? 'opacity-50 pointer-events-none' : ''}`}
@@ -82,14 +128,40 @@ export default function PdfUploadZone({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf"
+          accept={accept}
+          multiple={multiple}
           onChange={handleInputChange}
           className="hidden"
-          id="pdf-upload-input"
+          id={inputId}
           disabled={loading}
         />
-        <label htmlFor="pdf-upload-input" className="cursor-pointer">
-          {file ? (
+        <label htmlFor={inputId} className="cursor-pointer">
+          {!multiple && file && !onFileSelect ? (
+            <div>
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <svg
+                  className="w-6 h-6 text-blue-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </div>
+              <p className="font-medium text-gray-900">{file.name}</p>
+              <p className="text-sm text-gray-500 mt-1">
+                {(file.size / 1024 / 1024).toFixed(2)} MB
+              </p>
+              <p className="text-xs text-blue-600 mt-2 hover:underline">
+                Click to change file
+              </p>
+            </div>
+          ) : !multiple && file && onFileSelect ? (
             <div>
               <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <svg
@@ -130,30 +202,57 @@ export default function PdfUploadZone({
                 />
               </svg>
               <p className="text-gray-600 font-medium">
-                Drag and drop your PDF here
+                {label || defaultLabel}
               </p>
               <p className="text-sm text-gray-500 mt-1">
-                or click to select a file
+                {sublabel || defaultSublabel}
               </p>
-              <p className="text-xs text-gray-400 mt-2">Max 10MB, PDF only</p>
+              <p className="text-xs text-gray-400 mt-2">
+                {sizeLabel || defaultSizeLabel}
+              </p>
             </div>
           )}
         </label>
       </div>
 
-      {file && (
+      {/* Multi-file list (only when managing state internally) */}
+      {multiple && !onFileSelect && hasFiles && (
+        <div className="space-y-2">
+          {files.map((f, i) => (
+            <div key={i} className="flex items-center justify-between bg-gray-50 px-4 py-2 rounded-lg border">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-gray-700">{f.name}</p>
+                  <p className="text-xs text-gray-400">{(f.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              </div>
+              <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {onUpload && hasFiles && (
         <button
           onClick={handleUploadClick}
           disabled={loading}
           className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
         >
-          {loading ? 'Uploading & Analyzing...' : 'Upload COI'}
+          {loading ? 'Uploading & Analyzing...' : buttonLabel}
         </button>
       )}
 
       {loading && (
         <p className="text-sm text-gray-500 text-center">
-          We're processing your COI. This may take a moment...
+          {loadingMessage || defaultLoadingMsg}
         </p>
       )}
     </div>
