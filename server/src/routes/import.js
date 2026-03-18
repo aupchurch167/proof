@@ -9,8 +9,8 @@ const router = express.Router();
 const prisma = new PrismaClient();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-// GET /api/import/template/vendors — download vendor CSV template
-router.get('/template/vendors', authenticate, (req, res) => {
+// GET /api/import/template/vendors — download vendor CSV template (no auth — static sample data)
+router.get('/template/vendors', (req, res) => {
   const sample = [{
     name: 'Acme Plumbing LLC',
     contact_name: 'John Doe',
@@ -24,8 +24,8 @@ router.get('/template/vendors', authenticate, (req, res) => {
   res.send(csv);
 });
 
-// GET /api/import/template/cois — download COI CSV template
-router.get('/template/cois', authenticate, (req, res) => {
+// GET /api/import/template/cois — download COI CSV template (no auth — static sample data)
+router.get('/template/cois', (req, res) => {
   const sample = [{
     vendor_email: 'billing@acmeplumbing.com',
     gl_policy_number: 'GL-12345',

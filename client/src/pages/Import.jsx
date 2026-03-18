@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../utils/api';
 
 const API_BASE = '/api';
 
@@ -193,12 +192,8 @@ export default function Import() {
     }
   };
 
-  const handleDownloadTemplate = async (type) => {
-    try {
-      await api.download(`/import/template/${type}`, `${type}-import-template.csv`);
-    } catch (err) {
-      alert('Failed to download template: ' + err.message);
-    }
+  const handleDownloadTemplate = (type) => {
+    window.location.href = `${API_BASE}/import/template/${type}`;
   };
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
