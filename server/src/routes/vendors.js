@@ -1,10 +1,34 @@
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 const { PrismaClient } = require('@prisma/client');
 const { authenticate, authorize } = require('../middleware/auth');
 const { sendUploadRequestEmail } = require('../services/email');
+const { extractCoiData } = require('../services/coiExtractor');
+const { checkCompliance, updateVendorStatus } = require('../services/compliance');
 
 const router = express.Router();
 const prisma = new PrismaClient();
+
+const storage = multer.diskStorage({
+  destination: path.join(__dirname, '../../uploads'),
+  filename: (req, file, cb) => {
+    cb(null, `${uuidv4()}${path.extname(file.originalname)}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'));
+    }
+  },
+});
 
 // GET /api/vendors
 router.get('/', authenticate, async (req, res) => {
@@ -159,6 +183,85 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
     res.json({ message: 'Vendor deleted' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete vendor' });
+  }
+});
+
+// POST /api/vendors/:id/coi/upload (admin-authenticated upload)
+router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single('pdf'), async (req, res) => {
+  try {
+    const vendor = await prisma.vendor.findFirst({
+      where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
+      include: { organization: { include: { settings: true } } },
+    });
+
+    if (!vendor) {
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'PDF file required' });
+    }
+
+    const pdfPath = req.file.filename;
+
+    // Extract data with Claude AI
+    let extractedData = null;
+    try {
+      extractedData = await extractCoiData(path.join(__dirname, '../../uploads', pdfPath));
+    } catch (extractErr) {
+      console.error('AI extraction failed:', extractErr);
+    }
+
+    // Check compliance against org requirements
+    const settings = vendor.organization.settings;
+    const complianceFlags = settings && extractedData
+      ? checkCompliance(extractedData, settings)
+      : null;
+
+    // Create COI record
+    const coiData = {
+      vendorId: vendor.id,
+      orgId: vendor.orgId,
+      pdfPath,
+      status: 'PENDING_REVIEW',
+      aiExtractedData: extractedData,
+      complianceFlags,
+    };
+
+    if (extractedData) {
+      Object.assign(coiData, {
+        glPolicyNumber: extractedData.glPolicyNumber || null,
+        glCoverageAmount: extractedData.glCoverageAmount || null,
+        glExpirationDate: extractedData.glExpirationDate ? new Date(extractedData.glExpirationDate) : null,
+        wcPolicyNumber: extractedData.wcPolicyNumber || null,
+        wcCoverageAmount: extractedData.wcCoverageAmount || null,
+        wcExpirationDate: extractedData.wcExpirationDate ? new Date(extractedData.wcExpirationDate) : null,
+        umbPolicyNumber: extractedData.umbPolicyNumber || null,
+        umbCoverageAmount: extractedData.umbCoverageAmount || null,
+        umbExpirationDate: extractedData.umbExpirationDate ? new Date(extractedData.umbExpirationDate) : null,
+        autoPolicyNumber: extractedData.autoPolicyNumber || null,
+        autoCoverageAmount: extractedData.autoCoverageAmount || null,
+        autoExpirationDate: extractedData.autoExpirationDate ? new Date(extractedData.autoExpirationDate) : null,
+        agentName: extractedData.agentName || null,
+        agentEmail: extractedData.agentEmail || null,
+        agentPhone: extractedData.agentPhone || null,
+        insuranceCompany: extractedData.insuranceCompany || null,
+      });
+    }
+
+    const coi = await prisma.coi.create({ data: coiData });
+
+    // Update vendor status
+    await updateVendorStatus(prisma, vendor.id, vendor.orgId);
+
+    res.status(201).json({
+      message: 'COI uploaded successfully',
+      coiId: coi.id,
+      complianceFlags,
+    });
+  } catch (err) {
+    console.error('COI upload error:', err);
+    res.status(500).json({ error: 'Failed to upload COI' });
   }
 });
 

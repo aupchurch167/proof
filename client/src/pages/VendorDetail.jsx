@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
+import PdfUploadZone from '../components/PdfUploadZone';
 
 const statusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -21,6 +22,9 @@ export default function VendorDetail() {
   const [form, setForm] = useState({});
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   useEffect(() => {
     api.get(`/vendors/${id}`)
@@ -46,6 +50,24 @@ export default function VendorDetail() {
       navigate('/vendors');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleUploadCoi = async (file) => {
+    setUploading(true);
+    setUploadError('');
+    try {
+      const formData = new FormData();
+      formData.append('pdf', file);
+      await api.upload(`/vendors/${id}/coi/upload`, formData);
+      setShowUpload(false);
+      // Refresh vendor data to show new COI
+      const updated = await api.get(`/vendors/${id}`);
+      setVendor(updated);
+    } catch (err) {
+      setUploadError(err.message || 'Failed to upload COI');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -112,7 +134,29 @@ export default function VendorDetail() {
       </div>
 
       {/* COI History */}
-      <h2 className="text-lg font-semibold mb-4">COI History</h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold">COI History</h2>
+        {canManage && (
+          <button
+            onClick={() => setShowUpload(!showUpload)}
+            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700"
+          >
+            {showUpload ? 'Cancel' : 'Upload COI'}
+          </button>
+        )}
+      </div>
+
+      {/* Upload zone */}
+      {showUpload && (
+        <div className="bg-white rounded-xl border p-6 mb-6">
+          <PdfUploadZone
+            onUpload={handleUploadCoi}
+            loading={uploading}
+            error={uploadError}
+          />
+        </div>
+      )}
+
       {vendor.cois?.length === 0 ? (
         <p className="text-gray-500 text-sm">No COIs on file</p>
       ) : (
