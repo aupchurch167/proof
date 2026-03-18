@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 
 const statusColors = {
   COMPLIANT: 'bg-green-100 text-green-800',
@@ -32,8 +33,6 @@ export default function Vendors() {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [deleteError, setDeleteError] = useState('');
   const [deleting, setDeleting] = useState(false);
 
   const fetchVendors = async () => {
@@ -93,23 +92,13 @@ export default function Vendors() {
     });
   };
 
-  const openDeleteModal = () => {
-    setDeleteConfirmText('');
-    setDeleteError('');
-    setShowDeleteModal(true);
-  };
-
   const handleBulkDelete = async () => {
-    if (deleteConfirmText !== 'DELETE') return;
     setDeleting(true);
-    setDeleteError('');
     try {
       await api.delete('/vendors/bulk', { ids: [...selected] });
       setSelected(new Set());
       setShowDeleteModal(false);
       fetchVendors();
-    } catch (err) {
-      setDeleteError(err.message || 'Failed to delete vendors');
     } finally {
       setDeleting(false);
     }
@@ -124,7 +113,7 @@ export default function Vendors() {
         <h1 className="text-2xl font-bold">Vendors</h1>
         <div className="flex gap-2">
           {isAdmin && someSelected && (
-            <button onClick={openDeleteModal}
+            <button onClick={() => setShowDeleteModal(true)}
               className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium">
               Delete Selected ({selected.size})
             </button>
@@ -255,47 +244,14 @@ export default function Vendors() {
         </div>
       )}
 
-      {/* Bulk delete confirmation modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">Delete {selected.size} vendor{selected.size !== 1 ? 's' : ''}?</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              This will permanently remove the selected vendors and all their associated data. This action cannot be undone.
-            </p>
-            <p className="text-sm font-medium text-gray-700 mb-2">
-              Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm:
-            </p>
-            <input
-              type="text"
-              value={deleteConfirmText}
-              onChange={(e) => setDeleteConfirmText(e.target.value)}
-              placeholder="DELETE"
-              className="w-full px-3 py-2 border rounded-lg text-sm mb-4 font-mono"
-              autoFocus
-            />
-            {deleteError && (
-              <div className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm mb-4">{deleteError}</div>
-            )}
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50"
-                disabled={deleting}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleBulkDelete}
-                disabled={deleteConfirmText !== 'DELETE' || deleting}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {deleting ? 'Deleting...' : `Delete ${selected.size} vendor${selected.size !== 1 ? 's' : ''}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DeleteConfirmationModal
+        isOpen={showDeleteModal}
+        itemCount={selected.size}
+        itemLabel="vendor"
+        loading={deleting}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setShowDeleteModal(false)}
+      />
     </div>
   );
 }

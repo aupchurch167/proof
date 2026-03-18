@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 
 const statusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -13,10 +14,13 @@ const statusColors = {
 export default function VendorDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [vendor, setVendor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api.get(`/vendors/${id}`)
@@ -35,7 +39,18 @@ export default function VendorDetail() {
     }
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/vendors/${id}`);
+      navigate('/vendors');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
+  const isAdmin = user?.role === 'ADMIN';
 
   if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
   if (!vendor) return <div className="text-center py-12 text-gray-500">Vendor not found</div>;
@@ -47,8 +62,8 @@ export default function VendorDetail() {
       <Link to="/vendors" className="text-sm text-blue-600 hover:underline mb-4 inline-block">Back to Vendors</Link>
 
       <div className="bg-white rounded-xl border p-6 mb-6">
-        <div className="flex justify-between items-start">
-          <div>
+        <div className="flex justify-between items-start gap-4">
+          <div className="flex-1">
             {editing ? (
               <div className="space-y-3">
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -77,7 +92,12 @@ export default function VendorDetail() {
             )}
           </div>
           {canManage && !editing && (
-            <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+              {isAdmin && (
+                <button onClick={() => setShowDeleteModal(true)} className="text-sm text-red-600 hover:underline">Delete</button>
+              )}
+            </div>
           )}
         </div>
 
@@ -119,6 +139,15 @@ export default function VendorDetail() {
           ))}
         </div>
       )}
+
+      <DeleteConfirmationModal
+        isOpen={showDeleteModal}
+        itemCount={1}
+        itemLabel="vendor"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteModal(false)}
+      />
     </div>
   );
 }

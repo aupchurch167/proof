@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 
 function formatCurrency(cents) {
   if (cents == null) return 'N/A';
@@ -16,12 +17,15 @@ function formatDate(d) {
 export default function CoiDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [coi, setCoi] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api.get(`/cois/${id}`)
@@ -57,6 +61,16 @@ export default function CoiDetail() {
       setShowReject(false);
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/cois/${id}`);
+      navigate(`/vendors/${coi.vendor?.id}`);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -203,6 +217,10 @@ export default function CoiDetail() {
               className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700">Reject</button>
           </>
         )}
+        {user?.role === 'ADMIN' && !editing && (
+          <button onClick={() => setShowDeleteModal(true)}
+            className="text-red-600 hover:underline text-sm">Delete COI</button>
+        )}
       </div>
 
       {/* Reject modal */}
@@ -220,6 +238,15 @@ export default function CoiDetail() {
           </div>
         </div>
       )}
+
+      <DeleteConfirmationModal
+        isOpen={showDeleteModal}
+        itemCount={1}
+        itemLabel="COI"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteModal(false)}
+      />
     </div>
   );
 }

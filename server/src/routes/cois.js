@@ -129,6 +129,31 @@ router.post('/:id/approve', authenticate, authorize('ADMIN', 'REVIEWER'), async 
   }
 });
 
+// DELETE /api/cois/:id
+router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+  try {
+    const coi = await prisma.coi.findFirst({
+      where: { id: req.params.id, orgId: req.user.orgId },
+      include: { vendor: true },
+    });
+
+    if (!coi) {
+      return res.status(404).json({ error: 'COI not found' });
+    }
+
+    await prisma.coi.delete({
+      where: { id: req.params.id },
+    });
+
+    await updateVendorStatus(prisma, coi.vendorId, coi.orgId);
+
+    res.json({ message: 'COI deleted' });
+  } catch (err) {
+    console.error('Delete COI error:', err);
+    res.status(500).json({ error: 'Failed to delete COI' });
+  }
+});
+
 // POST /api/cois/:id/reject
 router.post('/:id/reject', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
   try {
