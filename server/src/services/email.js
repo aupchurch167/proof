@@ -19,14 +19,18 @@ async function sendEmail(to, subject, html) {
   init();
 
   try {
-    await sgMail.send({
+    const [response] = await sgMail.send({
       to,
       from: process.env.FROM_EMAIL,
       subject,
       html,
     });
+    console.log(`[Email] Sent to ${to}: "${subject}" — status ${response.statusCode}`);
   } catch (err) {
     console.error(`[Email] Failed to send to ${to}:`, err.message);
+    if (err.response) {
+      console.error(`[Email] SendGrid response body:`, JSON.stringify(err.response.body, null, 2));
+    }
     throw err;
   }
 }
