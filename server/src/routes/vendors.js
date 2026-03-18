@@ -108,6 +108,26 @@ router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res
   }
 });
 
+// DELETE /api/vendors/bulk (soft delete multiple)
+router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+
+    const { count } = await prisma.vendor.updateMany({
+      where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+
+    res.json({ message: `${count} vendor(s) deleted` });
+  } catch (err) {
+    console.error('Bulk delete error:', err);
+    res.status(500).json({ error: 'Failed to delete vendors' });
+  }
+});
+
 // DELETE /api/vendors/:id (soft delete)
 router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {

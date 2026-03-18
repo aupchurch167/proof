@@ -30,6 +30,11 @@ export default function Vendors() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const fetchVendors = async () => {
     try {
@@ -69,18 +74,68 @@ export default function Vendors() {
     }
   };
 
+  const allSelected = vendors.length > 0 && vendors.every((v) => selected.has(v.id));
+  const someSelected = selected.size > 0;
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(vendors.map((v) => v.id)));
+    }
+  };
+
+  const toggleOne = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const openDeleteModal = () => {
+    setDeleteConfirmText('');
+    setDeleteError('');
+    setShowDeleteModal(true);
+  };
+
+  const handleBulkDelete = async () => {
+    if (deleteConfirmText !== 'DELETE') return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await api.delete('/vendors/bulk', { ids: [...selected] });
+      setSelected(new Set());
+      setShowDeleteModal(false);
+      fetchVendors();
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete vendors');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
+  const isAdmin = user?.role === 'ADMIN';
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Vendors</h1>
-        {canManage && (
-          <button onClick={() => setShowAdd(!showAdd)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
-            Add Vendor
-          </button>
-        )}
+        <div className="flex gap-2">
+          {isAdmin && someSelected && (
+            <button onClick={openDeleteModal}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium">
+              Delete Selected ({selected.size})
+            </button>
+          )}
+          {canManage && (
+            <button onClick={() => setShowAdd(!showAdd)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+              Add Vendor
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Add vendor form */}
@@ -147,6 +202,12 @@ export default function Vendors() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b">
+                {isAdmin && (
+                  <th className="px-4 py-3 w-10">
+                    <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                      className="rounded border-gray-300 cursor-pointer" />
+                  </th>
+                )}
                 <th className="text-left px-6 py-3 font-medium text-gray-600">Name</th>
                 <th className="text-left px-6 py-3 font-medium text-gray-600">Email</th>
                 <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
@@ -156,7 +217,13 @@ export default function Vendors() {
             </thead>
             <tbody>
               {vendors.map((vendor) => (
-                <tr key={vendor.id} className="border-b last:border-0 hover:bg-gray-50">
+                <tr key={vendor.id} className={`border-b last:border-0 hover:bg-gray-50 ${selected.has(vendor.id) ? 'bg-red-50' : ''}`}>
+                  {isAdmin && (
+                    <td className="px-4 py-4">
+                      <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
+                        className="rounded border-gray-300 cursor-pointer" />
+                    </td>
+                  )}
                   <td className="px-6 py-4">
                     <Link to={`/vendors/${vendor.id}`} className="text-blue-600 hover:underline font-medium">
                       {vendor.name}
@@ -185,6 +252,48 @@ export default function Vendors() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Bulk delete confirmation modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Delete {selected.size} vendor{selected.size !== 1 ? 's' : ''}?</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              This will permanently remove the selected vendors and all their associated data. This action cannot be undone.
+            </p>
+            <p className="text-sm font-medium text-gray-700 mb-2">
+              Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm:
+            </p>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="DELETE"
+              className="w-full px-3 py-2 border rounded-lg text-sm mb-4 font-mono"
+              autoFocus
+            />
+            {deleteError && (
+              <div className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm mb-4">{deleteError}</div>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50"
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={deleteConfirmText !== 'DELETE' || deleting}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {deleting ? 'Deleting...' : `Delete ${selected.size} vendor${selected.size !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
