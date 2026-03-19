@@ -4,6 +4,7 @@ const { PrismaClient } = require('@prisma/client');
 const { authenticate, authorize } = require('../middleware/auth');
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
 const { checkCompliance } = require('../services/compliance');
+const { getPlanLimits, getPlanLabel } = require('../config/plans');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -97,6 +98,14 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
       return res.status(400).json({ error: 'Name and email header mappings are required' });
     }
 
+    // Check plan limits
+    const org = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { plan: true } });
+    const limits = getPlanLimits(org?.plan || 'FREE');
+    const label = getPlanLabel(org?.plan || 'FREE');
+    let vendorCount = limits.maxVendors !== Infinity
+      ? await prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } })
+      : 0;
+
     const results = { created: 0, skipped: 0, errors: [] };
 
     for (let i = 0; i < rows.length; i++) {
@@ -124,6 +133,13 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
         continue;
       }
 
+      // Check vendor plan limit
+      if (limits.maxVendors !== Infinity && vendorCount >= limits.maxVendors) {
+        results.errors.push({ row: i + 2, message: `Vendor limit (${limits.maxVendors}) reached for ${label} plan` });
+        results.skipped++;
+        continue;
+      }
+
       try {
         await prisma.vendor.create({
           data: {
@@ -135,6 +151,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
             address: address || null,
           },
         });
+        vendorCount++;
         results.created++;
       } catch (err) {
         results.errors.push({ row: i + 2, message: err.message });
@@ -168,6 +185,14 @@ router.post('/cois', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single
     if (!headerMap.vendor_email) {
       return res.status(400).json({ error: 'Vendor email header mapping is required' });
     }
+
+    // Check plan limits
+    const org = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { plan: true } });
+    const coiLimits = getPlanLimits(org?.plan || 'FREE');
+    const coiLabel = getPlanLabel(org?.plan || 'FREE');
+    let coiCount = coiLimits.maxCois !== Infinity
+      ? await prisma.coi.count({ where: { orgId: req.user.orgId } })
+      : 0;
 
     // Load org settings if compliance check requested
     let orgSettings = null;
@@ -213,6 +238,13 @@ router.post('/cois', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single
 
       if (!vendor) {
         results.errors.push({ row: i + 2, message: `No vendor found with email ${vendorEmail}` });
+        results.skipped++;
+        continue;
+      }
+
+      // Check COI plan limit
+      if (coiLimits.maxCois !== Infinity && coiCount >= coiLimits.maxCois) {
+        results.errors.push({ row: i + 2, message: `COI limit (${coiLimits.maxCois}) reached for ${coiLabel} plan` });
         results.skipped++;
         continue;
       }
@@ -267,6 +299,7 @@ router.post('/cois', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single
         }
 
         await prisma.coi.create({ data: coiData });
+        coiCount++;
 
         // Update vendor status to pending
         await prisma.vendor.update({

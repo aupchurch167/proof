@@ -6,6 +6,7 @@ const { PrismaClient } = require('@prisma/client');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
+const { getPlanLimits, getPlanLabel } = require('../config/plans');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -92,6 +93,19 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
 
     if (!req.file) {
       return res.status(400).json({ error: 'PDF file required' });
+    }
+
+    // Check COI plan limit
+    const plan = vendor.organization.plan || 'FREE';
+    const limits = getPlanLimits(plan);
+    if (limits.maxCois !== Infinity) {
+      const coiCount = await prisma.coi.count({ where: { orgId: vendor.orgId } });
+      if (coiCount >= limits.maxCois) {
+        return res.status(403).json({
+          error: `This organization has reached its COI limit. Please contact them to resolve this.`,
+          code: 'PLAN_LIMIT_EXCEEDED',
+        });
+      }
     }
 
     const pdfPath = req.file.filename;

@@ -41,12 +41,19 @@ enum NotificationStatus {
   FAILED
 }
 
+enum Plan {
+  FREE
+  STARTER
+  UNLIMITED
+}
+
 model Organization {
   id        String   @id @default(uuid())
   name      String
   email     String
   phone     String?
   address   String?
+  plan      Plan     @default(FREE)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

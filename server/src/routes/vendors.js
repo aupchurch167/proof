@@ -4,6 +4,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PrismaClient } = require('@prisma/client');
 const { authenticate, authorize } = require('../middleware/auth');
+const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
@@ -63,7 +64,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // POST /api/vendors
-router.post('/', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'REVIEWER'), enforcePlanLimit('vendor'), async (req, res) => {
   try {
     const { name, contactName, email, phone, address } = req.body;
 
@@ -187,7 +188,7 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/vendors/:id/coi/upload (admin-authenticated upload)
-router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single('pdf'), async (req, res) => {
+router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'REVIEWER'), enforcePlanLimit('coi'), upload.single('pdf'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
