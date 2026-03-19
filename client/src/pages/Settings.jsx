@@ -30,7 +30,7 @@ export default function Settings() {
   const [savingSettings, setSavingSettings] = useState(false);
 
   // Organization info
-  const [orgForm, setOrgForm] = useState({ name: '', email: '', phone: '', address: '' });
+  const [orgForm, setOrgForm] = useState({ name: '', email: '', phone: '', address: '', additionalInsuredNote: '' });
   const [orgMsg, setOrgMsg] = useState('');
   const [savingOrg, setSavingOrg] = useState(false);
 
@@ -60,7 +60,7 @@ export default function Settings() {
           notifyOnUpload: s.notifyOnUpload,
           notifyOnExpiration: s.notifyOnExpiration,
         });
-        setOrgForm({ name: org.name, email: org.email, phone: org.phone || '', address: org.address || '' });
+        setOrgForm({ name: org.name, email: org.email, phone: org.phone || '', address: org.address || '', additionalInsuredNote: org.additionalInsuredNote || '' });
         setProfileForm({ firstName: me.firstName, lastName: me.lastName, email: me.email });
       })
       .catch(console.error)
@@ -236,6 +236,14 @@ export default function Settings() {
                 <input value={orgForm.address} onChange={(e) => setOrgForm({ ...orgForm, address: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg" />
               </div>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Additional Insured Note</label>
+              <textarea value={orgForm.additionalInsuredNote}
+                onChange={(e) => setOrgForm({ ...orgForm, additionalInsuredNote: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg" rows={3}
+                placeholder="Please list the above company as Additionally Insured on your Certificate of Insurance." />
+              <p className="text-xs text-gray-500 mt-1">This note is shown to vendors on the COI upload portal. Leave blank for the default message.</p>
             </div>
             <button type="submit" disabled={savingOrg}
               className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">

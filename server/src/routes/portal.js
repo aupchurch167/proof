@@ -35,7 +35,12 @@ router.get('/:uploadToken', async (req, res) => {
   try {
     const vendor = await prisma.vendor.findUnique({
       where: { uploadToken: req.params.uploadToken },
-      select: { id: true, name: true, contactName: true, email: true, phone: true, address: true },
+      select: {
+        id: true, name: true, contactName: true, email: true, phone: true, address: true,
+        organization: {
+          select: { name: true, address: true, additionalInsuredNote: true },
+        },
+      },
     });
 
     if (!vendor) {

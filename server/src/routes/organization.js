@@ -25,13 +25,14 @@ router.get('/', authenticate, async (req, res) => {
 // PUT /api/organization
 router.put('/', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
-    const { name, email, phone, address } = req.body;
+    const { name, email, phone, address, additionalInsuredNote } = req.body;
 
     const data = {};
     if (name) data.name = name;
     if (email) data.email = email;
     if (phone !== undefined) data.phone = phone;
     if (address !== undefined) data.address = address;
+    if (additionalInsuredNote !== undefined) data.additionalInsuredNote = additionalInsuredNote;
 
     const updated = await prisma.organization.update({
       where: { id: req.user.orgId },

@@ -168,6 +168,26 @@ export default function Portal() {
           )}
         </div>
 
+        {/* Certificate Requirements */}
+        {vendor.organization && (
+          <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6">
+            <h2 className="text-lg font-semibold text-blue-900 mb-3">Certificate Requirements</h2>
+            <div className="text-sm space-y-2 text-blue-800">
+              <p><span className="font-medium">Additionally Insured:</span></p>
+              <div className="bg-white rounded-lg p-4 border border-blue-200">
+                <p className="font-medium text-gray-900">{vendor.organization.name}</p>
+                {vendor.organization.address && (
+                  <p className="text-gray-600 mt-1">{vendor.organization.address}</p>
+                )}
+              </div>
+              <p className="text-blue-700 text-xs mt-3">
+                {vendor.organization.additionalInsuredNote
+                  || 'Please list the above company as Additionally Insured on your Certificate of Insurance.'}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Upload form */}
         <form onSubmit={handleUpload} className="bg-white p-6 rounded-xl shadow-sm border">
           <h2 className="text-lg font-semibold mb-4">Upload Certificate of Insurance</h2>
