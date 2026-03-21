@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 
 const statusColors = {
@@ -12,6 +12,7 @@ const statusColors = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [pendingCois, setPendingCois] = useState([]);
   const [expiring, setExpiring] = useState([]);
@@ -42,14 +43,18 @@ export default function Dashboard() {
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
           {[
-            { label: 'Total Vendors', value: stats.total, color: 'bg-white' },
-            { label: 'Compliant', value: stats.compliant, color: 'bg-green-50' },
-            { label: 'Non-Compliant', value: stats.nonCompliant, color: 'bg-red-50' },
-            { label: 'Expiring Soon', value: stats.expiringSoon, color: 'bg-yellow-50' },
-            { label: 'Expired', value: stats.expired, color: 'bg-red-50' },
-            { label: 'Pending', value: stats.pending, color: 'bg-blue-50' },
+            { label: 'Total Vendors', value: stats.total, color: 'bg-white', status: '' },
+            { label: 'Compliant', value: stats.compliant, color: 'bg-green-50', status: 'COMPLIANT' },
+            { label: 'Non-Compliant', value: stats.nonCompliant, color: 'bg-red-50', status: 'NON_COMPLIANT' },
+            { label: 'Expiring Soon', value: stats.expiringSoon, color: 'bg-yellow-50', status: 'EXPIRING_SOON' },
+            { label: 'Expired', value: stats.expired, color: 'bg-red-50', status: 'EXPIRED' },
+            { label: 'Pending', value: stats.pending, color: 'bg-blue-50', status: 'PENDING' },
           ].map((s) => (
-            <div key={s.label} className={`${s.color} p-4 rounded-xl border`}>
+            <div
+              key={s.label}
+              onClick={() => navigate(s.status ? `/vendors?status=${s.status}` : '/vendors')}
+              className={`${s.color} p-4 rounded-xl border cursor-pointer transition-shadow hover:shadow-md hover:border-gray-300`}
+            >
               <p className="text-2xl font-bold">{s.value}</p>
               <p className="text-sm text-gray-600">{s.label}</p>
             </div>

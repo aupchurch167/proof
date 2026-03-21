@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
@@ -24,12 +24,13 @@ const statusLabels = {
 
 export default function Vendors() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -192,7 +193,14 @@ export default function Vendors() {
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <input placeholder="Search vendors..." value={search} onChange={(e) => setSearch(e.target.value)}
           className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-64" />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+        <select value={statusFilter} onChange={(e) => {
+            setStatusFilter(e.target.value);
+            if (e.target.value) {
+              setSearchParams({ status: e.target.value });
+            } else {
+              setSearchParams({});
+            }
+          }}
           className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
           <option value="">All Statuses</option>
           {Object.entries(statusLabels).map(([k, v]) => (
