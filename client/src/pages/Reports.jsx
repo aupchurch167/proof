@@ -19,6 +19,56 @@ function ExpirationCell({ dateStr }) {
   return <span className={color}>{d.toLocaleDateString()}</span>;
 }
 
+function MobileCoiCard({ coi, hasExpiringColumn }) {
+  return (
+    <div className="bg-white rounded-xl border p-4">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="font-medium truncate">{coi.vendor?.name}</span>
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[coi.status]}`}>
+          {coi.status.replace('_', ' ')}
+        </span>
+      </div>
+      {hasExpiringColumn && coi.expiringCoverages?.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {coi.expiringCoverages.map(c => (
+            <span key={c} className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        {coi.glExpirationDate && (
+          <>
+            <span className="text-gray-500">GL</span>
+            <span><ExpirationCell dateStr={coi.glExpirationDate} /></span>
+          </>
+        )}
+        {coi.wcExpirationDate && (
+          <>
+            <span className="text-gray-500">WC</span>
+            <span><ExpirationCell dateStr={coi.wcExpirationDate} /></span>
+          </>
+        )}
+        {coi.umbExpirationDate && (
+          <>
+            <span className="text-gray-500">Umbrella</span>
+            <span><ExpirationCell dateStr={coi.umbExpirationDate} /></span>
+          </>
+        )}
+        {coi.autoExpirationDate && (
+          <>
+            <span className="text-gray-500">Auto</span>
+            <span><ExpirationCell dateStr={coi.autoExpirationDate} /></span>
+          </>
+        )}
+        <span className="text-gray-500">Submitted</span>
+        <span className="text-gray-600">{new Date(coi.submittedAt).toLocaleDateString()}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function Reports() {
   const [cois, setCois] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -114,15 +164,15 @@ export default function Reports() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Audit Reports</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <button onClick={exportPdfs} disabled={cois.length === 0 || exportingPdfs}
-            className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium">
+            className="border border-blue-600 text-blue-600 px-4 py-2.5 sm:py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium text-center">
             {exportingPdfs ? 'Merging...' : 'Export PDFs'}
           </button>
           <button onClick={exportCsv} disabled={cois.length === 0}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+            className="bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium text-center">
             Export CSV
           </button>
         </div>
@@ -130,11 +180,11 @@ export default function Reports() {
 
       {/* Filters */}
       <div className="bg-white rounded-xl border p-4 mb-6">
-        <div className="flex flex-wrap gap-4 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-3 lg:gap-4 lg:items-end">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Filter Dates By</label>
             <select value={filterBy} onChange={(e) => setFilterBy(e.target.value)}
-              className="px-3 py-2 border rounded-lg text-sm">
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm">
               <option value="submission">Submission Date</option>
               <option value="expiration">Expiration Date</option>
             </select>
@@ -144,19 +194,19 @@ export default function Reports() {
               {filterBy === 'expiration' ? 'Expires After' : 'Start Date'}
             </label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-2 border rounded-lg text-sm" />
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {filterBy === 'expiration' ? 'Expires Before' : 'End Date'}
             </label>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-2 border rounded-lg text-sm" />
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
             <select value={status} onChange={(e) => setStatus(e.target.value)}
-              className="px-3 py-2 border rounded-lg text-sm">
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm">
               <option value="">All</option>
               <option value="APPROVED">Approved</option>
               <option value="PENDING_REVIEW">Pending</option>
@@ -165,7 +215,7 @@ export default function Reports() {
             </select>
           </div>
           <button onClick={fetchReport}
-            className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800">
+            className="sm:col-span-2 lg:col-span-1 bg-gray-900 text-white px-4 py-2.5 sm:py-2 rounded-lg text-sm hover:bg-gray-800">
             Run Report
           </button>
         </div>
@@ -178,64 +228,74 @@ export default function Reports() {
         <>
           <p className="text-sm text-gray-500 mb-4">{cois.length} COI(s) found</p>
           {cois.length > 0 && (
-            <div className="bg-white rounded-xl border overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b">
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Vendor</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-                    {hasExpiringColumn && (
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Expiring Coverage</th>
-                    )}
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">GL</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">GL Exp</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">WC</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">WC Exp</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Umb</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Umb Exp</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Auto</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Auto Exp</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Submitted</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cois.map((coi) => (
-                    <tr key={coi.id} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{coi.vendor?.name}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[coi.status]}`}>
-                          {coi.status.replace('_', ' ')}
-                        </span>
-                      </td>
+            <>
+              {/* Desktop table */}
+              <div className="hidden lg:block bg-white rounded-xl border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Vendor</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
                       {hasExpiringColumn && (
-                        <td className="px-4 py-3">
-                          {coi.expiringCoverages?.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {coi.expiringCoverages.map(c => (
-                                <span key={c} className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
-                                  {c}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-gray-300">-</span>
-                          )}
-                        </td>
+                        <th className="text-left px-4 py-3 font-medium text-gray-600">Expiring Coverage</th>
                       )}
-                      <td className="px-4 py-3 text-gray-600">{coi.glCoverageAmount ? `$${(coi.glCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.glExpirationDate} /></td>
-                      <td className="px-4 py-3 text-gray-600">{coi.wcCoverageAmount ? `$${(coi.wcCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.wcExpirationDate} /></td>
-                      <td className="px-4 py-3 text-gray-600">{coi.umbCoverageAmount ? `$${(coi.umbCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.umbExpirationDate} /></td>
-                      <td className="px-4 py-3 text-gray-600">{coi.autoCoverageAmount ? `$${(coi.autoCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.autoExpirationDate} /></td>
-                      <td className="px-4 py-3 text-gray-600">{new Date(coi.submittedAt).toLocaleDateString()}</td>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">GL</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">GL Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">WC</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">WC Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Umb</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Umb Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Auto</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Auto Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Submitted</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {cois.map((coi) => (
+                      <tr key={coi.id} className="border-b last:border-0 hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium">{coi.vendor?.name}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[coi.status]}`}>
+                            {coi.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        {hasExpiringColumn && (
+                          <td className="px-4 py-3">
+                            {coi.expiringCoverages?.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {coi.expiringCoverages.map(c => (
+                                  <span key={c} className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+                                    {c}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300">-</span>
+                            )}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-gray-600">{coi.glCoverageAmount ? `$${(coi.glCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3"><ExpirationCell dateStr={coi.glExpirationDate} /></td>
+                        <td className="px-4 py-3 text-gray-600">{coi.wcCoverageAmount ? `$${(coi.wcCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3"><ExpirationCell dateStr={coi.wcExpirationDate} /></td>
+                        <td className="px-4 py-3 text-gray-600">{coi.umbCoverageAmount ? `$${(coi.umbCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3"><ExpirationCell dateStr={coi.umbExpirationDate} /></td>
+                        <td className="px-4 py-3 text-gray-600">{coi.autoCoverageAmount ? `$${(coi.autoCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3"><ExpirationCell dateStr={coi.autoExpirationDate} /></td>
+                        <td className="px-4 py-3 text-gray-600">{new Date(coi.submittedAt).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile card list */}
+              <div className="lg:hidden space-y-3">
+                {cois.map((coi) => (
+                  <MobileCoiCard key={coi.id} coi={coi} hasExpiringColumn={hasExpiringColumn} />
+                ))}
+              </div>
+            </>
           )}
         </>
       )}

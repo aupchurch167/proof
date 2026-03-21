@@ -126,9 +126,9 @@ export default function Vendors() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Vendors</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {canManage && someSelected && (
             <button onClick={handleBulkRequestCoi} disabled={requestingBulk}
               className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium disabled:opacity-50">
@@ -152,48 +152,48 @@ export default function Vendors() {
 
       {/* Add vendor form */}
       {showAdd && (
-        <form onSubmit={handleAdd} className="bg-white p-6 rounded-xl border mb-6">
+        <form onSubmit={handleAdd} className="bg-white p-4 sm:p-6 rounded-xl border mb-6">
           {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
-          <div className="grid md:grid-cols-2 gap-4 mb-4">
+          <div className="grid sm:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required
-                className="w-full px-3 py-2 border rounded-lg" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
               <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required
-                className="w-full px-3 py-2 border rounded-lg" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
               <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
               <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">Save</button>
-            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 rounded-lg border text-sm">Cancel</button>
+            <button type="submit" className="bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm">Save</button>
+            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
           </div>
         </form>
       )}
 
       {/* Filters */}
-      <div className="flex gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <input placeholder="Search vendors..." value={search} onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-2 border rounded-lg text-sm w-64" />
+          className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-64" />
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border rounded-lg text-sm">
+          className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
           <option value="">All Statuses</option>
           {Object.entries(statusLabels).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
@@ -210,61 +210,109 @@ export default function Vendors() {
           {canManage && <p className="text-sm mt-1">Add your first vendor to get started</p>}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b">
-                {isAdmin && (
-                  <th className="px-4 py-3 w-10">
-                    <input type="checkbox" checked={allSelected} onChange={toggleAll}
-                      className="rounded border-gray-300 cursor-pointer" />
-                  </th>
-                )}
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Name</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Email</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Latest COI</th>
-                <th className="text-right px-6 py-3 font-medium text-gray-600">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {vendors.map((vendor) => (
-                <tr key={vendor.id} className={`border-b last:border-0 hover:bg-gray-50 ${selected.has(vendor.id) ? 'bg-red-50' : ''}`}>
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block bg-white rounded-xl border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b">
                   {isAdmin && (
-                    <td className="px-4 py-4">
-                      <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
+                    <th className="px-4 py-3 w-10">
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll}
                         className="rounded border-gray-300 cursor-pointer" />
-                    </td>
+                    </th>
                   )}
-                  <td className="px-6 py-4">
-                    <Link to={`/vendors/${vendor.id}`} className="text-blue-600 hover:underline font-medium">
-                      {vendor.name}
-                    </Link>
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">{vendor.email}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[vendor.coiStatus]}`}>
-                      {statusLabels[vendor.coiStatus]}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {vendor.cois?.[0]
-                      ? new Date(vendor.cois[0].submittedAt).toLocaleDateString()
-                      : 'None'}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    {canManage && (
-                      <button onClick={() => handleRequestCoi(vendor.id)}
-                        className="text-blue-600 hover:underline text-sm">
-                        Request COI
-                      </button>
-                    )}
-                  </td>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Name</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Email</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Latest COI</th>
+                  <th className="text-right px-6 py-3 font-medium text-gray-600">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {vendors.map((vendor) => (
+                  <tr key={vendor.id} className={`border-b last:border-0 hover:bg-gray-50 ${selected.has(vendor.id) ? 'bg-red-50' : ''}`}>
+                    {isAdmin && (
+                      <td className="px-4 py-4">
+                        <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
+                          className="rounded border-gray-300 cursor-pointer" />
+                      </td>
+                    )}
+                    <td className="px-6 py-4">
+                      <Link to={`/vendors/${vendor.id}`} className="text-blue-600 hover:underline font-medium">
+                        {vendor.name}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">{vendor.email}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[vendor.coiStatus]}`}>
+                        {statusLabels[vendor.coiStatus]}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {vendor.cois?.[0]
+                        ? new Date(vendor.cois[0].submittedAt).toLocaleDateString()
+                        : 'None'}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {canManage && (
+                        <button onClick={() => handleRequestCoi(vendor.id)}
+                          className="text-blue-600 hover:underline text-sm">
+                          Request COI
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile card list */}
+          <div className="md:hidden space-y-3">
+            {isAdmin && (
+              <div className="flex items-center gap-2 px-1">
+                <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                  className="rounded border-gray-300 cursor-pointer w-5 h-5" />
+                <span className="text-sm text-gray-500">Select all</span>
+              </div>
+            )}
+            {vendors.map((vendor) => (
+              <div key={vendor.id} className={`bg-white rounded-xl border p-4 ${selected.has(vendor.id) ? 'border-red-300 bg-red-50' : ''}`}>
+                <div className="flex items-start gap-3">
+                  {isAdmin && (
+                    <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
+                      className="rounded border-gray-300 cursor-pointer w-5 h-5 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <Link to={`/vendors/${vendor.id}`} className="text-blue-600 hover:underline font-medium truncate">
+                        {vendor.name}
+                      </Link>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[vendor.coiStatus]}`}>
+                        {statusLabels[vendor.coiStatus]}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-500 truncate mt-1">{vendor.email}</p>
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-xs text-gray-400">
+                        {vendor.cois?.[0]
+                          ? `COI: ${new Date(vendor.cois[0].submittedAt).toLocaleDateString()}`
+                          : 'No COI'}
+                      </span>
+                      {canManage && (
+                        <button onClick={() => handleRequestCoi(vendor.id)}
+                          className="text-blue-600 text-sm py-1">
+                          Request COI
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       <DeleteConfirmationModal

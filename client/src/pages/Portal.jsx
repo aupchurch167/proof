@@ -150,7 +150,7 @@ export default function Portal() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12">
+    <div className="min-h-screen bg-gray-50 py-6 sm:py-12">
       <div className="max-w-lg mx-auto px-4">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold">Proof</h1>
@@ -168,15 +168,15 @@ export default function Portal() {
           {editingInfo ? (
             <form onSubmit={handleUpdateInfo} className="space-y-3">
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" placeholder="Company Name" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Company Name" />
               <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" placeholder="Contact Name" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Contact Name" />
               <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" placeholder="Email" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Email" />
               <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" placeholder="Phone" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Phone" />
               <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" placeholder="Address" />
+                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Address" />
               <div className="flex gap-2">
                 <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">Save</button>
                 <button type="button" onClick={() => setEditingInfo(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
@@ -220,7 +220,7 @@ export default function Portal() {
 
           {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
 
-          <div className="border-2 border-dashed rounded-xl p-8 text-center mb-4">
+          <div className="border-2 border-dashed rounded-xl p-6 sm:p-8 text-center mb-4">
             <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files[0])}
               className="hidden" id="pdf-upload" />
             <label htmlFor="pdf-upload" className="cursor-pointer">

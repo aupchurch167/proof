@@ -33,8 +33,8 @@ export default function DeleteConfirmationModal({
   const countText = itemCount > 1 ? `${itemCount} ${pluralLabel}` : pluralLabel;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+      <div className="bg-white rounded-t-xl sm:rounded-xl shadow-xl p-6 w-full sm:max-w-md sm:mx-4">
         <h2 className="text-lg font-semibold text-gray-900 mb-2">
           Delete {countText}?
         </h2>
@@ -49,7 +49,7 @@ export default function DeleteConfirmationModal({
           value={confirmText}
           onChange={(e) => setConfirmText(e.target.value)}
           placeholder="DELETE"
-          className="w-full px-3 py-2 border rounded-lg text-sm mb-4 font-mono"
+          className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm mb-4 font-mono"
           autoFocus
           disabled={loading}
         />
@@ -58,10 +58,10 @@ export default function DeleteConfirmationModal({
             {error}
           </div>
         )}
-        <div className="flex justify-end gap-3">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3">
           <button
             onClick={handleCancel}
-            className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50"
+            className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50"
             disabled={loading}
           >
             Cancel
@@ -69,7 +69,7 @@ export default function DeleteConfirmationModal({
           <button
             onClick={handleConfirm}
             disabled={confirmText !== 'DELETE' || loading}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {loading ? 'Deleting...' : `Delete ${countText}`}
           </button>

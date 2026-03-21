@@ -149,7 +149,7 @@ export default function Settings() {
   const isAdmin = user?.role === 'ADMIN';
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
       {/* User Profile */}

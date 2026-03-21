@@ -44,7 +44,7 @@ function ExpirationBadge({ dateStr }) {
 
 function CoverageBreakdown({ coi }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
+    <div className="grid grid-cols-2 gap-2 mt-3">
       {COVERAGE_TYPES.map(ct => {
         const amount = coi[ct.amountField];
         const date = coi[ct.dateField];
@@ -63,7 +63,6 @@ function CoverageBreakdown({ coi }) {
 }
 
 function CoverageSummary({ cois }) {
-  // For each coverage type, find the latest approved COI that has data for that type
   const coverageMap = {};
   for (const ct of COVERAGE_TYPES) {
     const matching = cois
@@ -73,9 +72,9 @@ function CoverageSummary({ cois }) {
   }
 
   return (
-    <div className="bg-white rounded-xl border p-6 mb-6">
+    <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
       <h2 className="text-lg font-semibold mb-4">Coverage Summary</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {COVERAGE_TYPES.map(ct => {
           const coi = coverageMap[ct.key];
           const status = coi ? getExpirationStatus(coi[ct.dateField]) : 'none';
@@ -200,7 +199,6 @@ export default function VendorDetail() {
 
   const portalUrl = `${window.location.origin}/portal/${vendor.uploadToken}`;
 
-  // Group COIs by coverage type
   const coverageTypeLabels = {
     GENERAL_LIABILITY: 'General Liability',
     WORKERS_COMP: 'Workers Comp',
@@ -223,41 +221,41 @@ export default function VendorDetail() {
     <div>
       <Link to="/vendors" className="text-sm text-blue-600 hover:underline mb-4 inline-block">Back to Vendors</Link>
 
-      <div className="bg-white rounded-xl border p-6 mb-6">
-        <div className="flex justify-between items-start gap-4">
-          <div className="flex-1">
+      <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+          <div className="flex-1 min-w-0">
             {editing ? (
               <div className="space-y-3">
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="px-3 py-2 border rounded-lg text-lg font-bold" />
+                  className="px-3 py-2.5 border rounded-lg text-lg font-bold w-full text-base" />
                 <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                  className="px-3 py-2 border rounded-lg w-full" placeholder="Contact Name" />
+                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Contact Name" />
                 <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="px-3 py-2 border rounded-lg w-full" placeholder="Email" />
+                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Email" />
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="px-3 py-2 border rounded-lg w-full" placeholder="Phone" />
+                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Phone" />
                 <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  className="px-3 py-2 border rounded-lg w-full" placeholder="Address" />
+                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Address" />
                 <div className="flex gap-2">
-                  <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">Save</button>
-                  <button onClick={() => setEditing(false)} className="px-4 py-2 rounded-lg border text-sm">Cancel</button>
+                  <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm">Save</button>
+                  <button onClick={() => setEditing(false)} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
                 </div>
               </div>
             ) : (
               <>
-                <h1 className="text-2xl font-bold">{vendor.name}</h1>
+                <h1 className="text-xl sm:text-2xl font-bold">{vendor.name}</h1>
                 {vendor.contactName && <p className="text-gray-600 mt-1">{vendor.contactName}</p>}
-                <p className="text-gray-600 mt-1">{vendor.email}</p>
+                <p className="text-gray-600 mt-1 break-all">{vendor.email}</p>
                 {vendor.phone && <p className="text-gray-600">{vendor.phone}</p>}
                 {vendor.address && <p className="text-gray-600">{vendor.address}</p>}
               </>
             )}
           </div>
           {canManage && !editing && (
-            <div className="flex gap-2">
-              <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+            <div className="flex gap-3 sm:gap-2">
+              <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline py-1">Edit</button>
               {isAdmin && (
-                <button onClick={() => setShowDeleteModal(true)} className="text-sm text-red-600 hover:underline">Delete</button>
+                <button onClick={() => setShowDeleteModal(true)} className="text-sm text-red-600 hover:underline py-1">Delete</button>
               )}
             </div>
           )}
@@ -265,10 +263,10 @@ export default function VendorDetail() {
 
         <div className="mt-4 pt-4 border-t">
           <p className="text-sm text-gray-500">Portal Link</p>
-          <div className="flex items-center gap-2 mt-1">
-            <code className="text-sm bg-gray-100 px-3 py-1.5 rounded-lg flex-1 overflow-x-auto">{portalUrl}</code>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-1">
+            <code className="text-xs sm:text-sm bg-gray-100 px-3 py-1.5 rounded-lg flex-1 overflow-x-auto break-all">{portalUrl}</code>
             <button onClick={() => { navigator.clipboard.writeText(portalUrl); }}
-              className="text-sm text-blue-600 hover:underline whitespace-nowrap">Copy</button>
+              className="text-sm text-blue-600 hover:underline whitespace-nowrap py-1">Copy</button>
           </div>
         </div>
       </div>
@@ -277,20 +275,20 @@ export default function VendorDetail() {
       {vendor.cois?.length > 0 && <CoverageSummary cois={vendor.cois} />}
 
       {/* COI History */}
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold">COI History</h2>
         {canManage && (
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <button
               onClick={handleRequestCoi}
               disabled={requesting}
-              className="text-sm border border-blue-600 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+              className="text-sm border border-blue-600 text-blue-600 px-3 py-2 sm:py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-center"
             >
               {requesting ? 'Sending...' : 'Request COI'}
             </button>
             <button
               onClick={() => setShowUpload(!showUpload)}
-              className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700"
+              className="text-sm bg-blue-600 text-white px-3 py-2 sm:py-1.5 rounded-lg hover:bg-blue-700 text-center"
             >
               {showUpload ? 'Cancel' : 'Upload COI'}
             </button>
@@ -300,7 +298,7 @@ export default function VendorDetail() {
 
       {/* Upload zone */}
       {showUpload && (
-        <div className="bg-white rounded-xl border p-6 mb-6">
+        <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
           <PdfUploadZone
             onUpload={handleUploadCoi}
             loading={uploading}
@@ -313,7 +311,6 @@ export default function VendorDetail() {
         <p className="text-gray-500 text-sm">No COIs on file</p>
       ) : (
         <div className="space-y-6">
-          {/* Grouped by coverage type */}
           {Object.entries(groupedCois).map(([type, cois]) => (
             <div key={type}>
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
@@ -323,10 +320,10 @@ export default function VendorDetail() {
                 {cois.map((coi) => (
                   <Link key={coi.id} to={`/cois/${coi.id}`}
                     className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex justify-between items-start">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-sm">
                             Submitted {new Date(coi.submittedAt).toLocaleDateString()}
                           </p>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${reviewStatusColors[coi.status]}`}>
@@ -342,7 +339,6 @@ export default function VendorDetail() {
             </div>
           ))}
 
-          {/* Ungrouped / Multi-coverage */}
           {ungroupedCois.length > 0 && (
             <div>
               {Object.keys(groupedCois).length > 0 && (
@@ -354,10 +350,10 @@ export default function VendorDetail() {
                 {ungroupedCois.map((coi) => (
                   <Link key={coi.id} to={`/cois/${coi.id}`}
                     className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex justify-between items-start">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-sm">
                             Submitted {new Date(coi.submittedAt).toLocaleDateString()}
                           </p>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${reviewStatusColors[coi.status]}`}>

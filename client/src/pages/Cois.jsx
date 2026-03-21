@@ -25,10 +25,10 @@ export default function Cois() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Certificates of Insurance</h1>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border rounded-lg text-sm">
+          className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
           <option value="">All Statuses</option>
           <option value="PENDING_REVIEW">Pending Review</option>
           <option value="APPROVED">Approved</option>
@@ -42,48 +42,77 @@ export default function Cois() {
       ) : cois.length === 0 ? (
         <div className="text-center py-12 text-gray-500">No COIs found</div>
       ) : (
-        <div className="bg-white rounded-xl border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b">
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Vendor</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Submitted</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">GL Coverage</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">GL Expires</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
-                <th className="text-left px-6 py-3 font-medium text-gray-600">Reviewed By</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cois.map((coi) => (
-                <tr key={coi.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <Link to={`/cois/${coi.id}`} className="text-blue-600 hover:underline font-medium">
-                      {coi.vendor?.name}
-                    </Link>
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {new Date(coi.submittedAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {coi.glCoverageAmount ? `$${(coi.glCoverageAmount / 100).toLocaleString()}` : 'N/A'}
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {coi.glExpirationDate ? new Date(coi.glExpirationDate).toLocaleDateString() : 'N/A'}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[coi.status]}`}>
-                      {coi.status.replace('_', ' ')}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {coi.reviewedBy ? `${coi.reviewedBy.firstName} ${coi.reviewedBy.lastName}` : '-'}
-                  </td>
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block bg-white rounded-xl border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b">
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Vendor</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Submitted</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">GL Coverage</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">GL Expires</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Reviewed By</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {cois.map((coi) => (
+                  <tr key={coi.id} className="border-b last:border-0 hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <Link to={`/cois/${coi.id}`} className="text-blue-600 hover:underline font-medium">
+                        {coi.vendor?.name}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {new Date(coi.submittedAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {coi.glCoverageAmount ? `$${(coi.glCoverageAmount / 100).toLocaleString()}` : 'N/A'}
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {coi.glExpirationDate ? new Date(coi.glExpirationDate).toLocaleDateString() : 'N/A'}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[coi.status]}`}>
+                        {coi.status.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {coi.reviewedBy ? `${coi.reviewedBy.firstName} ${coi.reviewedBy.lastName}` : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile card list */}
+          <div className="md:hidden space-y-3">
+            {cois.map((coi) => (
+              <Link key={coi.id} to={`/cois/${coi.id}`}
+                className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-medium text-blue-600 truncate">{coi.vendor?.name}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[coi.status]}`}>
+                    {coi.status.replace('_', ' ')}
+                  </span>
+                </div>
+                <div className="text-sm text-gray-500 space-y-0.5">
+                  <p>Submitted {new Date(coi.submittedAt).toLocaleDateString()}</p>
+                  {coi.glCoverageAmount && (
+                    <p>GL: ${(coi.glCoverageAmount / 100).toLocaleString()}
+                      {coi.glExpirationDate && ` — Exp ${new Date(coi.glExpirationDate).toLocaleDateString()}`}
+                    </p>
+                  )}
+                  {coi.reviewedBy && (
+                    <p className="text-xs text-gray-400">Reviewed by {coi.reviewedBy.firstName} {coi.reviewedBy.lastName}</p>
+                  )}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

@@ -90,9 +90,9 @@ export default function CoiDetail() {
     <div>
       <Link to="/cois" className="text-sm text-blue-600 hover:underline mb-4 inline-block">Back to COIs</Link>
 
-      <div className="flex justify-between items-start mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold">COI Detail</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">COI Detail</h1>
           <p className="text-gray-600">
             Vendor: <Link to={`/vendors/${coi.vendor?.id}`} className="text-blue-600 hover:underline">
               {coi.vendor?.name}
@@ -103,7 +103,7 @@ export default function CoiDetail() {
           {coi.pdfPath && (
             <button
               onClick={() => api.download(`/cois/${coi.id}/pdf`, coi.pdfPath || 'coi.pdf')}
-              className="text-sm text-blue-600 hover:underline">View PDF</button>
+              className="text-sm text-blue-600 hover:underline py-1">View PDF</button>
           )}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
             coi.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
@@ -128,37 +128,37 @@ export default function CoiDetail() {
         </div>
       )}
 
-      {/* Coverage table */}
-      <div className="bg-white rounded-xl border mb-6 overflow-hidden">
+      {/* Coverage — Desktop table */}
+      <div className="hidden sm:block bg-white rounded-xl border mb-6 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b">
-              <th className="text-left px-6 py-3 font-medium text-gray-600">Coverage Type</th>
-              <th className="text-left px-6 py-3 font-medium text-gray-600">Policy Number</th>
-              <th className="text-left px-6 py-3 font-medium text-gray-600">Coverage Amount</th>
-              <th className="text-left px-6 py-3 font-medium text-gray-600">Expiration Date</th>
+              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Coverage Type</th>
+              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Policy Number</th>
+              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Coverage Amount</th>
+              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Expiration Date</th>
             </tr>
           </thead>
           <tbody>
             {coverageRows.map((row) => (
               <tr key={row.label} className="border-b last:border-0">
-                <td className="px-6 py-4 font-medium">{row.label}</td>
-                <td className="px-6 py-4 text-gray-600">
+                <td className="px-4 sm:px-6 py-4 font-medium">{row.label}</td>
+                <td className="px-4 sm:px-6 py-4 text-gray-600">
                   {editing ? (
                     <input value={form[row.policy] || ''} onChange={(e) => setForm({ ...form, [row.policy]: e.target.value })}
-                      className="px-2 py-1 border rounded w-full" />
+                      className="px-2 py-1.5 border rounded w-full text-sm" />
                   ) : coi[row.policy] || 'N/A'}
                 </td>
-                <td className="px-6 py-4 text-gray-600">
+                <td className="px-4 sm:px-6 py-4 text-gray-600">
                   {editing ? (
                     <input type="number" value={form[row.amount] || ''} onChange={(e) => setForm({ ...form, [row.amount]: parseInt(e.target.value) || null })}
-                      className="px-2 py-1 border rounded w-full" placeholder="Amount in cents" />
+                      className="px-2 py-1.5 border rounded w-full text-sm" placeholder="Amount in cents" />
                   ) : formatCurrency(coi[row.amount])}
                 </td>
-                <td className="px-6 py-4 text-gray-600">
+                <td className="px-4 sm:px-6 py-4 text-gray-600">
                   {editing ? (
                     <input type="date" value={form[row.date]?.split('T')[0] || ''} onChange={(e) => setForm({ ...form, [row.date]: e.target.value })}
-                      className="px-2 py-1 border rounded" />
+                      className="px-2 py-1.5 border rounded text-sm" />
                   ) : formatDate(coi[row.date])}
                 </td>
               </tr>
@@ -167,15 +167,58 @@ export default function CoiDetail() {
         </table>
       </div>
 
+      {/* Coverage — Mobile cards */}
+      <div className="sm:hidden space-y-3 mb-6">
+        {coverageRows.map((row) => (
+          <div key={row.label} className="bg-white rounded-xl border p-4">
+            <p className="font-medium mb-2">{row.label}</p>
+            {editing ? (
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs text-gray-500">Policy Number</label>
+                  <input value={form[row.policy] || ''} onChange={(e) => setForm({ ...form, [row.policy]: e.target.value })}
+                    className="w-full px-3 py-2.5 border rounded-lg text-base" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Amount (cents)</label>
+                  <input type="number" value={form[row.amount] || ''} onChange={(e) => setForm({ ...form, [row.amount]: parseInt(e.target.value) || null })}
+                    className="w-full px-3 py-2.5 border rounded-lg text-base" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Expiration</label>
+                  <input type="date" value={form[row.date]?.split('T')[0] || ''} onChange={(e) => setForm({ ...form, [row.date]: e.target.value })}
+                    className="w-full px-3 py-2.5 border rounded-lg text-base" />
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <div>
+                  <p className="text-xs text-gray-400">Policy</p>
+                  <p className="text-gray-600">{coi[row.policy] || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Amount</p>
+                  <p className="text-gray-600">{formatCurrency(coi[row.amount])}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Expires</p>
+                  <p className="text-gray-600">{formatDate(coi[row.date])}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
       {/* Agent info */}
-      <div className="bg-white rounded-xl border p-6 mb-6">
+      <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
         <h3 className="font-semibold mb-3">Insurance Agent</h3>
-        <div className="grid md:grid-cols-2 gap-4 text-sm">
+        <div className="grid sm:grid-cols-2 gap-3 text-sm">
           <div>
             <span className="text-gray-500">Name:</span> {coi.agentName || 'N/A'}
           </div>
           <div>
-            <span className="text-gray-500">Email:</span> {coi.agentEmail || 'N/A'}
+            <span className="text-gray-500">Email:</span> <span className="break-all">{coi.agentEmail || 'N/A'}</span>
           </div>
           <div>
             <span className="text-gray-500">Phone:</span> {coi.agentPhone || 'N/A'}
@@ -188,7 +231,7 @@ export default function CoiDetail() {
 
       {/* Review info */}
       {coi.reviewedBy && (
-        <div className="bg-white rounded-xl border p-6 mb-6">
+        <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
           <h3 className="font-semibold mb-3">Review</h3>
           <div className="text-sm space-y-1">
             <p><span className="text-gray-500">Reviewed by:</span> {coi.reviewedBy.firstName} {coi.reviewedBy.lastName}</p>
@@ -199,42 +242,42 @@ export default function CoiDetail() {
       )}
 
       {/* Actions */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-2 sm:gap-3">
         {(user?.role === 'ADMIN' || user?.role === 'REVIEWER') && !editing && (
           <button onClick={() => setEditing(true)}
-            className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Edit Data</button>
+            className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50">Edit Data</button>
         )}
         {editing && (
           <>
-            <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">Save Changes</button>
-            <button onClick={() => { setEditing(false); setForm(coi); }} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+            <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm">Save Changes</button>
+            <button onClick={() => { setEditing(false); setForm(coi); }} className="px-4 py-2.5 border rounded-lg text-sm">Cancel</button>
           </>
         )}
         {canReview && !editing && (
           <>
             <button onClick={handleApprove}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700">Approve</button>
+              className="bg-green-600 text-white px-4 py-2.5 rounded-lg text-sm hover:bg-green-700">Approve</button>
             <button onClick={() => setShowReject(true)}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700">Reject</button>
+              className="bg-red-600 text-white px-4 py-2.5 rounded-lg text-sm hover:bg-red-700">Reject</button>
           </>
         )}
         {user?.role === 'ADMIN' && !editing && (
           <button onClick={() => setShowDeleteModal(true)}
-            className="text-red-600 hover:underline text-sm">Delete COI</button>
+            className="text-red-600 hover:underline text-sm py-2.5">Delete COI</button>
         )}
       </div>
 
       {/* Reject modal */}
       {showReject && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-white rounded-t-xl sm:rounded-xl p-6 w-full sm:max-w-md sm:mx-4">
             <h3 className="text-lg font-semibold mb-4">Reject COI</h3>
             <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
               placeholder="Reason for rejection..."
-              className="w-full px-3 py-2 border rounded-lg mb-4 h-32 resize-none" />
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowReject(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              <button onClick={handleReject} className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm">Reject</button>
+              className="w-full px-3 py-2.5 border rounded-lg mb-4 h-32 resize-none text-base sm:text-sm" />
+            <div className="flex flex-col sm:flex-row gap-2 sm:justify-end">
+              <button onClick={() => setShowReject(false)} className="px-4 py-2.5 border rounded-lg text-sm order-2 sm:order-1">Cancel</button>
+              <button onClick={handleReject} className="bg-red-600 text-white px-4 py-2.5 rounded-lg text-sm order-1 sm:order-2">Reject</button>
             </div>
           </div>
         </div>

@@ -117,7 +117,7 @@ export default function PdfUploadZone({
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
-        className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+        className={`border-2 border-dashed rounded-xl p-6 sm:p-8 text-center transition-colors ${
           dragActive
             ? 'border-blue-500 bg-blue-50'
             : hasFiles && !onFileSelect
