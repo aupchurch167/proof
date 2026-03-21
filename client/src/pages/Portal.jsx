@@ -14,11 +14,16 @@ export default function Portal() {
   const [complianceFlags, setComplianceFlags] = useState(null);
   const [editingInfo, setEditingInfo] = useState(false);
   const [form, setForm] = useState({});
+  const [errorOrgName, setErrorOrgName] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/portal/${token}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Invalid link');
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setErrorOrgName(data.orgName || null);
+          throw new Error('Invalid link');
+        }
         return res.json();
       })
       .then((v) => {
@@ -87,9 +92,29 @@ export default function Portal() {
   if (error && !vendor) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Invalid Link</h1>
-          <p className="text-gray-500">This upload link is not valid or has expired.</p>
+        <div className="text-center max-w-md mx-4">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.05 6.05m3.828 3.828L6.05 6.05m0 0L3 3m3.05 3.05l12.9 12.9" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Link Expired</h1>
+          <p className="text-gray-500">
+            {errorOrgName
+              ? `This link is no longer valid. Please reach out to ${errorOrgName} to request a new one.`
+              : 'This link is no longer valid. Please reach out to the requesting company to get a new upload link.'}
+          </p>
+          <div className="mt-8">
+            <p className="text-xs text-gray-400">
+              Powered by{' '}
+              <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
+                className="font-medium text-gray-500 hover:text-gray-700">Proof</a>
+              {' '}&mdash;{' '}
+              <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
+                className="text-blue-500 hover:underline">proofcoi.com</a>
+            </p>
+          </div>
         </div>
       </div>
     );

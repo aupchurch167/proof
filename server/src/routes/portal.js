@@ -44,7 +44,7 @@ router.get('/:uploadToken', async (req, res) => {
     });
 
     if (!vendor) {
-      return res.status(404).json({ error: 'Invalid upload link' });
+      return res.status(404).json({ error: 'Invalid upload link', orgName: null });
     }
 
     res.json(vendor);

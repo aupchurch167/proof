@@ -1,4 +1,5 @@
 const { CronJob } = require('cron');
+const { v4: uuidv4 } = require('uuid');
 const { sendExpirationReminderEmail } = require('./email');
 const { updateVendorStatus } = require('./compliance');
 
@@ -106,4 +107,31 @@ function startExpirationCron(prisma) {
   console.log('[Cron] Expiration reminder job scheduled (daily at 8 AM)');
 }
 
-module.exports = { startExpirationCron };
+function startTokenRefreshCron(prisma) {
+  // Run every Sunday at midnight
+  const job = new CronJob('0 0 * * 0', async () => {
+    console.log('[Cron] Refreshing vendor upload tokens...');
+    try {
+      const vendors = await prisma.vendor.findMany({
+        where: { deletedAt: null },
+        select: { id: true },
+      });
+
+      for (const vendor of vendors) {
+        await prisma.vendor.update({
+          where: { id: vendor.id },
+          data: { uploadToken: uuidv4() },
+        });
+      }
+
+      console.log(`[Cron] Refreshed upload tokens for ${vendors.length} vendor(s)`);
+    } catch (err) {
+      console.error('[Cron] Token refresh failed:', err);
+    }
+  });
+
+  job.start();
+  console.log('[Cron] Token refresh job scheduled (Sundays at midnight)');
+}
+
+module.exports = { startExpirationCron, startTokenRefreshCron };

@@ -271,6 +271,7 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'REVIEWER'), as
   try {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
+      include: { organization: { select: { name: true, email: true, address: true } } },
     });
 
     if (!vendor) {
@@ -279,7 +280,7 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'REVIEWER'), as
 
     const portalUrl = `${process.env.APP_URL}/portal/${vendor.uploadToken}`;
 
-    await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl);
+    await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization);
 
     await prisma.notificationLog.create({
       data: {

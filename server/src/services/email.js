@@ -35,16 +35,36 @@ async function sendEmail(to, subject, html) {
   }
 }
 
-async function sendUploadRequestEmail(to, vendorName, portalUrl) {
+async function sendUploadRequestEmail(to, vendorName, portalUrl, org) {
+  const orgName = org?.name || 'our company';
+  const orgEmail = org?.email || '';
+  const orgAddress = org?.address || '';
+
+  const contactBlock = [
+    `<p style="margin:0;font-weight:600;">${orgName}</p>`,
+    orgAddress ? `<p style="margin:0;color:#4b5563;">${orgAddress}</p>` : '',
+    orgEmail ? `<p style="margin:0;color:#4b5563;">${orgEmail}</p>` : '',
+  ].filter(Boolean).join('\n');
+
   await sendEmail(
     to,
-    'Certificate of Insurance Request',
+    `Certificate of Insurance Request from ${orgName}`,
     `<h2>COI Upload Request</h2>
      <p>Hello ${vendorName},</p>
-     <p>We need your current Certificate of Insurance (COI) on file. Please upload it using the secure link below:</p>
+     <p><strong>${orgName}</strong> needs your current Certificate of Insurance (COI) on file. Please upload it using the secure link below:</p>
      <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload COI</a></p>
      <p>This link is unique to your company. No login required.</p>
-     <p>Thank you!</p>`
+     <div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+       <p style="margin:0 0 8px;font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Requesting Company</p>
+       ${contactBlock}
+     </div>
+     <p style="margin-top:16px;">If you have questions, please contact <a href="mailto:${orgEmail}">${orgName}</a> directly.</p>
+     <p>Thank you!</p>
+     <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 16px;" />
+     <p style="font-size:12px;color:#9ca3af;text-align:center;">
+       Powered by <a href="https://proofcoi.com" style="color:#6b7280;text-decoration:none;font-weight:500;">Proof</a> &mdash; COI management for general contractors.
+       <a href="https://proofcoi.com" style="color:#3b82f6;text-decoration:none;">Learn more at proofcoi.com</a>
+     </p>`
   );
 }
 
