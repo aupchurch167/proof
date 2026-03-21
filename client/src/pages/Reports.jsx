@@ -8,12 +8,25 @@ const statusColors = {
   EXPIRED: 'bg-gray-100 text-gray-800',
 };
 
+function ExpirationCell({ dateStr }) {
+  if (!dateStr) return <span className="text-gray-300">-</span>;
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffDays = Math.ceil((d - now) / (1000 * 60 * 60 * 24));
+  let color = 'text-gray-600';
+  if (diffDays < 0) color = 'text-red-600 font-medium';
+  else if (diffDays <= 30) color = 'text-yellow-600 font-medium';
+  return <span className={color}>{d.toLocaleDateString()}</span>;
+}
+
 export default function Reports() {
   const [cois, setCois] = useState([]);
   const [loading, setLoading] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [status, setStatus] = useState('');
+  const [filterBy, setFilterBy] = useState('submission');
+  const [exportingPdfs, setExportingPdfs] = useState(false);
 
   const fetchReport = async () => {
     setLoading(true);
@@ -22,6 +35,7 @@ export default function Reports() {
       if (startDate) url += `startDate=${startDate}&`;
       if (endDate) url += `endDate=${endDate}&`;
       if (status) url += `status=${status}&`;
+      if (filterBy === 'expiration') url += 'filterBy=expiration&';
       const data = await api.get(url);
       setCois(data);
     } catch (err) {
@@ -34,10 +48,11 @@ export default function Reports() {
   useEffect(() => { fetchReport(); }, []);
 
   const exportCsv = () => {
-    const headers = ['Vendor', 'Status', 'GL Coverage', 'GL Expires', 'WC Coverage', 'WC Expires', 'Umbrella Coverage', 'Umbrella Expires', 'Auto Coverage', 'Auto Expires', 'Submitted'];
+    const headers = ['Vendor', 'Status', 'Coverage Type', 'GL Coverage', 'GL Expires', 'WC Coverage', 'WC Expires', 'Umbrella Coverage', 'Umbrella Expires', 'Auto Coverage', 'Auto Expires', 'Expiring Coverages', 'Submitted'];
     const rows = cois.map(c => [
       c.vendor?.name,
       c.status,
+      c.coverageType || '',
       c.glCoverageAmount ? (c.glCoverageAmount / 100) : '',
       c.glExpirationDate ? new Date(c.glExpirationDate).toLocaleDateString() : '',
       c.wcCoverageAmount ? (c.wcCoverageAmount / 100) : '',
@@ -46,6 +61,7 @@ export default function Reports() {
       c.umbExpirationDate ? new Date(c.umbExpirationDate).toLocaleDateString() : '',
       c.autoCoverageAmount ? (c.autoCoverageAmount / 100) : '',
       c.autoExpirationDate ? new Date(c.autoExpirationDate).toLocaleDateString() : '',
+      c.expiringCoverages?.join(', ') || '',
       new Date(c.submittedAt).toLocaleDateString(),
     ]);
 
@@ -59,26 +75,81 @@ export default function Reports() {
     URL.revokeObjectURL(url);
   };
 
+  const exportPdfs = async () => {
+    const coiIds = cois.filter(c => c.pdfPath).map(c => c.id);
+    if (coiIds.length === 0) {
+      alert('No COIs with PDF files in the current results.');
+      return;
+    }
+    setExportingPdfs(true);
+    try {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch('/api/reports/export-pdfs', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ coiIds }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Export failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `coi-export-${new Date().toISOString().split('T')[0]}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Failed to export PDFs: ' + err.message);
+    } finally {
+      setExportingPdfs(false);
+    }
+  };
+
+  const hasExpiringColumn = filterBy === 'expiration' && (startDate || endDate);
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Audit Reports</h1>
-        <button onClick={exportCsv} disabled={cois.length === 0}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-          Export CSV
-        </button>
+        <div className="flex gap-2">
+          <button onClick={exportPdfs} disabled={cois.length === 0 || exportingPdfs}
+            className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium">
+            {exportingPdfs ? 'Merging...' : 'Export PDFs'}
+          </button>
+          <button onClick={exportCsv} disabled={cois.length === 0}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
       <div className="bg-white rounded-xl border p-4 mb-6">
         <div className="flex flex-wrap gap-4 items-end">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Filter Dates By</label>
+            <select value={filterBy} onChange={(e) => setFilterBy(e.target.value)}
+              className="px-3 py-2 border rounded-lg text-sm">
+              <option value="submission">Submission Date</option>
+              <option value="expiration">Expiration Date</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {filterBy === 'expiration' ? 'Expires After' : 'Start Date'}
+            </label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
               className="px-3 py-2 border rounded-lg text-sm" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {filterBy === 'expiration' ? 'Expires Before' : 'End Date'}
+            </label>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
               className="px-3 py-2 border rounded-lg text-sm" />
           </div>
@@ -113,6 +184,9 @@ export default function Reports() {
                   <tr className="bg-gray-50 border-b">
                     <th className="text-left px-4 py-3 font-medium text-gray-600">Vendor</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                    {hasExpiringColumn && (
+                      <th className="text-left px-4 py-3 font-medium text-gray-600">Expiring Coverage</th>
+                    )}
                     <th className="text-left px-4 py-3 font-medium text-gray-600">GL</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600">GL Exp</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600">WC</th>
@@ -133,14 +207,29 @@ export default function Reports() {
                           {coi.status.replace('_', ' ')}
                         </span>
                       </td>
+                      {hasExpiringColumn && (
+                        <td className="px-4 py-3">
+                          {coi.expiringCoverages?.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {coi.expiringCoverages.map(c => (
+                                <span key={c} className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+                                  {c}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-gray-600">{coi.glCoverageAmount ? `$${(coi.glCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3 text-gray-600">{coi.glExpirationDate ? new Date(coi.glExpirationDate).toLocaleDateString() : '-'}</td>
+                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.glExpirationDate} /></td>
                       <td className="px-4 py-3 text-gray-600">{coi.wcCoverageAmount ? `$${(coi.wcCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3 text-gray-600">{coi.wcExpirationDate ? new Date(coi.wcExpirationDate).toLocaleDateString() : '-'}</td>
+                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.wcExpirationDate} /></td>
                       <td className="px-4 py-3 text-gray-600">{coi.umbCoverageAmount ? `$${(coi.umbCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3 text-gray-600">{coi.umbExpirationDate ? new Date(coi.umbExpirationDate).toLocaleDateString() : '-'}</td>
+                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.umbExpirationDate} /></td>
                       <td className="px-4 py-3 text-gray-600">{coi.autoCoverageAmount ? `$${(coi.autoCoverageAmount/100).toLocaleString()}` : '-'}</td>
-                      <td className="px-4 py-3 text-gray-600">{coi.autoExpirationDate ? new Date(coi.autoExpirationDate).toLocaleDateString() : '-'}</td>
+                      <td className="px-4 py-3"><ExpirationCell dateStr={coi.autoExpirationDate} /></td>
                       <td className="px-4 py-3 text-gray-600">{new Date(coi.submittedAt).toLocaleDateString()}</td>
                     </tr>
                   ))}
