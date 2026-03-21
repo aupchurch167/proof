@@ -102,7 +102,10 @@ export default function CoiDetail() {
         <div className="flex items-center gap-3">
           {coi.pdfPath && (
             <button
-              onClick={() => api.download(`/cois/${coi.id}/pdf`, coi.pdfPath || 'coi.pdf')}
+              onClick={async () => {
+                const { url } = await api.get(`/cois/${coi.id}/pdf`);
+                window.open(url, '_blank');
+              }}
               className="text-sm text-blue-600 hover:underline py-1">View PDF</button>
           )}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${

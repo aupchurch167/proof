@@ -70,7 +70,7 @@ router.get('/:id/pdf', authenticate, async (req, res) => {
     }
 
     const signedUrl = await getSignedUrl(coi.pdfPath);
-    res.redirect(signedUrl);
+    res.json({ url: signedUrl });
   } catch (err) {
     console.error('PDF download error:', err);
     res.status(500).json({ error: 'Failed to download PDF' });
