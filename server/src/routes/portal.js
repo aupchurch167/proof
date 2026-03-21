@@ -7,19 +7,13 @@ const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
+const { uploadFile } = require('../services/storage');
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '../../uploads'),
-  filename: (req, file, cb) => {
-    cb(null, `${uuidv4()}${path.extname(file.originalname)}`);
-  },
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/pdf') {
@@ -113,12 +107,14 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
       }
     }
 
-    const pdfPath = req.file.filename;
+    // Upload to DigitalOcean Spaces
+    const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
+    const pdfPath = await uploadFile(req.file.buffer, filename, req.file.mimetype);
 
     // Extract data with Claude AI
     let extractedData = null;
     try {
-      extractedData = await extractCoiData(path.join(__dirname, '../../uploads', pdfPath));
+      extractedData = await extractCoiData(req.file.buffer);
     } catch (extractErr) {
       console.error('AI extraction failed:', extractErr);
     }

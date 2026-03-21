@@ -8,19 +8,13 @@ const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
+const { uploadFile, deleteFile } = require('../services/storage');
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '../../uploads'),
-  filename: (req, file, cb) => {
-    cb(null, `${uuidv4()}${path.extname(file.originalname)}`);
-  },
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/pdf') {
@@ -141,7 +135,17 @@ router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
       return res.status(400).json({ error: 'ids must be a non-empty array' });
     }
 
-    // First, delete all COIs for these vendors (hard delete)
+    // Delete COI files from Spaces, then delete records
+    const coisToDelete = await prisma.coi.findMany({
+      where: { vendorId: { in: ids }, orgId: req.user.orgId },
+      select: { pdfPath: true },
+    });
+    for (const c of coisToDelete) {
+      if (c.pdfPath) {
+        await deleteFile(c.pdfPath).catch(err => console.error('[Storage] Delete failed:', err.message));
+      }
+    }
+
     await prisma.coi.deleteMany({
       where: { vendorId: { in: ids }, orgId: req.user.orgId },
     });
@@ -170,7 +174,17 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
-    // Delete all COIs for this vendor (hard delete)
+    // Delete COI files from Spaces, then delete records
+    const vendorCois = await prisma.coi.findMany({
+      where: { vendorId: req.params.id, orgId: req.user.orgId },
+      select: { pdfPath: true },
+    });
+    for (const c of vendorCois) {
+      if (c.pdfPath) {
+        await deleteFile(c.pdfPath).catch(err => console.error('[Storage] Delete failed:', err.message));
+      }
+    }
+
     await prisma.coi.deleteMany({
       where: { vendorId: req.params.id, orgId: req.user.orgId },
     });
@@ -203,12 +217,14 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'REVIEWER'), enf
       return res.status(400).json({ error: 'PDF file required' });
     }
 
-    const pdfPath = req.file.filename;
+    // Upload to DigitalOcean Spaces
+    const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
+    const pdfPath = await uploadFile(req.file.buffer, filename, req.file.mimetype);
 
     // Extract data with Claude AI
     let extractedData = null;
     try {
-      extractedData = await extractCoiData(path.join(__dirname, '../../uploads', pdfPath));
+      extractedData = await extractCoiData(req.file.buffer);
     } catch (extractErr) {
       console.error('AI extraction failed:', extractErr);
     }

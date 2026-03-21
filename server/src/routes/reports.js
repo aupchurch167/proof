@@ -1,9 +1,8 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
 const { PrismaClient } = require('@prisma/client');
 const { PDFDocument } = require('pdf-lib');
 const { authenticate } = require('../middleware/auth');
+const { downloadFile } = require('../services/storage');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -169,28 +168,24 @@ router.post('/export-pdfs', authenticate, async (req, res) => {
       select: { pdfPath: true },
     });
 
-    const uploadsDir = path.join(__dirname, '../../uploads');
-    const validPaths = cois
-      .filter(c => c.pdfPath)
-      .map(c => path.join(uploadsDir, c.pdfPath))
-      .filter(p => fs.existsSync(p));
+    const validKeys = cois.filter(c => c.pdfPath).map(c => c.pdfPath);
 
-    if (validPaths.length === 0) {
+    if (validKeys.length === 0) {
       return res.status(404).json({ error: 'No PDF files found for the selected COIs' });
     }
 
     const mergedPdf = await PDFDocument.create();
 
-    for (const filePath of validPaths) {
+    for (const key of validKeys) {
       try {
-        const pdfBytes = fs.readFileSync(filePath);
+        const pdfBytes = await downloadFile(key);
         const sourcePdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
         const pages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
         for (const page of pages) {
           mergedPdf.addPage(page);
         }
       } catch (err) {
-        console.error(`[PDF Merge] Failed to process ${filePath}:`, err.message);
+        console.error(`[PDF Merge] Failed to process ${key}:`, err.message);
       }
     }
 

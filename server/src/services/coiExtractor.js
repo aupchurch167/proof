@@ -1,10 +1,20 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const fs = require('fs');
 
 const client = new Anthropic.default();
 
-async function extractCoiData(pdfPath) {
-  const pdfBuffer = fs.readFileSync(pdfPath);
+/**
+ * Extract COI data from a PDF.
+ * @param {Buffer|string} pdfInput - PDF buffer or file path (legacy support for migration)
+ */
+async function extractCoiData(pdfInput) {
+  let pdfBuffer;
+  if (Buffer.isBuffer(pdfInput)) {
+    pdfBuffer = pdfInput;
+  } else {
+    // Legacy: accept file path for migration script
+    const fs = require('fs');
+    pdfBuffer = fs.readFileSync(pdfInput);
+  }
   const base64Pdf = pdfBuffer.toString('base64');
 
   const response = await client.messages.create({

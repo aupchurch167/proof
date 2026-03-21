@@ -1,9 +1,8 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
 const { PrismaClient } = require('@prisma/client');
 const { authenticate, authorize } = require('../middleware/auth');
 const { updateVendorStatus } = require('../services/compliance');
+const { getSignedUrl, deleteFile } = require('../services/storage');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -70,15 +69,8 @@ router.get('/:id/pdf', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'PDF not found' });
     }
 
-    const filePath = path.join(__dirname, '../../uploads', coi.pdfPath);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'PDF file not found on disk' });
-    }
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${coi.pdfPath}"`);
-    fs.createReadStream(filePath).pipe(res);
+    const signedUrl = await getSignedUrl(coi.pdfPath);
+    res.redirect(signedUrl);
   } catch (err) {
     console.error('PDF download error:', err);
     res.status(500).json({ error: 'Failed to download PDF' });
@@ -169,6 +161,11 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
 
     if (!coi) {
       return res.status(404).json({ error: 'COI not found' });
+    }
+
+    // Delete file from Spaces
+    if (coi.pdfPath) {
+      await deleteFile(coi.pdfPath).catch(err => console.error('[Storage] Delete failed:', err.message));
     }
 
     await prisma.coi.delete({
