@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
 
@@ -9,77 +9,239 @@ const statusColors = {
   EXPIRED: 'bg-gray-100 text-gray-800',
 };
 
+const coverageTypeLabels = {
+  GENERAL_LIABILITY: 'GL',
+  WORKERS_COMP: 'WC',
+  UMBRELLA: 'Umbrella',
+  AUTO: 'Auto',
+  OTHER: 'Other',
+};
+
+function formatCurrency(cents) {
+  if (!cents) return '—';
+  return `$${(cents / 100).toLocaleString()}`;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString();
+}
+
+function soonestExpiration(coi) {
+  return [coi.glExpirationDate, coi.wcExpirationDate, coi.umbExpirationDate, coi.autoExpirationDate]
+    .filter(Boolean)
+    .sort()[0] || null;
+}
+
 export default function Cois() {
   const [cois, setCois] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [coverageFilter, setCoverageFilter] = useState('');
+  const [expiringWithin, setExpiringWithin] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [search, setSearch] = useState('');
+  const [sortField, setSortField] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
 
   useEffect(() => {
     let url = '/cois?';
-    if (statusFilter) url += `status=${statusFilter}`;
+    if (statusFilter) url += `status=${statusFilter}&`;
     api.get(url)
       .then(setCois)
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [statusFilter]);
 
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const sortIndicator = (field) => {
+    if (sortField !== field) return ' ↕';
+    return sortDir === 'asc' ? ' ↑' : ' ↓';
+  };
+
+  const filtered = useMemo(() => {
+    let result = cois;
+
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(c => c.vendor?.name?.toLowerCase().includes(q));
+    }
+
+    if (coverageFilter) {
+      result = result.filter(c => c.coverageType === coverageFilter);
+    }
+
+    if (expiringWithin) {
+      const days = parseInt(expiringWithin);
+      const now = new Date();
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() + days);
+      result = result.filter(c => {
+        const s = soonestExpiration(c);
+        if (!s) return false;
+        const d = new Date(s);
+        return d >= now && d <= cutoff;
+      });
+    }
+
+    if (dateFrom || dateTo) {
+      result = result.filter(c => {
+        const s = soonestExpiration(c);
+        if (!s) return false;
+        const d = new Date(s);
+        if (dateFrom && d < new Date(dateFrom)) return false;
+        if (dateTo && d > new Date(dateTo)) return false;
+        return true;
+      });
+    }
+
+    if (sortField) {
+      result = [...result].sort((a, b) => {
+        const aVal = a[sortField];
+        const bVal = b[sortField];
+        if (!aVal && !bVal) return 0;
+        if (!aVal) return 1;
+        if (!bVal) return -1;
+        const cmp = new Date(aVal) - new Date(bVal);
+        return sortDir === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    return result;
+  }, [cois, search, coverageFilter, expiringWithin, dateFrom, dateTo, sortField, sortDir]);
+
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h1 className="text-2xl font-bold">Certificates of Insurance</h1>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
-          <option value="">All Statuses</option>
-          <option value="PENDING_REVIEW">Pending Review</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="EXPIRED">Expired</option>
-        </select>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            placeholder="Search by vendor name..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-64"
+          />
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
+            <option value="">All Statuses</option>
+            <option value="PENDING_REVIEW">Pending Review</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="EXPIRED">Expired</option>
+          </select>
+          <select value={coverageFilter} onChange={(e) => setCoverageFilter(e.target.value)}
+            className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
+            <option value="">All Coverage Types</option>
+            <option value="GENERAL_LIABILITY">GL</option>
+            <option value="WORKERS_COMP">WC</option>
+            <option value="UMBRELLA">Umbrella</option>
+            <option value="AUTO">Auto</option>
+          </select>
+          <select value={expiringWithin} onChange={(e) => setExpiringWithin(e.target.value)}
+            className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
+            <option value="">Expiring Within</option>
+            <option value="30">30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+          </select>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <label className="text-sm text-gray-600 whitespace-nowrap">From</label>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto" />
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <label className="text-sm text-gray-600 whitespace-nowrap">To</label>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto" />
+          </div>
+          {(search || statusFilter || coverageFilter || expiringWithin || dateFrom || dateTo) && (
+            <button
+              onClick={() => { setSearch(''); setStatusFilter(''); setCoverageFilter(''); setExpiringWithin(''); setDateFrom(''); setDateTo(''); }}
+              className="text-sm text-gray-500 hover:text-gray-700 whitespace-nowrap">
+              Clear filters
+            </button>
+          )}
+        </div>
       </div>
 
       {loading ? (
         <p className="text-gray-500">Loading...</p>
-      ) : cois.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-gray-500">No COIs found</div>
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden md:block bg-white rounded-xl border overflow-hidden">
+          <div className="hidden md:block bg-white rounded-xl border overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Vendor</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Submitted</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">GL Coverage</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">GL Expires</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Reviewed By</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Vendor</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Type</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">GL Coverage</th>
+                  <th
+                    className="text-left px-4 py-3 font-medium text-gray-600 cursor-pointer select-none hover:text-gray-900"
+                    onClick={() => handleSort('glExpirationDate')}
+                  >
+                    GL Expires{sortIndicator('glExpirationDate')}
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600 hidden xl:table-cell">WC Coverage</th>
+                  <th
+                    className="text-left px-4 py-3 font-medium text-gray-600 cursor-pointer select-none hover:text-gray-900 hidden xl:table-cell"
+                    onClick={() => handleSort('wcExpirationDate')}
+                  >
+                    WC Expires{sortIndicator('wcExpirationDate')}
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600 hidden xl:table-cell">Umbrella Coverage</th>
+                  <th
+                    className="text-left px-4 py-3 font-medium text-gray-600 cursor-pointer select-none hover:text-gray-900 hidden xl:table-cell"
+                    onClick={() => handleSort('umbExpirationDate')}
+                  >
+                    Umbrella Expires{sortIndicator('umbExpirationDate')}
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Reviewed By</th>
                 </tr>
               </thead>
               <tbody>
-                {cois.map((coi) => (
+                {filtered.map((coi) => (
                   <tr key={coi.id} className="border-b last:border-0 hover:bg-gray-50">
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       <Link to={`/cois/${coi.id}`} className="text-blue-600 hover:underline font-medium">
                         {coi.vendor?.name}
                       </Link>
+                      <p className="text-xs text-gray-400">{new Date(coi.submittedAt).toLocaleDateString()}</p>
                     </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {new Date(coi.submittedAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {coi.glCoverageAmount ? `$${(coi.glCoverageAmount / 100).toLocaleString()}` : 'N/A'}
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {coi.glExpirationDate ? new Date(coi.glExpirationDate).toLocaleDateString() : 'N/A'}
-                    </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[coi.status]}`}>
                         {coi.status.replace('_', ' ')}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {coi.reviewedBy ? `${coi.reviewedBy.firstName} ${coi.reviewedBy.lastName}` : '-'}
+                    <td className="px-4 py-4 text-gray-600">
+                      {coverageTypeLabels[coi.coverageType] || '—'}
+                    </td>
+                    <td className="px-4 py-4 text-gray-600">{formatCurrency(coi.glCoverageAmount)}</td>
+                    <td className="px-4 py-4 text-gray-600">{formatDate(coi.glExpirationDate)}</td>
+                    <td className="px-4 py-4 text-gray-600 hidden xl:table-cell">{formatCurrency(coi.wcCoverageAmount)}</td>
+                    <td className="px-4 py-4 text-gray-600 hidden xl:table-cell">{formatDate(coi.wcExpirationDate)}</td>
+                    <td className="px-4 py-4 text-gray-600 hidden xl:table-cell">{formatCurrency(coi.umbCoverageAmount)}</td>
+                    <td className="px-4 py-4 text-gray-600 hidden xl:table-cell">{formatDate(coi.umbExpirationDate)}</td>
+                    <td className="px-4 py-4 text-gray-600">
+                      {coi.reviewedBy ? `${coi.reviewedBy.firstName} ${coi.reviewedBy.lastName}` : '—'}
                     </td>
                   </tr>
                 ))}
@@ -89,28 +251,46 @@ export default function Cois() {
 
           {/* Mobile card list */}
           <div className="md:hidden space-y-3">
-            {cois.map((coi) => (
-              <Link key={coi.id} to={`/cois/${coi.id}`}
-                className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="font-medium text-blue-600 truncate">{coi.vendor?.name}</span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[coi.status]}`}>
-                    {coi.status.replace('_', ' ')}
-                  </span>
-                </div>
-                <div className="text-sm text-gray-500 space-y-0.5">
-                  <p>Submitted {new Date(coi.submittedAt).toLocaleDateString()}</p>
-                  {coi.glCoverageAmount && (
-                    <p>GL: ${(coi.glCoverageAmount / 100).toLocaleString()}
-                      {coi.glExpirationDate && ` — Exp ${new Date(coi.glExpirationDate).toLocaleDateString()}`}
-                    </p>
-                  )}
-                  {coi.reviewedBy && (
-                    <p className="text-xs text-gray-400">Reviewed by {coi.reviewedBy.firstName} {coi.reviewedBy.lastName}</p>
-                  )}
-                </div>
-              </Link>
-            ))}
+            {filtered.map((coi) => {
+              const soonest = soonestExpiration(coi);
+              return (
+                <Link key={coi.id} to={`/cois/${coi.id}`}
+                  className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="font-medium text-blue-600 truncate">{coi.vendor?.name}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[coi.status]}`}>
+                      {coi.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-500 space-y-1">
+                    <div className="flex justify-between">
+                      <span>Submitted</span>
+                      <span>{new Date(coi.submittedAt).toLocaleDateString()}</span>
+                    </div>
+                    {soonest && (
+                      <div className="flex justify-between">
+                        <span>Soonest Expiration</span>
+                        <span className={new Date(soonest) < new Date() ? 'text-red-600 font-medium' : ''}>
+                          {new Date(soonest).toLocaleDateString()}
+                        </span>
+                      </div>
+                    )}
+                    {coi.coverageType && (
+                      <div className="flex justify-between">
+                        <span>Coverage Type</span>
+                        <span>{coverageTypeLabels[coi.coverageType] || coi.coverageType}</span>
+                      </div>
+                    )}
+                    {coi.glCoverageAmount && (
+                      <div className="flex justify-between">
+                        <span>GL Coverage</span>
+                        <span>{formatCurrency(coi.glCoverageAmount)}</span>
+                      </div>
+                    )}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </>
       )}
