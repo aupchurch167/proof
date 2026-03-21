@@ -1,4 +1,6 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const { PrismaClient } = require('@prisma/client');
 const { authenticate, authorize } = require('../middleware/auth');
 const { updateVendorStatus } = require('../services/compliance');
@@ -53,6 +55,33 @@ router.get('/:id', authenticate, async (req, res) => {
     res.json(coi);
   } catch (err) {
     res.status(500).json({ error: 'Failed to get COI' });
+  }
+});
+
+// GET /api/cois/:id/pdf
+router.get('/:id/pdf', authenticate, async (req, res) => {
+  try {
+    const coi = await prisma.coi.findFirst({
+      where: { id: req.params.id, orgId: req.user.orgId },
+      select: { pdfPath: true },
+    });
+
+    if (!coi || !coi.pdfPath) {
+      return res.status(404).json({ error: 'PDF not found' });
+    }
+
+    const filePath = path.join(__dirname, '../../uploads', coi.pdfPath);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'PDF file not found on disk' });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${coi.pdfPath}"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) {
+    console.error('PDF download error:', err);
+    res.status(500).json({ error: 'Failed to download PDF' });
   }
 });
 

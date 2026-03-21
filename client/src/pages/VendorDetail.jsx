@@ -25,6 +25,7 @@ export default function VendorDetail() {
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [requesting, setRequesting] = useState(false);
 
   useEffect(() => {
     api.get(`/vendors/${id}`)
@@ -68,6 +69,18 @@ export default function VendorDetail() {
       setUploadError(err.message || 'Failed to upload COI');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleRequestCoi = async () => {
+    setRequesting(true);
+    try {
+      await api.post(`/vendors/${id}/request-coi`);
+      alert('COI request email sent!');
+    } catch (err) {
+      alert('Failed to send request: ' + err.message);
+    } finally {
+      setRequesting(false);
     }
   };
 
@@ -137,12 +150,21 @@ export default function VendorDetail() {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold">COI History</h2>
         {canManage && (
-          <button
-            onClick={() => setShowUpload(!showUpload)}
-            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700"
-          >
-            {showUpload ? 'Cancel' : 'Upload COI'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRequestCoi}
+              disabled={requesting}
+              className="text-sm border border-blue-600 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+            >
+              {requesting ? 'Sending...' : 'Request COI'}
+            </button>
+            <button
+              onClick={() => setShowUpload(!showUpload)}
+              className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700"
+            >
+              {showUpload ? 'Cancel' : 'Upload COI'}
+            </button>
+          </div>
         )}
       </div>
 

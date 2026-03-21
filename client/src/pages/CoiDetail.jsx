@@ -101,8 +101,9 @@ export default function CoiDetail() {
         </div>
         <div className="flex items-center gap-3">
           {coi.pdfPath && (
-            <a href={`/uploads/${coi.pdfPath}`} target="_blank" rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline">View PDF</a>
+            <button
+              onClick={() => api.download(`/cois/${coi.id}/pdf`, coi.pdfPath || 'coi.pdf')}
+              className="text-sm text-blue-600 hover:underline">View PDF</button>
           )}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
             coi.status === 'APPROVED' ? 'bg-green-100 text-green-800' :

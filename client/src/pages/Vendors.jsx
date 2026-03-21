@@ -34,6 +34,7 @@ export default function Vendors() {
   const [selected, setSelected] = useState(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [requestingBulk, setRequestingBulk] = useState(false);
 
   const fetchVendors = async () => {
     try {
@@ -92,6 +93,22 @@ export default function Vendors() {
     });
   };
 
+  const handleBulkRequestCoi = async () => {
+    setRequestingBulk(true);
+    let sent = 0;
+    let failed = 0;
+    for (const vendorId of selected) {
+      try {
+        await api.post(`/vendors/${vendorId}/request-coi`);
+        sent++;
+      } catch {
+        failed++;
+      }
+    }
+    setRequestingBulk(false);
+    alert(`COI requests sent: ${sent}${failed > 0 ? `, ${failed} failed` : ''}`);
+  };
+
   const handleBulkDelete = async () => {
     setDeleting(true);
     try {
@@ -112,6 +129,12 @@ export default function Vendors() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Vendors</h1>
         <div className="flex gap-2">
+          {canManage && someSelected && (
+            <button onClick={handleBulkRequestCoi} disabled={requestingBulk}
+              className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium disabled:opacity-50">
+              {requestingBulk ? 'Sending...' : `Request COI (${selected.size})`}
+            </button>
+          )}
           {isAdmin && someSelected && (
             <button onClick={() => setShowDeleteModal(true)}
               className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium">

@@ -228,6 +228,21 @@ export default function Portal() {
             </p>
           )}
         </form>
+
+        {/* CTA */}
+        <div className="mt-8 text-center">
+          <p className="text-sm text-gray-400">
+            Powered by{' '}
+            <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
+              className="font-medium text-gray-500 hover:text-gray-700">Proof</a>
+            {' '}&mdash; COI management built for general contractors.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Want to manage your vendors' insurance automatically?{' '}
+            <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
+              className="text-blue-500 hover:underline">Get started free.</a>
+          </p>
+        </div>
       </div>
     </div>
   );
