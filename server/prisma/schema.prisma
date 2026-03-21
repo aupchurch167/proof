@@ -47,6 +47,14 @@ enum Plan {
   UNLIMITED
 }
 
+enum CoverageType {
+  GENERAL_LIABILITY
+  WORKERS_COMP
+  UMBRELLA
+  AUTO
+  OTHER
+}
+
 model Organization {
   id                    String   @id @default(uuid())
   name                  String
@@ -119,9 +127,10 @@ model Vendor {
 }
 
 model Coi {
-  id       String @id @default(uuid())
-  vendorId String
-  orgId    String
+  id           String        @id @default(uuid())
+  vendorId     String
+  orgId        String
+  coverageType CoverageType?
 
   // General Liability
   glPolicyNumber   String?

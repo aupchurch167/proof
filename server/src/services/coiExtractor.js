@@ -27,6 +27,7 @@ async function extractCoiData(pdfPath) {
             text: `Extract the following information from this Certificate of Insurance (COI) PDF. Return ONLY a valid JSON object with these fields. For coverage amounts, convert to cents (e.g., $1,000,000 = 100000000). For dates, use ISO 8601 format (YYYY-MM-DD).
 
 {
+  "coverageType": "GENERAL_LIABILITY | WORKERS_COMP | UMBRELLA | AUTO | OTHER",
   "glPolicyNumber": "string or null",
   "glCoverageAmount": "integer in cents or null",
   "glExpirationDate": "YYYY-MM-DD or null",
@@ -46,11 +47,19 @@ async function extractCoiData(pdfPath) {
 }
 
 Important:
+- For coverageType, determine the PRIMARY coverage type of this certificate:
+  - "GENERAL_LIABILITY" if the certificate primarily covers General/Commercial General Liability
+  - "WORKERS_COMP" if it primarily covers Workers Compensation
+  - "UMBRELLA" if it primarily covers Umbrella/Excess Liability
+  - "AUTO" if it primarily covers Automobile Liability
+  - "OTHER" if it doesn't fit the above or covers multiple types equally
+  - If the certificate is an ACORD 25 form covering multiple types, set to "OTHER"
 - Look for "General Liability", "Commercial General Liability", or "CGL" for GL fields
 - Look for "Workers Compensation" or "Workers Comp" for WC fields
 - Look for "Umbrella" or "Excess Liability" for umbrella fields
 - Look for "Automobile Liability" or "Auto Liability" for auto fields
 - Extract the per-occurrence limit for General Liability, not the aggregate
+- Extract each coverage section's expiration date independently
 - Return ONLY the JSON, no markdown formatting or explanation`,
           },
         ],
@@ -66,7 +75,36 @@ Important:
     jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
   }
 
-  return JSON.parse(jsonStr);
+  const data = JSON.parse(jsonStr);
+
+  // Validate coverageType is a known enum value, fall back to inference
+  const validTypes = ['GENERAL_LIABILITY', 'WORKERS_COMP', 'UMBRELLA', 'AUTO', 'OTHER'];
+  if (!data.coverageType || !validTypes.includes(data.coverageType)) {
+    data.coverageType = inferCoverageType(data);
+  }
+
+  return data;
 }
 
-module.exports = { extractCoiData };
+function inferCoverageType(data) {
+  // Count which coverage sections have data
+  const has = {
+    gl: !!(data.glPolicyNumber || data.glCoverageAmount),
+    wc: !!(data.wcPolicyNumber || data.wcCoverageAmount),
+    umb: !!(data.umbPolicyNumber || data.umbCoverageAmount),
+    auto: !!(data.autoPolicyNumber || data.autoCoverageAmount),
+  };
+
+  const count = Object.values(has).filter(Boolean).length;
+
+  if (count === 1) {
+    if (has.gl) return 'GENERAL_LIABILITY';
+    if (has.wc) return 'WORKERS_COMP';
+    if (has.umb) return 'UMBRELLA';
+    if (has.auto) return 'AUTO';
+  }
+
+  return 'OTHER';
+}
+
+module.exports = { extractCoiData, inferCoverageType };

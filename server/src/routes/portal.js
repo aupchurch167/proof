@@ -141,6 +141,7 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
 
     if (extractedData) {
       Object.assign(coiData, {
+        coverageType: extractedData.coverageType || null,
         glPolicyNumber: extractedData.glPolicyNumber || null,
         glCoverageAmount: extractedData.glCoverageAmount || null,
         glExpirationDate: extractedData.glExpirationDate ? new Date(extractedData.glExpirationDate) : null,

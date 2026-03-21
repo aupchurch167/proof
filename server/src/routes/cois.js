@@ -97,6 +97,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res
     }
 
     const allowedFields = [
+      'coverageType',
       'glPolicyNumber', 'glCoverageAmount', 'glExpirationDate',
       'wcPolicyNumber', 'wcCoverageAmount', 'wcExpirationDate',
       'umbPolicyNumber', 'umbCoverageAmount', 'umbExpirationDate',

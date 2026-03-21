@@ -52,7 +52,7 @@ router.get('/', authenticate, async (req, res) => {
         cois: {
           orderBy: { submittedAt: 'desc' },
           take: 1,
-          select: { id: true, status: true, submittedAt: true, glExpirationDate: true },
+          select: { id: true, status: true, submittedAt: true, coverageType: true, glExpirationDate: true },
         },
       },
     });
@@ -231,6 +231,7 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'REVIEWER'), enf
 
     if (extractedData) {
       Object.assign(coiData, {
+        coverageType: extractedData.coverageType || null,
         glPolicyNumber: extractedData.glPolicyNumber || null,
         glCoverageAmount: extractedData.glCoverageAmount || null,
         glExpirationDate: extractedData.glExpirationDate ? new Date(extractedData.glExpirationDate) : null,
