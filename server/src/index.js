@@ -14,7 +14,7 @@ const reportsRoutes = require('./routes/reports');
 const notificationsRoutes = require('./routes/notifications');
 const organizationRoutes = require('./routes/organization');
 const importRoutes = require('./routes/import');
-const { startExpirationCron, startTokenRefreshCron } = require('./services/cron');
+const { startExpirationCron, startTokenRefreshCron, startWeeklySummaryCron } = require('./services/cron');
 
 const prisma = new PrismaClient();
 const app = express();
@@ -61,6 +61,7 @@ app.listen(PORT, () => {
   console.log(`Proof server running on port ${PORT}`);
   startExpirationCron(prisma);
   startTokenRefreshCron(prisma);
+  startWeeklySummaryCron(prisma);
 });
 
 module.exports = app;

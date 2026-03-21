@@ -103,10 +103,117 @@ async function sendExpirationReminderEmail(to, vendorName, daysUntil, portalUrl)
   );
 }
 
+async function sendWeeklySummaryEmail(to, orgName, summary) {
+  const {
+    totalVendors,
+    compliant,
+    expiringSoon,
+    expired,
+    noCoi,
+    urgentVendors,
+  } = summary;
+
+  const urgentRows = urgentVendors.map((v) => {
+    const statusColor = v.daysUntil <= 0 ? '#dc2626' : '#d97706';
+    const statusLabel = v.daysUntil <= 0
+      ? `Expired ${Math.abs(v.daysUntil)} day(s) ago`
+      : `Expires in ${v.daysUntil} day(s)`;
+    return `
+      <tr>
+        <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;">${v.name}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;">
+          ${v.expirationDate ? new Date(v.expirationDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+        </td>
+        <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;color:${statusColor};font-weight:600;">
+          ${statusLabel}
+        </td>
+      </tr>`;
+  }).join('');
+
+  const urgentSection = urgentVendors.length > 0 ? `
+    <div style="margin-top:24px;">
+      <h3 style="margin:0 0 12px;font-size:16px;color:#111827;">Needs Attention</h3>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Vendor</th>
+            <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Expiration</th>
+            <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${urgentRows}
+        </tbody>
+      </table>
+    </div>` : '';
+
+  const actionableCount = expiringSoon + expired + noCoi;
+
+  await sendEmail(
+    to,
+    `Your Weekly COI Compliance Summary — ${orgName}`,
+    `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;">
+       <h2 style="margin:0 0 8px;color:#111827;">Weekly Compliance Summary</h2>
+       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">Here's your COI compliance overview for ${orgName}.</p>
+
+       <div style="display:flex;gap:12px;margin-bottom:24px;">
+         <table style="width:100%;border-collapse:separate;border-spacing:12px 0;">
+           <tr>
+             <td style="background:#f9fafb;padding:16px;border-radius:8px;border:1px solid #e5e7eb;text-align:center;width:33%;">
+               <div style="font-size:28px;font-weight:700;color:#111827;">${totalVendors}</div>
+               <div style="font-size:12px;color:#6b7280;margin-top:4px;">Total Vendors</div>
+             </td>
+             <td style="background:#f0fdf4;padding:16px;border-radius:8px;border:1px solid #bbf7d0;text-align:center;width:33%;">
+               <div style="font-size:28px;font-weight:700;color:#16a34a;">${compliant}</div>
+               <div style="font-size:12px;color:#16a34a;margin-top:4px;">Compliant</div>
+             </td>
+             <td style="background:${actionableCount > 0 ? '#fef2f2' : '#f9fafb'};padding:16px;border-radius:8px;border:1px solid ${actionableCount > 0 ? '#fecaca' : '#e5e7eb'};text-align:center;width:33%;">
+               <div style="font-size:28px;font-weight:700;color:${actionableCount > 0 ? '#dc2626' : '#6b7280'};">${actionableCount}</div>
+               <div style="font-size:12px;color:${actionableCount > 0 ? '#dc2626' : '#6b7280'};margin-top:4px;">Need Action</div>
+             </td>
+           </tr>
+         </table>
+       </div>
+
+       <div style="background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;padding:16px;margin-bottom:24px;">
+         <table style="width:100%;font-size:14px;border-collapse:collapse;">
+           <tr>
+             <td style="padding:6px 0;color:#374151;">Expiring within 30 days</td>
+             <td style="padding:6px 0;text-align:right;font-weight:600;color:${expiringSoon > 0 ? '#d97706' : '#6b7280'};">${expiringSoon}</td>
+           </tr>
+           <tr>
+             <td style="padding:6px 0;color:#374151;">Expired</td>
+             <td style="padding:6px 0;text-align:right;font-weight:600;color:${expired > 0 ? '#dc2626' : '#6b7280'};">${expired}</td>
+           </tr>
+           <tr>
+             <td style="padding:6px 0;color:#374151;">Missing COI entirely</td>
+             <td style="padding:6px 0;text-align:right;font-weight:600;color:${noCoi > 0 ? '#dc2626' : '#6b7280'};">${noCoi}</td>
+           </tr>
+         </table>
+       </div>
+
+       ${urgentSection}
+
+       <div style="margin-top:32px;text-align:center;">
+         <a href="https://app.proofcoi.com" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
+           Review Compliance Dashboard
+         </a>
+       </div>
+
+       <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 16px;" />
+       <p style="font-size:12px;color:#9ca3af;text-align:center;">
+         Powered by <a href="https://proofcoi.com" style="color:#6b7280;text-decoration:none;font-weight:500;">Proof</a> &mdash;
+         <a href="https://proofcoi.com" style="color:#3b82f6;text-decoration:none;">proofcoi.com</a>
+       </p>
+     </div>`
+  );
+}
+
 module.exports = {
   sendEmail,
   sendUploadRequestEmail,
   sendUploadNotificationEmail,
   sendRejectionEmail,
   sendExpirationReminderEmail,
+  sendWeeklySummaryEmail,
 };

@@ -1,6 +1,6 @@
 const { CronJob } = require('cron');
 const { v4: uuidv4 } = require('uuid');
-const { sendExpirationReminderEmail } = require('./email');
+const { sendExpirationReminderEmail, sendWeeklySummaryEmail } = require('./email');
 const { updateVendorStatus } = require('./compliance');
 
 function startExpirationCron(prisma) {
@@ -134,4 +134,139 @@ function startTokenRefreshCron(prisma) {
   console.log('[Cron] Token refresh job scheduled (Sundays at midnight)');
 }
 
-module.exports = { startExpirationCron, startTokenRefreshCron };
+function startWeeklySummaryCron(prisma) {
+  // Run every Monday at 8 AM
+  const job = new CronJob('0 8 * * 1', async () => {
+    console.log('[Cron] Running weekly compliance summary...');
+
+    try {
+      const orgs = await prisma.organization.findMany({
+        include: {
+          users: {
+            where: { role: 'ADMIN' },
+            select: { email: true, firstName: true },
+          },
+        },
+      });
+
+      for (const org of orgs) {
+        // Find admin to send to
+        const admin = org.users[0];
+        if (!admin) {
+          console.log(`[Cron] Skipping org "${org.name}" — no admin user`);
+          continue;
+        }
+
+        // Get all vendors for this org
+        const vendors = await prisma.vendor.findMany({
+          where: { orgId: org.id, deletedAt: null },
+          include: {
+            cois: {
+              where: { status: 'APPROVED' },
+              orderBy: { submittedAt: 'desc' },
+              take: 1,
+            },
+          },
+        });
+
+        // Skip orgs with no vendors
+        if (vendors.length === 0) {
+          console.log(`[Cron] Skipping org "${org.name}" — no vendors`);
+          continue;
+        }
+
+        const now = new Date();
+        let compliant = 0;
+        let expiringSoon = 0;
+        let expired = 0;
+        let noCoi = 0;
+        const urgentList = [];
+
+        for (const vendor of vendors) {
+          if (vendor.cois.length === 0) {
+            noCoi++;
+            continue;
+          }
+
+          const latestCoi = vendor.cois[0];
+          const expirationDates = [
+            latestCoi.glExpirationDate,
+            latestCoi.wcExpirationDate,
+            latestCoi.umbExpirationDate,
+            latestCoi.autoExpirationDate,
+          ].filter(Boolean);
+
+          if (expirationDates.length === 0) {
+            noCoi++;
+            continue;
+          }
+
+          const earliestExpiration = expirationDates.reduce(
+            (min, d) => (d < min ? d : min),
+            expirationDates[0]
+          );
+
+          const daysUntil = Math.ceil((earliestExpiration - now) / (1000 * 60 * 60 * 24));
+
+          if (daysUntil < 0) {
+            expired++;
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpiration, daysUntil });
+          } else if (daysUntil <= 30) {
+            expiringSoon++;
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpiration, daysUntil });
+          } else {
+            compliant++;
+          }
+        }
+
+        // Sort by most urgent (most negative / lowest daysUntil first), take top 5
+        urgentList.sort((a, b) => a.daysUntil - b.daysUntil);
+        const urgentVendors = urgentList.slice(0, 5);
+
+        const summary = {
+          totalVendors: vendors.length,
+          compliant,
+          expiringSoon,
+          expired,
+          noCoi,
+          urgentVendors,
+        };
+
+        try {
+          await sendWeeklySummaryEmail(admin.email, org.name, summary);
+
+          await prisma.notificationLog.create({
+            data: {
+              orgId: org.id,
+              type: 'WEEKLY_SUMMARY',
+              recipientEmail: admin.email,
+              status: 'SENT',
+            },
+          });
+
+          console.log(`[Cron] Weekly summary sent to ${admin.email} for org "${org.name}" (${vendors.length} vendors, ${expired} expired, ${expiringSoon} expiring)`);
+        } catch (err) {
+          console.error(`[Cron] Failed to send weekly summary for org "${org.name}":`, err.message);
+
+          await prisma.notificationLog.create({
+            data: {
+              orgId: org.id,
+              type: 'WEEKLY_SUMMARY',
+              recipientEmail: admin.email,
+              status: 'FAILED',
+            },
+          }).catch(() => {});
+        }
+      }
+
+      console.log('[Cron] Weekly compliance summary complete');
+    } catch (err) {
+      console.error('[Cron] Weekly summary job failed:', err);
+    }
+  });
+
+  job.start();
+  console.log('[Cron] Weekly summary job scheduled (Mondays at 8 AM)');
+}
+
+module.exports = { startExpirationCron, startTokenRefreshCron, startWeeklySummaryCron };
