@@ -33,7 +33,8 @@ export default function Signup() {
           <p className="text-gray-500 mt-2">COI Management</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow-sm border">
-          <h2 className="text-xl font-semibold mb-6">Create your account</h2>
+          <h2 className="text-xl font-semibold mb-1">Create your account</h2>
+          <p className="text-sm text-gray-500 mb-6">You'll be the admin for your organization. You can invite team members later.</p>
           {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>

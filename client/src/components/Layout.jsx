@@ -69,7 +69,12 @@ export default function Layout({ children }) {
           })}
         </nav>
         <div className="p-4 border-t border-gray-800">
-          <p className="text-sm text-gray-400 truncate">{user?.email}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-gray-400 truncate">{user?.email}</p>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-300 flex-shrink-0">
+              {user?.role === 'ADMIN' ? 'Admin' : 'Member'}
+            </span>
+          </div>
           <button
             onClick={logout}
             className="text-sm text-gray-400 hover:text-white mt-2"
