@@ -97,7 +97,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl border p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold">Expiring Soon</h2>
-            <Link to="/reports" className="text-sm text-blue-600 hover:underline">View report</Link>
+            <Link to="/cois" className="text-sm text-blue-600 hover:underline">View all COIs</Link>
           </div>
           {expiring.length === 0 ? (
             <p className="text-gray-500 text-sm">No COIs expiring in the next 30 days</p>

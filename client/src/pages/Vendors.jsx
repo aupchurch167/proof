@@ -138,7 +138,7 @@ export default function Vendors() {
           )}
           {canDelete && someSelected && (
             <button onClick={() => setShowDeleteModal(true)}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium">
+              className="text-red-600 underline text-sm font-medium hover:text-red-800 px-2 py-2">
               Delete Selected ({selected.size})
             </button>
           )}

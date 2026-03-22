@@ -17,6 +17,13 @@ const coverageTypeLabels = {
   OTHER: 'Other',
 };
 
+const dateFieldMap = {
+  glExpiration: 'glExpirationDate',
+  wcExpiration: 'wcExpirationDate',
+  umbExpiration: 'umbExpirationDate',
+  submission: 'submittedAt',
+};
+
 function formatCurrency(cents) {
   if (!cents) return '—';
   return `$${(cents / 100).toLocaleString()}`;
@@ -41,9 +48,11 @@ export default function Cois() {
   const [expiringWithin, setExpiringWithin] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [dateFilterBy, setDateFilterBy] = useState('glExpiration');
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('');
   const [sortDir, setSortDir] = useState('asc');
+  const [exportingPdfs, setExportingPdfs] = useState(false);
 
   useEffect(() => {
     let url = '/cois?';
@@ -94,10 +103,11 @@ export default function Cois() {
     }
 
     if (dateFrom || dateTo) {
+      const field = dateFieldMap[dateFilterBy];
       result = result.filter(c => {
-        const s = soonestExpiration(c);
-        if (!s) return false;
-        const d = new Date(s);
+        const val = c[field];
+        if (!val) return false;
+        const d = new Date(val);
         if (dateFrom && d < new Date(dateFrom)) return false;
         if (dateTo && d > new Date(dateTo)) return false;
         return true;
@@ -117,12 +127,83 @@ export default function Cois() {
     }
 
     return result;
-  }, [cois, search, coverageFilter, expiringWithin, dateFrom, dateTo, sortField, sortDir]);
+  }, [cois, search, coverageFilter, expiringWithin, dateFrom, dateTo, dateFilterBy, sortField, sortDir]);
+
+  const exportCsv = () => {
+    const headers = ['Vendor', 'Status', 'Coverage Type', 'GL Coverage', 'GL Expires', 'WC Coverage', 'WC Expires', 'Umbrella Coverage', 'Umbrella Expires', 'Auto Coverage', 'Auto Expires', 'Submitted'];
+    const rows = filtered.map(c => [
+      c.vendor?.name,
+      c.status,
+      c.coverageType || '',
+      c.glCoverageAmount ? (c.glCoverageAmount / 100) : '',
+      c.glExpirationDate ? new Date(c.glExpirationDate).toLocaleDateString() : '',
+      c.wcCoverageAmount ? (c.wcCoverageAmount / 100) : '',
+      c.wcExpirationDate ? new Date(c.wcExpirationDate).toLocaleDateString() : '',
+      c.umbCoverageAmount ? (c.umbCoverageAmount / 100) : '',
+      c.umbExpirationDate ? new Date(c.umbExpirationDate).toLocaleDateString() : '',
+      c.autoCoverageAmount ? (c.autoCoverageAmount / 100) : '',
+      c.autoExpirationDate ? new Date(c.autoExpirationDate).toLocaleDateString() : '',
+      new Date(c.submittedAt).toLocaleDateString(),
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `coi-report-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportPdfs = async () => {
+    const coiIds = filtered.filter(c => c.pdfPath).map(c => c.id);
+    if (coiIds.length === 0) {
+      alert('No COIs with PDF files in the current results.');
+      return;
+    }
+    setExportingPdfs(true);
+    try {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch('/api/reports/export-pdfs', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ coiIds }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Export failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `coi-export-${new Date().toISOString().split('T')[0]}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Failed to export PDFs: ' + err.message);
+    } finally {
+      setExportingPdfs(false);
+    }
+  };
 
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h1 className="text-2xl font-bold">Certificates of Insurance</h1>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button onClick={exportPdfs} disabled={filtered.length === 0 || exportingPdfs}
+            className="border border-blue-600 text-blue-600 px-4 py-2.5 sm:py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium text-center">
+            {exportingPdfs ? 'Merging...' : 'Export PDFs'}
+          </button>
+          <button onClick={exportCsv} disabled={filtered.length === 0}
+            className="bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium text-center">
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -159,6 +240,16 @@ export default function Cois() {
           </select>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Filter Dates By</label>
+            <select value={dateFilterBy} onChange={(e) => setDateFilterBy(e.target.value)}
+              className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
+              <option value="glExpiration">GL Expiration</option>
+              <option value="wcExpiration">WC Expiration</option>
+              <option value="umbExpiration">Umbrella Expiration</option>
+              <option value="submission">Submission Date</option>
+            </select>
+          </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <label className="text-sm text-gray-600 whitespace-nowrap">From</label>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
@@ -171,7 +262,7 @@ export default function Cois() {
           </div>
           {(search || statusFilter || coverageFilter || expiringWithin || dateFrom || dateTo) && (
             <button
-              onClick={() => { setSearch(''); setStatusFilter(''); setCoverageFilter(''); setExpiringWithin(''); setDateFrom(''); setDateTo(''); }}
+              onClick={() => { setSearch(''); setStatusFilter(''); setCoverageFilter(''); setExpiringWithin(''); setDateFrom(''); setDateTo(''); setDateFilterBy('glExpiration'); }}
               className="text-sm text-gray-500 hover:text-gray-700 whitespace-nowrap">
               Clear filters
             </button>
@@ -185,6 +276,8 @@ export default function Cois() {
         <div className="text-center py-12 text-gray-500">No COIs found</div>
       ) : (
         <>
+          <p className="text-sm text-gray-500 mb-4">{filtered.length} COI(s) found</p>
+
           {/* Desktop table */}
           <div className="hidden md:block bg-white rounded-xl border overflow-x-auto">
             <table className="w-full text-sm">

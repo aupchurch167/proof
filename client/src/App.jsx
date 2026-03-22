@@ -10,7 +10,7 @@ import Cois from './pages/Cois';
 import CoiDetail from './pages/CoiDetail';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
-import Reports from './pages/Reports';
+
 import Portal from './pages/Portal';
 import Import from './pages/Import';
 import AcceptInvite from './pages/AcceptInvite';
@@ -49,7 +49,7 @@ export default function App() {
                 <Route path="/cois/:id" element={<CoiDetail />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/users" element={<AdminRoute><Users /></AdminRoute>} />
-                <Route path="/reports" element={<Reports />} />
+
                 <Route path="/import" element={<Import />} />
               </Routes>
             </Layout>
