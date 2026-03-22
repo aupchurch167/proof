@@ -18,10 +18,10 @@ const coverageTypeLabels = {
 };
 
 const dateFieldMap = {
-  glExpiration: 'glExpirationDate',
-  wcExpiration: 'wcExpirationDate',
-  umbExpiration: 'umbExpirationDate',
-  submission: 'submittedAt',
+  glActive: 'glExpirationDate',
+  wcActive: 'wcExpirationDate',
+  umbActive: 'umbExpirationDate',
+  anyActive: null,
 };
 
 function formatCurrency(cents) {
@@ -48,7 +48,7 @@ export default function Cois() {
   const [expiringWithin, setExpiringWithin] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [dateFilterBy, setDateFilterBy] = useState('glExpiration');
+  const [dateFilterBy, setDateFilterBy] = useState('glActive');
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('');
   const [sortDir, setSortDir] = useState('asc');
@@ -105,11 +105,19 @@ export default function Cois() {
     if (dateFrom || dateTo) {
       const field = dateFieldMap[dateFilterBy];
       result = result.filter(c => {
+        if (dateFilterBy === 'anyActive') {
+          const expirations = [c.glExpirationDate, c.wcExpirationDate, c.umbExpirationDate, c.autoExpirationDate].filter(Boolean);
+          if (expirations.length === 0) return false;
+          return expirations.some(val => {
+            const d = new Date(val);
+            if (dateFrom && d < new Date(dateFrom)) return false;
+            return true;
+          });
+        }
         const val = c[field];
         if (!val) return false;
         const d = new Date(val);
         if (dateFrom && d < new Date(dateFrom)) return false;
-        if (dateTo && d > new Date(dateTo)) return false;
         return true;
       });
     }
@@ -239,17 +247,15 @@ export default function Cois() {
             <option value="90">90 days</option>
           </select>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Filter Dates By</label>
-            <select value={dateFilterBy} onChange={(e) => setDateFilterBy(e.target.value)}
-              className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
-              <option value="glExpiration">GL Expiration</option>
-              <option value="wcExpiration">WC Expiration</option>
-              <option value="umbExpiration">Umbrella Expiration</option>
-              <option value="submission">Submission Date</option>
-            </select>
-          </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <label className="text-sm font-medium text-gray-600 whitespace-nowrap">Active Coverage:</label>
+          <select value={dateFilterBy} onChange={(e) => setDateFilterBy(e.target.value)}
+            className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
+            <option value="glActive">GL Coverage Active</option>
+            <option value="wcActive">WC Coverage Active</option>
+            <option value="umbActive">Umbrella Coverage Active</option>
+            <option value="anyActive">Any Coverage Active</option>
+          </select>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <label className="text-sm text-gray-600 whitespace-nowrap">From</label>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
@@ -262,7 +268,7 @@ export default function Cois() {
           </div>
           {(search || statusFilter || coverageFilter || expiringWithin || dateFrom || dateTo) && (
             <button
-              onClick={() => { setSearch(''); setStatusFilter(''); setCoverageFilter(''); setExpiringWithin(''); setDateFrom(''); setDateTo(''); setDateFilterBy('glExpiration'); }}
+              onClick={() => { setSearch(''); setStatusFilter(''); setCoverageFilter(''); setExpiringWithin(''); setDateFrom(''); setDateTo(''); setDateFilterBy('glActive'); }}
               className="text-sm text-gray-500 hover:text-gray-700 whitespace-nowrap">
               Clear filters
             </button>
