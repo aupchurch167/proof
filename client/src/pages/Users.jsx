@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../utils/api';
 
@@ -63,8 +64,21 @@ export default function Users() {
 
   return (
     <div className="max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Settings</h1>
+
+      <div className="flex border-b mb-6">
+        <Link to="/settings"
+          className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
+          General
+        </Link>
+        <Link to="/settings/users"
+          className="px-4 py-2.5 text-sm font-medium border-b-2 border-blue-600 text-blue-600">
+          Users
+        </Link>
+      </div>
+
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">User Management</h1>
+        <h2 className="text-lg font-semibold">User Management</h2>
         <button onClick={() => setShowInvite(!showInvite)}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
           Invite User
