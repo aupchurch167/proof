@@ -50,6 +50,9 @@ const schemas = {
 
 function validate(schemaName) {
   return (req, res, next) => {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Request body is required (Content-Type must be application/json)' });
+    }
     const schema = schemas[schemaName];
     const result = schema.safeParse(req.body);
     if (!result.success) {
