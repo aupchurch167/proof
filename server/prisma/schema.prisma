@@ -9,6 +9,7 @@ datasource db {
 
 enum UserRole {
   ADMIN
+  MEMBER
   REVIEWER
   VIEWER
 }
@@ -101,6 +102,7 @@ model User {
   firstName    String
   lastName     String
   role         UserRole @default(ADMIN)
+  inviteToken  String?  @unique
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

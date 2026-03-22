@@ -74,7 +74,7 @@ export default function CoiDetail() {
     }
   };
 
-  const canReview = (user?.role === 'ADMIN' || user?.role === 'REVIEWER') && coi?.status === 'PENDING_REVIEW';
+  const canReview = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role) && coi?.status === 'PENDING_REVIEW';
 
   if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
   if (!coi) return <div className="text-center py-12 text-gray-500">COI not found</div>;
@@ -246,7 +246,7 @@ export default function CoiDetail() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-2 sm:gap-3">
-        {(user?.role === 'ADMIN' || user?.role === 'REVIEWER') && !editing && (
+        {['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role) && !editing && (
           <button onClick={() => setEditing(true)}
             className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50">Edit Data</button>
         )}
@@ -264,7 +264,7 @@ export default function CoiDetail() {
               className="bg-red-600 text-white px-4 py-2.5 rounded-lg text-sm hover:bg-red-700">Reject</button>
           </>
         )}
-        {user?.role === 'ADMIN' && !editing && (
+        {['ADMIN', 'MEMBER'].includes(user?.role) && !editing && (
           <button onClick={() => setShowDeleteModal(true)}
             className="text-red-600 hover:underline text-sm py-2.5">Delete COI</button>
         )}

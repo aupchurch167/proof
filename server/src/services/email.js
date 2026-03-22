@@ -209,6 +209,22 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
   );
 }
 
+async function sendInviteEmail(to, orgName, inviteUrl) {
+  await sendEmail(
+    to,
+    `You've been invited to join ${orgName} on Proof`,
+    `<h2>You're Invited!</h2>
+     <p>You've been invited to join <strong>${orgName}</strong> on Proof, a COI management platform.</p>
+     <p>Click the link below to set up your account:</p>
+     <p><a href="${inviteUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Accept Invitation</a></p>
+     <p>This link is unique to you. If you didn't expect this invitation, you can safely ignore this email.</p>
+     <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 16px;" />
+     <p style="font-size:12px;color:#9ca3af;text-align:center;">
+       Powered by <a href="https://proofcoi.com" style="color:#6b7280;text-decoration:none;font-weight:500;">Proof</a>
+     </p>`
+  );
+}
+
 module.exports = {
   sendEmail,
   sendUploadRequestEmail,
@@ -216,4 +232,5 @@ module.exports = {
   sendRejectionEmail,
   sendExpirationReminderEmail,
   sendWeeklySummaryEmail,
+  sendInviteEmail,
 };

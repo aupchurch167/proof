@@ -122,8 +122,8 @@ export default function Vendors() {
     }
   };
 
-  const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
-  const isAdmin = user?.role === 'ADMIN';
+  const canManage = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
+  const canDelete = ['ADMIN', 'MEMBER'].includes(user?.role);
 
   return (
     <div>
@@ -136,7 +136,7 @@ export default function Vendors() {
               {requestingBulk ? 'Sending...' : `Request COI (${selected.size})`}
             </button>
           )}
-          {isAdmin && someSelected && (
+          {canDelete && someSelected && (
             <button onClick={() => setShowDeleteModal(true)}
               className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium">
               Delete Selected ({selected.size})
@@ -224,7 +224,7 @@ export default function Vendors() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
-                  {isAdmin && (
+                  {canDelete && (
                     <th className="px-4 py-3 w-10">
                       <input type="checkbox" checked={allSelected} onChange={toggleAll}
                         className="rounded border-gray-300 cursor-pointer" />
@@ -240,7 +240,7 @@ export default function Vendors() {
               <tbody>
                 {vendors.map((vendor) => (
                   <tr key={vendor.id} className={`border-b last:border-0 hover:bg-gray-50 ${selected.has(vendor.id) ? 'bg-red-50' : ''}`}>
-                    {isAdmin && (
+                    {canDelete && (
                       <td className="px-4 py-4">
                         <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
                           className="rounded border-gray-300 cursor-pointer" />
@@ -278,7 +278,7 @@ export default function Vendors() {
 
           {/* Mobile card list */}
           <div className="md:hidden space-y-3">
-            {isAdmin && (
+            {canDelete && (
               <div className="flex items-center gap-2 px-1">
                 <input type="checkbox" checked={allSelected} onChange={toggleAll}
                   className="rounded border-gray-300 cursor-pointer w-5 h-5" />
@@ -288,7 +288,7 @@ export default function Vendors() {
             {vendors.map((vendor) => (
               <div key={vendor.id} className={`bg-white rounded-xl border p-4 ${selected.has(vendor.id) ? 'border-red-300 bg-red-50' : ''}`}>
                 <div className="flex items-start gap-3">
-                  {isAdmin && (
+                  {canDelete && (
                     <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
                       className="rounded border-gray-300 cursor-pointer w-5 h-5 mt-0.5 flex-shrink-0" />
                   )}

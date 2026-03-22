@@ -168,6 +168,86 @@ router.get('/me', authenticate, async (req, res) => {
   }
 });
 
+// POST /api/auth/accept-invite — accept an invitation and set up account
+router.post('/accept-invite', async (req, res) => {
+  try {
+    const { token, firstName, lastName, password } = req.body;
+
+    if (!token || !firstName || !lastName || !password) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { inviteToken: token },
+      include: { organization: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Invalid or expired invite link' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        firstName,
+        lastName,
+        passwordHash,
+        inviteToken: null,
+      },
+      include: { organization: true },
+    });
+
+    const accessToken = generateAccessToken(updated);
+    const refreshToken = generateRefreshToken(updated);
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: {
+        id: updated.id,
+        email: updated.email,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        role: updated.role,
+        orgId: updated.orgId,
+        orgName: updated.organization.name,
+      },
+    });
+  } catch (err) {
+    console.error('Accept invite error:', err);
+    res.status(500).json({ error: 'Failed to accept invitation' });
+  }
+});
+
+// GET /api/auth/invite-info — get info about an invite token
+router.get('/invite-info', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(400).json({ error: 'Token required' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { inviteToken: token },
+      include: { organization: { select: { name: true } } },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Invalid or expired invite link' });
+    }
+
+    res.json({ email: user.email, orgName: user.organization.name });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get invite info' });
+  }
+});
+
 // PUT /api/auth/me — update own profile
 router.put('/me', authenticate, async (req, res) => {
   try {

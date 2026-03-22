@@ -78,7 +78,7 @@ router.get('/:id/pdf', authenticate, async (req, res) => {
 });
 
 // PUT /api/cois/:id
-router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId },
@@ -122,7 +122,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res
 });
 
 // POST /api/cois/:id/approve
-router.post('/:id/approve', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
+router.post('/:id/approve', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId },
@@ -152,7 +152,7 @@ router.post('/:id/approve', authenticate, authorize('ADMIN', 'REVIEWER'), async 
 });
 
 // DELETE /api/cois/:id
-router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId },
@@ -182,7 +182,7 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/cois/:id/reject
-router.post('/:id/reject', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
+router.post('/:id/reject', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
     const { reason } = req.body;
     if (!reason) {

@@ -58,7 +58,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // POST /api/vendors
-router.post('/', authenticate, authorize('ADMIN', 'REVIEWER'), enforcePlanLimit('vendor'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('vendor'), async (req, res) => {
   try {
     const { name, contactName, email, phone, address } = req.body;
 
@@ -98,7 +98,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // PUT /api/vendors/:id
-router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
     const { name, contactName, email, phone, address } = req.body;
 
@@ -128,7 +128,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res
 });
 
 // DELETE /api/vendors/bulk (soft delete multiple, hard delete COIs first)
-router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
+router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -164,7 +164,7 @@ router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // DELETE /api/vendors/:id (soft delete, hard delete COIs first)
-router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
@@ -202,7 +202,7 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/vendors/:id/coi/upload (admin-authenticated upload)
-router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'REVIEWER'), enforcePlanLimit('coi'), upload.single('pdf'), async (req, res) => {
+router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('coi'), upload.single('pdf'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
@@ -284,7 +284,7 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'REVIEWER'), enf
 });
 
 // POST /api/vendors/:id/request-coi
-router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'REVIEWER'), async (req, res) => {
+router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },

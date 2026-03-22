@@ -48,20 +48,25 @@ export default function Layout({ children }) {
           </button>
         </div>
         <nav className="flex-1 px-4">
-          {nav.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={() => setSidebarOpen(false)}
-              className={`block px-4 py-2.5 rounded-lg mb-1 text-sm transition-colors ${
-                location.pathname === item.path
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-gray-800'
-              }`}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {nav.map((item) => {
+            const isActive = item.path === '/'
+              ? location.pathname === '/'
+              : location.pathname.startsWith(item.path);
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                onClick={() => setSidebarOpen(false)}
+                className={`block px-4 py-2.5 rounded-lg mb-1 text-sm transition-colors ${
+                  isActive
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-800'
+                }`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
         <div className="p-4 border-t border-gray-800">
           <p className="text-sm text-gray-400 truncate">{user?.email}</p>

@@ -53,7 +53,7 @@ router.get('/template/cois', (req, res) => {
 });
 
 // POST /api/import/preview — parse CSV and return headers + preview rows (no import yet)
-router.post('/preview', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single('file'), (req, res) => {
+router.post('/preview', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upload.single('file'), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'CSV file required' });
@@ -79,7 +79,7 @@ router.post('/preview', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
 
 // POST /api/import/vendors — bulk import vendors
 // Expects JSON body: { headerMap: { templateField: csvHeader }, csvData: string }
-router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single('file'), async (req, res) => {
+router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'CSV file required' });
@@ -167,7 +167,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
 });
 
 // POST /api/import/cois — bulk import COIs
-router.post('/cois', authenticate, authorize('ADMIN', 'REVIEWER'), upload.single('file'), async (req, res) => {
+router.post('/cois', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'CSV file required' });

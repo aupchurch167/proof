@@ -9,14 +9,24 @@ import VendorDetail from './pages/VendorDetail';
 import Cois from './pages/Cois';
 import CoiDetail from './pages/CoiDetail';
 import Settings from './pages/Settings';
+import Users from './pages/Users';
 import Reports from './pages/Reports';
 import Portal from './pages/Portal';
 import Import from './pages/Import';
+import AcceptInvite from './pages/AcceptInvite';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
   return user ? children : <Navigate to="/login" />;
+}
+
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
+  if (!user) return <Navigate to="/login" />;
+  if (user.role !== 'ADMIN') return <Navigate to="/" />;
+  return children;
 }
 
 export default function App() {
@@ -25,6 +35,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/portal/:token" element={<Portal />} />
+      <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route
         path="/*"
         element={
@@ -37,6 +48,7 @@ export default function App() {
                 <Route path="/cois" element={<Cois />} />
                 <Route path="/cois/:id" element={<CoiDetail />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/settings/users" element={<AdminRoute><Users /></AdminRoute>} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/import" element={<Import />} />
               </Routes>

@@ -191,8 +191,8 @@ export default function VendorDetail() {
     }
   };
 
-  const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
-  const isAdmin = user?.role === 'ADMIN';
+  const canManage = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
+  const isAdmin = ['ADMIN', 'MEMBER'].includes(user?.role);
 
   if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
   if (!vendor) return <div className="text-center py-12 text-gray-500">Vendor not found</div>;
