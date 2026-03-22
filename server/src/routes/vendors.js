@@ -9,6 +9,8 @@ const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
 const { uploadFile, deleteFile } = require('../services/storage');
+const { validate } = require('../utils/validation');
+const { generateUploadToken } = require('../utils/tokens');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -58,19 +60,21 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // POST /api/vendors
-router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('vendor'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('vendor'), validate('createVendor'), async (req, res) => {
   try {
     const { name, contactName, email, phone, address } = req.body;
-
-    if (!name || !email) {
-      return res.status(400).json({ error: 'Name and email required' });
-    }
 
     const vendor = await prisma.vendor.create({
       data: { orgId: req.user.orgId, name, contactName, email, phone, address },
     });
 
-    res.status(201).json(vendor);
+    // Replace default UUID token with a signed JWT
+    const updated = await prisma.vendor.update({
+      where: { id: vendor.id },
+      data: { uploadToken: generateUploadToken(vendor.id) },
+    });
+
+    res.status(201).json(updated);
   } catch (err) {
     console.error('Create vendor error:', err);
     res.status(500).json({ error: 'Failed to create vendor' });

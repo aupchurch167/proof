@@ -3,9 +3,30 @@ const { PrismaClient } = require('@prisma/client');
 const { authenticate, authorize } = require('../middleware/auth');
 const { updateVendorStatus } = require('../services/compliance');
 const { getSignedUrl, deleteFile } = require('../services/storage');
+const { z } = require('zod');
 
 const router = express.Router();
 const prisma = new PrismaClient();
+
+const coiUpdateSchema = z.object({
+  coverageType: z.string().optional(),
+  glPolicyNumber: z.string().nullable().optional(),
+  glCoverageAmount: z.number().nullable().optional(),
+  glExpirationDate: z.string().nullable().optional(),
+  wcPolicyNumber: z.string().nullable().optional(),
+  wcCoverageAmount: z.number().nullable().optional(),
+  wcExpirationDate: z.string().nullable().optional(),
+  umbPolicyNumber: z.string().nullable().optional(),
+  umbCoverageAmount: z.number().nullable().optional(),
+  umbExpirationDate: z.string().nullable().optional(),
+  autoPolicyNumber: z.string().nullable().optional(),
+  autoCoverageAmount: z.number().nullable().optional(),
+  autoExpirationDate: z.string().nullable().optional(),
+  agentName: z.string().nullable().optional(),
+  agentEmail: z.string().email('Invalid agent email').nullable().optional(),
+  agentPhone: z.string().nullable().optional(),
+  insuranceCompany: z.string().nullable().optional(),
+}).strict();
 
 // GET /api/cois
 router.get('/', authenticate, async (req, res) => {
@@ -80,6 +101,12 @@ router.get('/:id/pdf', authenticate, async (req, res) => {
 // PUT /api/cois/:id
 router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
+    const parseResult = coiUpdateSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      const message = parseResult.error.issues.map(e => e.message).join(', ');
+      return res.status(400).json({ error: message });
+    }
+
     const coi = await prisma.coi.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId },
     });

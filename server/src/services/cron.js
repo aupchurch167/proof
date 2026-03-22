@@ -1,7 +1,7 @@
 const { CronJob } = require('cron');
-const { v4: uuidv4 } = require('uuid');
 const { sendExpirationReminderEmail, sendWeeklySummaryEmail } = require('./email');
 const { updateVendorStatus } = require('./compliance');
+const { generateUploadToken } = require('../utils/tokens');
 
 function startExpirationCron(prisma) {
   // Run daily at 8 AM
@@ -120,7 +120,7 @@ function startTokenRefreshCron(prisma) {
       for (const vendor of vendors) {
         await prisma.vendor.update({
           where: { id: vendor.id },
-          data: { uploadToken: uuidv4() },
+          data: { uploadToken: generateUploadToken(vendor.id) },
         });
       }
 

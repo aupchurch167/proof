@@ -4,18 +4,15 @@ const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
 const { generateAccessToken, generateRefreshToken } = require('../utils/tokens');
 const { authenticate } = require('../middleware/auth');
+const { validate, passwordSchema } = require('../utils/validation');
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 // POST /api/auth/signup
-router.post('/signup', async (req, res) => {
+router.post('/signup', validate('signup'), async (req, res) => {
   try {
     const { orgName, email, password, firstName, lastName, phone, address } = req.body;
-
-    if (!orgName || !email || !password || !firstName || !lastName) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -74,13 +71,9 @@ router.post('/signup', async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', validate('login'), async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
-    }
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -169,17 +162,9 @@ router.get('/me', authenticate, async (req, res) => {
 });
 
 // POST /api/auth/accept-invite — accept an invitation and set up account
-router.post('/accept-invite', async (req, res) => {
+router.post('/accept-invite', validate('acceptInvite'), async (req, res) => {
   try {
     const { token, firstName, lastName, password } = req.body;
-
-    if (!token || !firstName || !lastName || !password) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
 
     const user = await prisma.user.findUnique({
       where: { inviteToken: token },
@@ -273,6 +258,11 @@ router.put('/me', authenticate, async (req, res) => {
     if (newPassword) {
       if (!currentPassword) {
         return res.status(400).json({ error: 'Current password required to set new password' });
+      }
+      const pwResult = passwordSchema.safeParse(newPassword);
+      if (!pwResult.success) {
+        const message = pwResult.error.issues.map(e => e.message).join(', ');
+        return res.status(400).json({ error: message });
       }
       const valid = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!valid) {

@@ -16,4 +16,20 @@ function generateRefreshToken(user) {
   );
 }
 
-module.exports = { generateAccessToken, generateRefreshToken };
+function generateUploadToken(vendorId) {
+  return jwt.sign(
+    { vendorId, purpose: 'upload' },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+}
+
+function verifyUploadToken(token) {
+  const payload = jwt.verify(token, process.env.JWT_SECRET);
+  if (payload.purpose !== 'upload') {
+    throw new Error('Invalid token purpose');
+  }
+  return payload;
+}
+
+module.exports = { generateAccessToken, generateRefreshToken, generateUploadToken, verifyUploadToken };
