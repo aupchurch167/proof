@@ -53,7 +53,9 @@ async function extractCoiData(pdfInput) {
   "agentName": "string or null",
   "agentEmail": "string or null",
   "agentPhone": "string or null",
-  "insuranceCompany": "string or null"
+  "insuranceCompany": "string or null",
+  "certificateHolderName": "string or null",
+  "certificateHolderAddress": "string or null"
 }
 
 Important:
@@ -70,6 +72,8 @@ Important:
 - Look for "Automobile Liability" or "Auto Liability" for auto fields
 - Extract the per-occurrence limit for General Liability, not the aggregate
 - Extract each coverage section's expiration date independently
+- For certificateHolderName, look for the "CERTIFICATE HOLDER" section (usually bottom-left of ACORD forms) and extract the company/entity name
+- For certificateHolderAddress, extract the full address from the certificate holder section
 - Return ONLY the JSON, no markdown formatting or explanation`,
           },
         ],

@@ -26,6 +26,8 @@ const coiUpdateSchema = z.object({
   agentEmail: z.string().email('Invalid agent email').nullable().optional(),
   agentPhone: z.string().nullable().optional(),
   insuranceCompany: z.string().nullable().optional(),
+  certificateHolderName: z.string().nullable().optional(),
+  certificateHolderAddress: z.string().nullable().optional(),
 }).strict();
 
 // GET /api/cois
@@ -64,6 +66,7 @@ router.get('/:id', authenticate, async (req, res) => {
       where: { id: req.params.id, orgId: req.user.orgId },
       include: {
         vendor: true,
+        organization: { select: { name: true } },
         reviewedBy: { select: { id: true, firstName: true, lastName: true } },
       },
     });
@@ -122,6 +125,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
       'umbPolicyNumber', 'umbCoverageAmount', 'umbExpirationDate',
       'autoPolicyNumber', 'autoCoverageAmount', 'autoExpirationDate',
       'agentName', 'agentEmail', 'agentPhone', 'insuranceCompany',
+      'certificateHolderName', 'certificateHolderAddress',
     ];
 
     const data = {};

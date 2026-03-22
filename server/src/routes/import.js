@@ -194,12 +194,16 @@ router.post('/cois', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upl
       ? await prisma.coi.count({ where: { orgId: req.user.orgId } })
       : 0;
 
-    // Load org settings if compliance check requested
+    // Load org settings and name if compliance check requested
     let orgSettings = null;
+    let orgName = null;
     if (runComplianceCheck) {
-      orgSettings = await prisma.organizationSettings.findUnique({
-        where: { orgId: req.user.orgId },
+      const orgData = await prisma.organization.findUnique({
+        where: { id: req.user.orgId },
+        select: { name: true, settings: true },
       });
+      orgSettings = orgData?.settings;
+      orgName = orgData?.name;
     }
 
     const results = { created: 0, skipped: 0, errors: [], flagged: 0 };
@@ -291,7 +295,7 @@ router.post('/cois', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upl
             autoExpirationDate: coiData.autoExpirationDate?.toISOString?.() || getVal(row, 'auto_expiration_date'),
           };
 
-          const flags = checkCompliance(extractedForCheck, orgSettings);
+          const flags = checkCompliance(extractedForCheck, orgSettings, orgName);
           if (flags.length > 0) {
             coiData.complianceFlags = flags;
             results.flagged++;

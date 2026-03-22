@@ -144,7 +144,7 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
     // Check compliance against org requirements
     const settings = vendor.organization.settings;
     const complianceFlags = settings && extractedData
-      ? checkCompliance(extractedData, settings)
+      ? checkCompliance(extractedData, settings, vendor.organization.name)
       : null;
 
     // Create COI record
@@ -176,6 +176,8 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
         agentEmail: extractedData.agentEmail || null,
         agentPhone: extractedData.agentPhone || null,
         insuranceCompany: extractedData.insuranceCompany || null,
+        certificateHolderName: extractedData.certificateHolderName || null,
+        certificateHolderAddress: extractedData.certificateHolderAddress || null,
       });
     }
 

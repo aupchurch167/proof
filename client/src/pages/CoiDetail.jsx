@@ -213,6 +213,46 @@ export default function CoiDetail() {
         ))}
       </div>
 
+      {/* Certificate Holder / Additionally Insured */}
+      <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
+        <h3 className="font-semibold mb-3">Certificate Holder / Additionally Insured</h3>
+        {coi.certificateHolderName ? (
+          <div className="space-y-3">
+            <div className="text-sm">
+              <span className="text-gray-500">Name:</span> {coi.certificateHolderName}
+            </div>
+            {coi.certificateHolderAddress && (
+              <div className="text-sm">
+                <span className="text-gray-500">Address:</span> {coi.certificateHolderAddress}
+              </div>
+            )}
+            {(() => {
+              const orgName = coi.organization?.name;
+              if (!orgName) return null;
+              const holderNorm = coi.certificateHolderName.toLowerCase().trim();
+              const orgNorm = orgName.toLowerCase().trim();
+              const isMatch = holderNorm.includes(orgNorm) || orgNorm.includes(holderNorm);
+              return isMatch ? (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                  ✓ Additionally Insured Verified
+                </span>
+              ) : (
+                <div>
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                    ⚠ Additionally Insured Mismatch
+                  </span>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Expected: {orgName}
+                  </p>
+                </div>
+              );
+            })()}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">Not extracted</p>
+        )}
+      </div>
+
       {/* Agent info */}
       <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
         <h3 className="font-semibold mb-3">Insurance Agent</h3>

@@ -161,6 +161,10 @@ model Coi {
   agentPhone       String?
   insuranceCompany String?
 
+  // Certificate Holder
+  certificateHolderName    String?
+  certificateHolderAddress String?
+
   // Meta
   pdfPath         String
   status          CoiReviewStatus @default(PENDING_REVIEW)

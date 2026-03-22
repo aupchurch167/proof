@@ -236,7 +236,7 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
     // Check compliance against org requirements
     const settings = vendor.organization.settings;
     const complianceFlags = settings && extractedData
-      ? checkCompliance(extractedData, settings)
+      ? checkCompliance(extractedData, settings, vendor.organization.name)
       : null;
 
     // Create COI record
@@ -268,6 +268,8 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
         agentEmail: extractedData.agentEmail || null,
         agentPhone: extractedData.agentPhone || null,
         insuranceCompany: extractedData.insuranceCompany || null,
+        certificateHolderName: extractedData.certificateHolderName || null,
+        certificateHolderAddress: extractedData.certificateHolderAddress || null,
       });
     }
 

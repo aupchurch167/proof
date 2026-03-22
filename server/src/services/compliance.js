@@ -1,4 +1,4 @@
-function checkCompliance(extractedData, settings) {
+function checkCompliance(extractedData, settings, orgName) {
   const flags = [];
 
   const checks = [
@@ -54,13 +54,32 @@ function checkCompliance(extractedData, settings) {
     }
   }
 
+  // Check certificate holder / additionally insured
+  if (orgName && extractedData.certificateHolderName) {
+    const holderNorm = extractedData.certificateHolderName.toLowerCase().trim();
+    const orgNorm = orgName.toLowerCase().trim();
+    const isMatch = holderNorm.includes(orgNorm) || orgNorm.includes(holderNorm);
+    if (!isMatch) {
+      flags.push({
+        type: 'ADDITIONALLY_INSURED_MISMATCH',
+        field: 'certificateHolderName',
+        label: 'Additionally Insured',
+        expected: orgName,
+        actual: extractedData.certificateHolderName,
+        message: `Certificate holder "${extractedData.certificateHolderName}" does not match organization "${orgName}"`,
+      });
+    }
+  }
+
   return flags;
 }
 
 async function updateVendorStatus(prisma, vendorId, orgId) {
-  const settings = await prisma.organizationSettings.findUnique({
-    where: { orgId },
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { name: true, settings: true },
   });
+  const settings = org?.settings;
 
   // Get the latest approved COI
   const latestCoi = await prisma.coi.findFirst({
@@ -106,7 +125,8 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
     wcExpirationDate: latestCoi.wcExpirationDate?.toISOString(),
     umbExpirationDate: latestCoi.umbExpirationDate?.toISOString(),
     autoExpirationDate: latestCoi.autoExpirationDate?.toISOString(),
-  }, settings) : [];
+    certificateHolderName: latestCoi.certificateHolderName,
+  }, settings, org?.name) : [];
 
   let status;
   if (allExpired) {
