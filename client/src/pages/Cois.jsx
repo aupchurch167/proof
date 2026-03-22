@@ -48,7 +48,7 @@ export default function Cois() {
   const [expiringWithin, setExpiringWithin] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [dateFilterBy, setDateFilterBy] = useState('glActive');
+  const [dateFilterBy, setDateFilterBy] = useState('');
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('');
   const [sortDir, setSortDir] = useState('asc');
@@ -102,7 +102,7 @@ export default function Cois() {
       });
     }
 
-    if (dateFrom || dateTo) {
+    if (dateFilterBy && (dateFrom || dateTo)) {
       const field = dateFieldMap[dateFilterBy];
       result = result.filter(c => {
         if (dateFilterBy === 'anyActive') {
@@ -251,6 +251,7 @@ export default function Cois() {
           <label className="text-sm font-medium text-gray-600 whitespace-nowrap">Active Coverage:</label>
           <select value={dateFilterBy} onChange={(e) => setDateFilterBy(e.target.value)}
             className="px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
+            <option value="">All</option>
             <option value="glActive">GL Coverage Active</option>
             <option value="wcActive">WC Coverage Active</option>
             <option value="umbActive">Umbrella Coverage Active</option>
@@ -268,7 +269,7 @@ export default function Cois() {
           </div>
           {(search || statusFilter || coverageFilter || expiringWithin || dateFrom || dateTo) && (
             <button
-              onClick={() => { setSearch(''); setStatusFilter(''); setCoverageFilter(''); setExpiringWithin(''); setDateFrom(''); setDateTo(''); setDateFilterBy('glActive'); }}
+              onClick={() => { setSearch(''); setStatusFilter(''); setCoverageFilter(''); setExpiringWithin(''); setDateFrom(''); setDateTo(''); setDateFilterBy(''); }}
               className="text-sm text-gray-500 hover:text-gray-700 whitespace-nowrap">
               Clear filters
             </button>
