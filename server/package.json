@@ -8,7 +8,8 @@
     "db:migrate": "npx prisma migrate dev",
     "db:generate": "npx prisma generate",
     "db:seed": "node prisma/seed.js",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "jest --runInBand --forceExit --detectOpenHandles"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -31,7 +32,14 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.3.0",
     "nodemon": "^3.1.9",
-    "prisma": "^6.3.0"
+    "prisma": "^6.3.0",
+    "supertest": "^7.2.2"
+  },
+  "jest": {
+    "testMatch": ["**/tests/**/*.test.js"],
+    "testTimeout": 15000
   }
 }
