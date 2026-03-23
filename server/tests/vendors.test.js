@@ -11,6 +11,7 @@ jest.mock('../src/services/email', () => ({
   sendExpirationReminderEmail: jest.fn().mockResolvedValue(undefined),
   sendWeeklySummaryEmail: jest.fn().mockResolvedValue(undefined),
   sendRejectionEmail: jest.fn().mockResolvedValue(undefined),
+  sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../src/services/coiExtractor', () => ({

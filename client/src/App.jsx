@@ -14,6 +14,8 @@ import Users from './pages/Users';
 import Portal from './pages/Portal';
 import Import from './pages/Import';
 import AcceptInvite from './pages/AcceptInvite';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -34,6 +36,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/portal/:token" element={<Portal />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route
