@@ -2,14 +2,13 @@ const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { generateAccessToken, generateRefreshToken } = require('../utils/tokens');
 const { authenticate } = require('../middleware/auth');
 const { validate, passwordSchema } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../services/email');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // POST /api/auth/signup
 router.post('/signup', validate('signup'), async (req, res) => {

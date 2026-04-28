@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { authenticate, authorize } = require('../middleware/auth');
 const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
@@ -13,7 +13,6 @@ const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const upload = multer({
   storage: multer.memoryStorage(),

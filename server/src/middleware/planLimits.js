@@ -1,7 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
-
-const prisma = new PrismaClient();
 
 function enforcePlanLimit(resource) {
   return async (req, res, next) => {

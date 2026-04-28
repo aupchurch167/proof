@@ -1,13 +1,12 @@
 const express = require('express');
 const multer = require('multer');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { authenticate, authorize } = require('../middleware/auth');
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
 const { checkCompliance } = require('../services/compliance');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 // GET /api/import/template/vendors — download vendor CSV template (no auth — static sample data)

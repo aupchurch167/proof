@@ -110,6 +110,8 @@ model User {
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   reviewedCois Coi[]        @relation("ReviewedBy")
+
+  @@index([orgId])
 }
 
 model Vendor {
@@ -129,6 +131,8 @@ model Vendor {
   organization  Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   cois          Coi[]
   notifications NotificationLog[]
+
+  @@index([orgId, deletedAt])
 }
 
 model Coi {
@@ -183,6 +187,10 @@ model Coi {
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   reviewedBy   User?        @relation("ReviewedBy", fields: [reviewedById], references: [id])
   notifications NotificationLog[]
+
+  @@index([orgId, status])
+  @@index([vendorId, status])
+  @@index([orgId, submittedAt])
 }
 
 model NotificationLog {
@@ -198,4 +206,7 @@ model NotificationLog {
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   vendor       Vendor?      @relation(fields: [vendorId], references: [id])
   coi          Coi?         @relation(fields: [coiId], references: [id])
+
+  @@index([orgId])
+  @@index([vendorId, type, sentAt])
 }

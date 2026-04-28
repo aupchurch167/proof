@@ -1,12 +1,11 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { authenticate, authorize } = require('../middleware/auth');
 const { updateVendorStatus } = require('../services/compliance');
 const { getSignedUrl, deleteFile } = require('../services/storage');
 const { z } = require('zod');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const coiUpdateSchema = z.object({
   coverageType: z.string().optional(),

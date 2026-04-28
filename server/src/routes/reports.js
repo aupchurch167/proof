@@ -1,11 +1,10 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { PDFDocument } = require('pdf-lib');
 const { authenticate } = require('../middleware/auth');
 const { downloadFile } = require('../services/storage');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // GET /api/reports/compliance
 router.get('/compliance', authenticate, async (req, res) => {

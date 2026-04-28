@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const morgan = require('morgan');
 const path = require('path');
 
 const authRoutes = require('./routes/auth');
@@ -18,12 +19,14 @@ const importRoutes = require('./routes/import');
 
 const app = express();
 
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
   origin: ['https://app.proofcoi.com', 'http://localhost:5173'],
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // Rate limiting
 const authLimiter = rateLimit({
@@ -67,7 +70,15 @@ app.use('/api/organization', organizationRoutes);
 app.use('/api/import', importRoutes);
 
 // Health check
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', async (req, res) => {
+  try {
+    const prisma = require('./lib/prisma');
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', db: 'connected' });
+  } catch (err) {
+    res.status(503).json({ status: 'error', db: 'disconnected' });
+  }
+});
 
 // SPA fallback in production
 if (process.env.NODE_ENV === 'production') {
@@ -79,7 +90,11 @@ if (process.env.NODE_ENV === 'production') {
 // Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production'
+      ? 'Internal server error'
+      : err.message || 'Internal server error',
+  });
 });
 
 module.exports = app;
