@@ -1,4 +1,5 @@
 import { useState, useRef, useId } from 'react';
+import { useToast } from '../contexts/ToastContext';
 
 export default function PdfUploadZone({
   onUpload,
@@ -14,6 +15,7 @@ export default function PdfUploadZone({
   buttonLabel = 'Upload COI',
   loadingMessage,
 }) {
+  const toast = useToast();
   const [files, setFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
@@ -36,7 +38,7 @@ export default function PdfUploadZone({
     for (const file of newFiles) {
       const err = validateFile(file);
       if (err) {
-        alert(err);
+        toast.error(err);
       } else {
         validFiles.push(file);
       }

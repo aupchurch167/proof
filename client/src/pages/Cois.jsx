@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
+import { useToast } from '../contexts/ToastContext';
 
 const statusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -41,6 +42,7 @@ function soonestExpiration(coi) {
 }
 
 export default function Cois() {
+  const toast = useToast();
   const [cois, setCois] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
@@ -166,7 +168,7 @@ export default function Cois() {
   const exportPdfs = async () => {
     const coiIds = filtered.filter(c => c.pdfPath).map(c => c.id);
     if (coiIds.length === 0) {
-      alert('No COIs with PDF files in the current results.');
+      toast.warning('No COIs with PDF files in the current results.');
       return;
     }
     setExportingPdfs(true);
@@ -192,7 +194,7 @@ export default function Cois() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Failed to export PDFs: ' + err.message);
+      toast.error('Failed to export PDFs: ' + err.message);
     } finally {
       setExportingPdfs(false);
     }

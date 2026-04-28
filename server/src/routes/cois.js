@@ -4,6 +4,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { updateVendorStatus } = require('../services/compliance');
 const { getSignedUrl, deleteFile } = require('../services/storage');
 const { z } = require('zod');
+const { logAudit } = require('../services/audit');
 
 const router = express.Router();
 
@@ -173,6 +174,7 @@ router.post('/:id/approve', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER
     });
 
     await updateVendorStatus(prisma, coi.vendorId, coi.orgId);
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'approve', entity: 'coi', entityId: coi.id, ipAddress: req.ip });
 
     res.json(updated);
   } catch (err) {
@@ -203,6 +205,7 @@ router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, re
     });
 
     await updateVendorStatus(prisma, coi.vendorId, coi.orgId);
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'delete', entity: 'coi', entityId: req.params.id, ipAddress: req.ip });
 
     res.json({ message: 'COI deleted' });
   } catch (err) {
@@ -239,6 +242,7 @@ router.post('/:id/reject', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'
     });
 
     await updateVendorStatus(prisma, coi.vendorId, coi.orgId);
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'reject', entity: 'coi', entityId: coi.id, details: { reason }, ipAddress: req.ip });
 
     // Send rejection notification
     const { sendRejectionEmail } = require('../services/email');

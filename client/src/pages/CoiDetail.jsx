@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 
 function formatCurrency(cents) {
@@ -17,6 +18,7 @@ function formatDate(d) {
 export default function CoiDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const [coi, setCoi] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -39,8 +41,9 @@ export default function CoiDetail() {
       const updated = await api.put(`/cois/${id}`, form);
       setCoi({ ...coi, ...updated });
       setEditing(false);
+      toast.success('Changes saved');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -48,19 +51,21 @@ export default function CoiDetail() {
     try {
       const updated = await api.post(`/cois/${id}/approve`);
       setCoi({ ...coi, ...updated, status: 'APPROVED' });
+      toast.success('COI approved');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
   const handleReject = async () => {
-    if (!rejectReason.trim()) return alert('Please provide a reason');
+    if (!rejectReason.trim()) return toast.warning('Please provide a reason');
     try {
       const updated = await api.post(`/cois/${id}/reject`, { reason: rejectReason });
       setCoi({ ...coi, ...updated, status: 'REJECTED' });
       setShowReject(false);
+      toast.success('COI rejected');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 

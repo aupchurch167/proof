@@ -11,6 +11,7 @@ const { checkCompliance, updateVendorStatus } = require('../services/compliance'
 const { uploadFile, deleteFile } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
+const { logAudit } = require('../services/audit');
 
 const router = express.Router();
 
@@ -73,6 +74,7 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
       data: { uploadToken: generateUploadToken(vendor.id) },
     });
 
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'create', entity: 'vendor', entityId: updated.id, details: { name, email }, ipAddress: req.ip });
     res.status(201).json(updated);
   } catch (err) {
     console.error('Create vendor error:', err);
@@ -198,6 +200,7 @@ router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, re
       data: { deletedAt: new Date() },
     });
 
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'delete', entity: 'vendor', entityId: req.params.id, ipAddress: req.ip });
     res.json({ message: 'Vendor deleted' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete vendor' });

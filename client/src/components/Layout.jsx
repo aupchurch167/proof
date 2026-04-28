@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import EmailVerificationBanner from './EmailVerificationBanner';
 
 const nav = [
   { path: '/', label: 'Dashboard' },
@@ -98,6 +99,7 @@ export default function Layout({ children }) {
           <h1 className="text-lg font-bold">Proof</h1>
         </header>
 
+        {user && !user.emailVerified && <EmailVerificationBanner />}
         <main className="flex-1 p-4 sm:p-6 md:p-8 overflow-auto">{children}</main>
       </div>
     </div>

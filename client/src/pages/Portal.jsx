@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+import { useToast } from '../contexts/ToastContext';
 
 const API_BASE = '/api';
 
 export default function Portal() {
   const { token } = useParams();
+  const toast = useToast();
   const [vendor, setVendor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -47,7 +49,7 @@ export default function Portal() {
       setVendor(updated);
       setEditingInfo(false);
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 

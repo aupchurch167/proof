@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import PdfUploadZone from '../components/PdfUploadZone';
 
@@ -123,6 +124,7 @@ function CoverageSummary({ cois }) {
 export default function VendorDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const [vendor, setVendor] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -147,8 +149,9 @@ export default function VendorDetail() {
       const updated = await api.put(`/vendors/${id}`, form);
       setVendor({ ...vendor, ...updated });
       setEditing(false);
+      toast.success('Vendor updated');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -183,9 +186,9 @@ export default function VendorDetail() {
     setRequesting(true);
     try {
       await api.post(`/vendors/${id}/request-coi`);
-      alert('COI request email sent!');
+      toast.success('COI request email sent!');
     } catch (err) {
-      alert('Failed to send request: ' + err.message);
+      toast.error('Failed to send request: ' + err.message);
     } finally {
       setRequesting(false);
     }

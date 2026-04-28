@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../utils/api';
+import { useToast } from '../contexts/ToastContext';
 
 const statusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -70,6 +71,7 @@ function MobileCoiCard({ coi, hasExpiringColumn }) {
 }
 
 export default function Reports() {
+  const toast = useToast();
   const [cois, setCois] = useState([]);
   const [loading, setLoading] = useState(false);
   const [startDate, setStartDate] = useState('');
@@ -128,7 +130,7 @@ export default function Reports() {
   const exportPdfs = async () => {
     const coiIds = cois.filter(c => c.pdfPath).map(c => c.id);
     if (coiIds.length === 0) {
-      alert('No COIs with PDF files in the current results.');
+      toast.warning('No COIs with PDF files in the current results.');
       return;
     }
     setExportingPdfs(true);
@@ -154,7 +156,7 @@ export default function Reports() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Failed to export PDFs: ' + err.message);
+      toast.error('Failed to export PDFs: ' + err.message);
     } finally {
       setExportingPdfs(false);
     }

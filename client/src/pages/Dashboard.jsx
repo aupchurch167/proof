@@ -17,6 +17,7 @@ export default function Dashboard() {
   const [pendingCois, setPendingCois] = useState([]);
   const [expiring, setExpiring] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -29,11 +30,12 @@ export default function Dashboard() {
         setPendingCois(p);
         setExpiring(e);
       })
-      .catch(console.error)
+      .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
+  if (error) return <div className="text-center py-12"><p className="text-red-500 mb-2">Failed to load dashboard</p><button onClick={() => window.location.reload()} className="text-blue-600 hover:underline text-sm">Retry</button></div>;
 
   return (
     <div>

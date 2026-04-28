@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = require('../lib/prisma');
 const { authenticate, authorize } = require('../middleware/auth');
 const { sendInviteEmail } = require('../services/email');
+const { logAudit } = require('../services/audit');
 
 const router = express.Router();
 
@@ -100,6 +101,7 @@ router.put('/:id/role', authenticate, authorize('ADMIN'), async (req, res) => {
       data: { role },
       select: { id: true, email: true, firstName: true, lastName: true, role: true },
     });
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'change_role', entity: 'user', entityId: req.params.id, details: { newRole: role }, ipAddress: req.ip });
 
     res.json(updated);
   } catch (err) {
@@ -134,6 +136,7 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
     }
 
     await prisma.user.delete({ where: { id: req.params.id } });
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'remove', entity: 'user', entityId: req.params.id, details: { email: targetUser.email }, ipAddress: req.ip });
 
     res.json({ message: 'User removed' });
   } catch (err) {

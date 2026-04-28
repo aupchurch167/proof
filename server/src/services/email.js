@@ -251,6 +251,32 @@ async function sendPasswordResetEmail(to, resetUrl) {
   );
 }
 
+async function sendEmailVerificationEmail(to, verifyUrl) {
+  await sendEmail(
+    to,
+    'Verify your Proof email address',
+    `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;">
+       <h2 style="margin:0 0 16px;color:#111827;">Verify Your Email</h2>
+       <p style="color:#374151;font-size:14px;line-height:1.6;">
+         Thanks for signing up for Proof! Please verify your email address by clicking the button below:
+       </p>
+       <div style="text-align:center;margin:32px 0;">
+         <a href="${verifyUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
+           Verify Email
+         </a>
+       </div>
+       <p style="color:#6b7280;font-size:13px;line-height:1.6;">
+         If you didn't create a Proof account, you can safely ignore this email.
+       </p>
+       <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 16px;" />
+       <p style="font-size:12px;color:#9ca3af;text-align:center;">
+         Powered by <a href="https://proofcoi.com" style="color:#6b7280;text-decoration:none;font-weight:500;">Proof</a> &mdash; COI management for general contractors.
+         <a href="https://proofcoi.com" style="color:#3b82f6;text-decoration:none;">Learn more at proofcoi.com</a>
+       </p>
+     </div>`
+  );
+}
+
 module.exports = {
   sendEmail,
   sendUploadRequestEmail,
@@ -260,4 +286,5 @@ module.exports = {
   sendWeeklySummaryEmail,
   sendInviteEmail,
   sendPasswordResetEmail,
+  sendEmailVerificationEmail,
 };

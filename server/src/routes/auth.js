@@ -6,7 +6,7 @@ const prisma = require('../lib/prisma');
 const { generateAccessToken, generateRefreshToken } = require('../utils/tokens');
 const { authenticate } = require('../middleware/auth');
 const { validate, passwordSchema } = require('../utils/validation');
-const { sendPasswordResetEmail } = require('../services/email');
+const { sendPasswordResetEmail, sendEmailVerificationEmail } = require('../services/email');
 
 const router = express.Router();
 
@@ -21,6 +21,7 @@ router.post('/signup', validate('signup'), async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const emailVerifyToken = crypto.randomBytes(32).toString('hex');
 
     const result = await prisma.$transaction(async (tx) => {
       const org = await tx.organization.create({
@@ -43,11 +44,15 @@ router.post('/signup', validate('signup'), async (req, res) => {
           firstName,
           lastName,
           role: 'ADMIN',
+          emailVerifyToken,
         },
       });
 
       return { org, user };
     });
+
+    const verifyUrl = `${process.env.APP_URL || 'https://app.proofcoi.com'}/verify-email?token=${emailVerifyToken}`;
+    await sendEmailVerificationEmail(email, verifyUrl).catch(console.error);
 
     const accessToken = generateAccessToken(result.user);
     const refreshToken = generateRefreshToken(result.user);
@@ -63,6 +68,7 @@ router.post('/signup', validate('signup'), async (req, res) => {
         role: result.user.role,
         orgId: result.user.orgId,
         orgName: result.org.name,
+        emailVerified: false,
       },
     });
   } catch (err) {
@@ -104,6 +110,7 @@ router.post('/login', validate('login'), async (req, res) => {
         role: user.role,
         orgId: user.orgId,
         orgName: user.organization.name,
+        emailVerified: user.emailVerified,
       },
     });
   } catch (err) {
@@ -156,6 +163,7 @@ router.get('/me', authenticate, async (req, res) => {
       role: user.role,
       orgId: user.orgId,
       orgName: user.organization.name,
+      emailVerified: user.emailVerified,
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get user' });
@@ -352,6 +360,59 @@ router.post('/reset-password', async (req, res) => {
   } catch (err) {
     console.error('Reset password error:', err);
     res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+// GET /api/auth/verify-email
+router.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(400).json({ error: 'Verification token is required' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { emailVerifyToken: token } });
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired verification link' });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerified: true, emailVerifyToken: null },
+    });
+
+    res.json({ message: 'Email verified successfully' });
+  } catch (err) {
+    console.error('Verify email error:', err);
+    res.status(500).json({ error: 'Failed to verify email' });
+  }
+});
+
+// POST /api/auth/resend-verification
+router.post('/resend-verification', authenticate, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.emailVerified) {
+      return res.json({ message: 'Email already verified' });
+    }
+
+    const emailVerifyToken = crypto.randomBytes(32).toString('hex');
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerifyToken },
+    });
+
+    const verifyUrl = `${process.env.APP_URL || 'https://app.proofcoi.com'}/verify-email?token=${emailVerifyToken}`;
+    await sendEmailVerificationEmail(user.email, verifyUrl);
+
+    res.json({ message: 'Verification email sent' });
+  } catch (err) {
+    console.error('Resend verification error:', err);
+    res.status(500).json({ error: 'Failed to send verification email' });
   }
 });
 

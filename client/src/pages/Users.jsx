@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { api } from '../utils/api';
 
 const roleLabels = { ADMIN: 'Admin', MEMBER: 'Member', REVIEWER: 'Reviewer', VIEWER: 'Viewer' };
@@ -8,6 +9,7 @@ const roleColors = { ADMIN: 'bg-purple-100 text-purple-800', MEMBER: 'bg-blue-10
 
 export default function Users() {
   const { user: currentUser } = useAuth();
+  const toast = useToast();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
@@ -46,7 +48,7 @@ export default function Users() {
       await api.put(`/users/${userId}/role`, { role: newRole });
       fetchUsers();
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -56,7 +58,7 @@ export default function Users() {
       await api.delete(`/users/${userId}`);
       fetchUsers();
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -134,6 +136,9 @@ export default function Users() {
             </tr>
           </thead>
           <tbody>
+            {users.length === 0 && (
+              <tr><td colSpan={4} className="text-center py-8 text-gray-400">No team members yet. Invite someone to get started.</td></tr>
+            )}
             {users.map((u) => {
               const isPending = !!u.inviteToken;
               const displayName = isPending

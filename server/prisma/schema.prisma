@@ -73,6 +73,7 @@ model Organization {
   vendors       Vendor[]
   cois          Coi[]
   notifications NotificationLog[]
+  auditLogs     AuditLog[]
 }
 
 model OrganizationSettings {
@@ -101,8 +102,10 @@ model User {
   passwordHash String
   firstName    String
   lastName     String
-  role         UserRole @default(ADMIN)
-  inviteToken  String?  @unique
+  role             UserRole @default(ADMIN)
+  emailVerified    Boolean  @default(false)
+  emailVerifyToken String?  @unique
+  inviteToken      String?  @unique
   resetToken       String?  @unique
   resetTokenExpiry DateTime?
   createdAt    DateTime @default(now())
@@ -209,4 +212,21 @@ model NotificationLog {
 
   @@index([orgId])
   @@index([vendorId, type, sentAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  orgId     String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([orgId, entity, action])
 }

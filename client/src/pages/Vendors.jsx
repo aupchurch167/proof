@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 
 const statusColors = {
@@ -24,6 +25,7 @@ const statusLabels = {
 
 export default function Vendors() {
   const { user } = useAuth();
+  const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -69,9 +71,9 @@ export default function Vendors() {
   const handleRequestCoi = async (vendorId) => {
     try {
       await api.post(`/vendors/${vendorId}/request-coi`);
-      alert('COI request sent!');
+      toast.success('COI request sent!');
     } catch (err) {
-      alert('Failed to send request: ' + err.message);
+      toast.error('Failed to send request: ' + err.message);
     }
   };
 
@@ -107,7 +109,11 @@ export default function Vendors() {
       }
     }
     setRequestingBulk(false);
-    alert(`COI requests sent: ${sent}${failed > 0 ? `, ${failed} failed` : ''}`);
+    if (failed > 0) {
+      toast.warning(`COI requests sent: ${sent}, ${failed} failed`);
+    } else {
+      toast.success(`COI requests sent: ${sent}`);
+    }
   };
 
   const handleBulkDelete = async () => {
@@ -239,7 +245,7 @@ export default function Vendors() {
               </thead>
               <tbody>
                 {vendors.map((vendor) => (
-                  <tr key={vendor.id} className={`border-b last:border-0 hover:bg-gray-50 ${selected.has(vendor.id) ? 'bg-red-50' : ''}`}>
+                  <tr key={vendor.id} className={`border-b last:border-0 hover:bg-gray-50 ${selected.has(vendor.id) ? 'bg-blue-50' : ''}`}>
                     {canDelete && (
                       <td className="px-4 py-4">
                         <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
@@ -286,7 +292,7 @@ export default function Vendors() {
               </div>
             )}
             {vendors.map((vendor) => (
-              <div key={vendor.id} className={`bg-white rounded-xl border p-4 ${selected.has(vendor.id) ? 'border-red-300 bg-red-50' : ''}`}>
+              <div key={vendor.id} className={`bg-white rounded-xl border p-4 ${selected.has(vendor.id) ? 'border-blue-300 bg-blue-50' : ''}`}>
                 <div className="flex items-start gap-3">
                   {canDelete && (
                     <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
