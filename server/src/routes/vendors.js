@@ -90,7 +90,7 @@ async function mirrorCreateToCore(vendor) {
   if (!core.isEnabled()) return;
   try {
     const result = await core.createVendor(vendor);
-    const coreId = result && (result.id || (result.vendor && result.vendor.id));
+    const coreId = result && result.data && result.data.id;
     if (coreId) {
       await prisma.vendor.update({ where: { id: vendor.id }, data: { coreId } });
     } else {

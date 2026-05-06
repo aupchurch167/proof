@@ -52,7 +52,7 @@ async function main() {
 
     try {
       const result = await core.createVendor(vendor);
-      const coreId = result && (result.id || (result.vendor && result.vendor.id));
+      const coreId = result && result.data && result.data.id;
       if (!coreId) {
         console.warn(`[Backfill] No id returned for vendor ${vendor.id}; not linking`);
         failed++;

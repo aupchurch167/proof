@@ -87,7 +87,7 @@ async function createVendor(vendor) {
 async function updateVendor(coreId, vendor) {
   if (!isEnabled()) return null;
   const slug = CORE_ORG_SLUG();
-  return coreFetch('PUT', `/api/v1/orgs/${slug}/vendors/${coreId}`, vendorToCorePayload(vendor));
+  return coreFetch('PATCH', `/api/v1/orgs/${slug}/vendors/${coreId}`, vendorToCorePayload(vendor));
 }
 
 async function listVendors() {
