@@ -12,6 +12,7 @@ const { uploadFile, deleteFile } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
 const { logAudit } = require('../services/audit');
+const core = require('../lib/core');
 
 const router = express.Router();
 
@@ -75,12 +76,43 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
     });
 
     logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'create', entity: 'vendor', entityId: updated.id, details: { name, email }, ipAddress: req.ip });
+
+    mirrorCreateToCore(updated);
+
     res.status(201).json(updated);
   } catch (err) {
     console.error('Create vendor error:', err);
     res.status(500).json({ error: 'Failed to create vendor' });
   }
 });
+
+async function mirrorCreateToCore(vendor) {
+  if (!core.isEnabled()) return;
+  try {
+    const result = await core.createVendor(vendor);
+    const coreId = result && (result.id || (result.vendor && result.vendor.id));
+    if (coreId) {
+      await prisma.vendor.update({ where: { id: vendor.id }, data: { coreId } });
+    } else {
+      console.warn('[Core] createVendor returned no id; vendor not linked', { vendorId: vendor.id });
+    }
+  } catch (err) {
+    console.error('[Core] Failed to mirror vendor create:', err.status, err.message, err.body || '');
+  }
+}
+
+async function mirrorUpdateToCore(vendor) {
+  if (!core.isEnabled()) return;
+  if (!vendor.coreId) {
+    // No link yet — treat as a create so we don't drop the update.
+    return mirrorCreateToCore(vendor);
+  }
+  try {
+    await core.updateVendor(vendor.coreId, vendor);
+  } catch (err) {
+    console.error('[Core] Failed to mirror vendor update:', err.status, err.message, err.body || '');
+  }
+}
 
 // GET /api/vendors/:id
 router.get('/:id', authenticate, async (req, res) => {
@@ -125,6 +157,8 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
         ...(address !== undefined && { address }),
       },
     });
+
+    mirrorUpdateToCore(updated);
 
     res.json(updated);
   } catch (err) {

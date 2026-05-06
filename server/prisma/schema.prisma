@@ -127,6 +127,7 @@ model Vendor {
   address     String?
   uploadToken String    @unique @default(uuid())
   coiStatus   CoiStatus @default(NO_COI)
+  coreId      String?   @unique
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
