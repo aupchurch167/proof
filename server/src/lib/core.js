@@ -84,16 +84,23 @@ async function createVendor(vendor) {
   return coreFetch('POST', `/api/v1/orgs/${slug}/vendors`, vendorToCorePayload(vendor));
 }
 
-async function updateVendor(coreId, vendor) {
+async function updateVendor(coreId, partial) {
   if (!isEnabled()) return null;
   const slug = CORE_ORG_SLUG();
-  return coreFetch('PATCH', `/api/v1/orgs/${slug}/vendors/${coreId}`, vendorToCorePayload(vendor));
+  return coreFetch('PATCH', `/api/v1/orgs/${slug}/vendors/${coreId}`, partial);
 }
 
 async function listVendors() {
   if (!isEnabled()) return null;
   const slug = CORE_ORG_SLUG();
   return coreFetch('GET', `/api/v1/orgs/${slug}/vendors`);
+}
+
+// Format a Core API error for logs. Core returns { error: { code, message } }.
+function formatError(err) {
+  const code = err.body && err.body.error && err.body.error.code;
+  const msg = (err.body && err.body.error && err.body.error.message) || err.message;
+  return `${err.status || ''} ${code || ''} ${msg}`.trim();
 }
 
 module.exports = {
@@ -103,4 +110,5 @@ module.exports = {
   listVendors,
   vendorToCorePayload,
   mapComplianceStatus,
+  formatError,
 };

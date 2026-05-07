@@ -97,7 +97,7 @@ async function mirrorCreateToCore(vendor) {
       console.warn('[Core] createVendor returned no id; vendor not linked', { vendorId: vendor.id });
     }
   } catch (err) {
-    console.error('[Core] Failed to mirror vendor create:', err.status, err.message, err.body || '');
+    console.error('[Core] Failed to mirror vendor create:', core.formatError(err));
   }
 }
 
@@ -108,9 +108,18 @@ async function mirrorUpdateToCore(vendor) {
     return mirrorCreateToCore(vendor);
   }
   try {
-    await core.updateVendor(vendor.coreId, vendor);
+    await core.updateVendor(vendor.coreId, core.vendorToCorePayload(vendor));
   } catch (err) {
-    console.error('[Core] Failed to mirror vendor update:', err.status, err.message, err.body || '');
+    console.error('[Core] Failed to mirror vendor update:', core.formatError(err));
+  }
+}
+
+async function mirrorDeleteToCore(coreId) {
+  if (!core.isEnabled() || !coreId) return;
+  try {
+    await core.updateVendor(coreId, { status: 'inactive' });
+  } catch (err) {
+    console.error('[Core] Failed to mirror vendor delete:', core.formatError(err));
   }
 }
 
@@ -174,6 +183,12 @@ router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, r
       return res.status(400).json({ error: 'ids must be a non-empty array' });
     }
 
+    // Capture coreIds before soft-delete so we can mirror to Core after.
+    const linked = await prisma.vendor.findMany({
+      where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null, coreId: { not: null } },
+      select: { coreId: true },
+    });
+
     // Delete COI files from Spaces, then delete records
     const coisToDelete = await prisma.coi.findMany({
       where: { vendorId: { in: ids }, orgId: req.user.orgId },
@@ -194,6 +209,8 @@ router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, r
       where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
+
+    for (const v of linked) mirrorDeleteToCore(v.coreId);
 
     res.json({ message: `${count} vendor(s) deleted` });
   } catch (err) {
@@ -233,6 +250,8 @@ router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, re
       where: { id: req.params.id },
       data: { deletedAt: new Date() },
     });
+
+    mirrorDeleteToCore(vendor.coreId);
 
     logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'delete', entity: 'vendor', entityId: req.params.id, ipAddress: req.ip });
     res.json({ message: 'Vendor deleted' });

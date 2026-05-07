@@ -178,7 +178,7 @@ async function mirrorImportedVendorToCore(vendor) {
       console.warn('[Core] import: createVendor returned no id; vendor not linked', { vendorId: vendor.id });
     }
   } catch (err) {
-    console.error('[Core] import: failed to mirror vendor:', err.status, err.message, err.body || '');
+    console.error('[Core] import: failed to mirror vendor:', core.formatError(err));
   }
 }
 
