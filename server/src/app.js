@@ -21,8 +21,14 @@ const app = express();
 
 app.set('trust proxy', 1);
 app.use(helmet());
+const allowedOrigins = [
+  'https://app.proofcoi.com',
+  'https://proof.up.railway.app',
+  'http://localhost:5173',
+  ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) : []),
+];
 app.use(cors({
-  origin: ['https://app.proofcoi.com', 'http://localhost:5173'],
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));

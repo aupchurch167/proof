@@ -1,4 +1,8 @@
-const API_BASE = '/api';
+// In production the frontend is a separate service from the API, so set
+// VITE_API_BASE_URL to the backend's public origin at build time. Locally it's
+// unset and calls stay same-origin (proxied by Vite / served by the API).
+const API_ROOT = import.meta.env.VITE_API_BASE_URL || '';
+export const API_BASE = `${API_ROOT}/api`;
 
 async function request(path, options = {}) {
   const token = localStorage.getItem('accessToken');

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../utils/api';
+import { api, API_BASE } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 
 const statusColors = {
@@ -174,7 +174,7 @@ export default function Cois() {
     setExportingPdfs(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const res = await fetch('/api/reports/export-pdfs', {
+      const res = await fetch(`${API_BASE}/reports/export-pdfs`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
