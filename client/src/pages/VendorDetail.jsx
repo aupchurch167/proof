@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import PdfUploadZone from '../components/PdfUploadZone';
+import ReplyList from '../components/ReplyList';
 
 const reviewStatusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -153,6 +154,7 @@ export default function VendorDetail() {
   const toast = useToast();
   const navigate = useNavigate();
   const [vendor, setVendor] = useState(null);
+  const [replies, setReplies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
@@ -168,6 +170,9 @@ export default function VendorDetail() {
       .then((v) => { setVendor(v); setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '' }); })
       .catch(console.error)
       .finally(() => setLoading(false));
+    api.get(`/replies/vendor/${id}`)
+      .then(setReplies)
+      .catch(() => {}); // non-fatal if replies endpoint hiccups
   }, [id]);
 
   const handleSave = async () => {
@@ -444,6 +449,18 @@ export default function VendorDetail() {
           )}
         </div>
       )}
+
+      <div className="flex justify-between items-center mt-8 mb-4">
+        <h2 className="text-lg font-semibold">Replies</h2>
+        {replies.length > 0 && (
+          <span className="text-xs text-gray-500">{replies.length}</span>
+        )}
+      </div>
+      <ReplyList
+        replies={replies}
+        showVendor={false}
+        emptyText="No replies yet. When this vendor replies to a Proof email, it'll show here."
+      />
 
       <DeleteConfirmationModal
         isOpen={showDeleteModal}

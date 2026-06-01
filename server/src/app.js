@@ -18,6 +18,7 @@ const organizationRoutes = require('./routes/organization');
 const importRoutes = require('./routes/import');
 const applyRoutes = require('./routes/apply');
 const webhookRoutes = require('./routes/webhooks');
+const repliesRoutes = require('./routes/replies');
 
 const app = express();
 
@@ -89,6 +90,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/apply', applyRoutes);
+app.use('/api/replies', repliesRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {
