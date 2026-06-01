@@ -26,9 +26,9 @@ function getBucket() {
  * Upload a file buffer to DigitalOcean Spaces.
  * Returns the object key (filename) stored in Spaces.
  */
-async function uploadFile(buffer, filename, mimetype) {
+async function uploadFile(buffer, filename, mimetype, prefix = 'cois') {
   const s3 = getClient();
-  const key = `cois/${filename}`;
+  const key = `${prefix}/${filename}`;
 
   await s3.send(new PutObjectCommand({
     Bucket: getBucket(),
