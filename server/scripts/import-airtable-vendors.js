@@ -34,6 +34,10 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const path = require('path');
 const { PrismaClient } = require('@prisma/client');
 const { uploadFile } = require('../src/services/storage');
+const { generateUploadToken } = require('../src/utils/tokens');
+
+// Quick UUID check so we only re-issue tokens that aren't already signed JWTs.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // === Edit if your Airtable column names differ from MAC's base =============
 const FIELD_MAP = {
@@ -180,11 +184,20 @@ async function importOne(record, orgId) {
   });
 
   if (existing) {
+    // Heal vendors that still carry the default UUID upload token. The portal
+    // verifies the token as a signed JWT, so a UUID always reads as expired.
+    if (UUID_RE.test(existing.uploadToken || '')) {
+      data.uploadToken = generateUploadToken(existing.id);
+    }
     await prisma.vendor.update({ where: { id: existing.id }, data });
     return { status: 'updated', vendorId: existing.id };
   }
 
   const created = await prisma.vendor.create({ data: { ...data, orgId } });
+  await prisma.vendor.update({
+    where: { id: created.id },
+    data: { uploadToken: generateUploadToken(created.id) },
+  });
   return { status: 'created', vendorId: created.id };
 }
 

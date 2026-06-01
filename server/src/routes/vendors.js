@@ -373,7 +373,14 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
-    const portalUrl = `${process.env.APP_URL}/portal/${vendor.uploadToken}`;
+    // Rotate the upload token on every request. Catches vendors created via
+    // the import scripts (where uploadToken is still the default UUID and the
+    // portal can't jwt.verify() it) and also limits the lifetime of any
+    // previously-shared link.
+    const uploadToken = generateUploadToken(vendor.id);
+    await prisma.vendor.update({ where: { id: vendor.id }, data: { uploadToken } });
+
+    const portalUrl = `${process.env.APP_URL}/portal/${uploadToken}`;
 
     await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization);
 
