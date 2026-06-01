@@ -43,6 +43,32 @@ function ExpirationBadge({ dateStr }) {
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status]}`}>{labels[status]}</span>;
 }
 
+function DocSlot({ label, url, canManage, onUpload }) {
+  const inputId = `doc-${label.replace(/\s+/g, '-')}`;
+  return (
+    <div className="flex items-center gap-2">
+      {url ? (
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          className="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+          {label}
+        </a>
+      ) : (
+        <span className="text-sm text-gray-400 px-3 py-1.5">No {label}</span>
+      )}
+      {canManage && (
+        <>
+          <label htmlFor={inputId}
+            className="text-xs text-blue-600 hover:underline cursor-pointer">
+            {url ? 'Replace' : 'Upload'}
+          </label>
+          <input id={inputId} type="file" accept="application/pdf,image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ''; }} />
+        </>
+      )}
+    </div>
+  );
+}
+
 function CoverageBreakdown({ coi }) {
   return (
     <div className="grid grid-cols-2 gap-2 mt-3">
@@ -165,6 +191,19 @@ export default function VendorDetail() {
     }
   };
 
+  const handleUploadDoc = async (field, file) => {
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append(field, file);
+      const updated = await api.upload(`/vendors/${id}/documents`, fd);
+      setVendor((v) => ({ ...v, ...updated }));
+      toast.success(`${field === 'w9' ? 'W9' : 'Master Agreement'} uploaded`);
+    } catch (err) {
+      toast.error('Upload failed: ' + (err.message || 'unknown error'));
+    }
+  };
+
   const handleUploadCoi = async (file) => {
     setUploading(true);
     setUploadError('');
@@ -273,41 +312,37 @@ export default function VendorDetail() {
           </div>
         </div>
 
-        {(vendor.trade || vendor.notes || vendor.w9Url || vendor.masterAgreementUrl) && (
-          <div className="mt-4 pt-4 border-t space-y-3">
-            {vendor.trade && (
-              <div>
-                <p className="text-sm text-gray-500">Trade</p>
-                <p className="text-sm">{vendor.trade}</p>
-              </div>
-            )}
-            {vendor.notes && (
-              <div>
-                <p className="text-sm text-gray-500">Notes</p>
-                <p className="text-sm whitespace-pre-wrap">{vendor.notes}</p>
-              </div>
-            )}
-            {(vendor.w9Url || vendor.masterAgreementUrl) && (
-              <div>
-                <p className="text-sm text-gray-500">Documents</p>
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {vendor.w9Url && (
-                    <a href={vendor.w9Url} target="_blank" rel="noopener noreferrer"
-                      className="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
-                      W9
-                    </a>
-                  )}
-                  {vendor.masterAgreementUrl && (
-                    <a href={vendor.masterAgreementUrl} target="_blank" rel="noopener noreferrer"
-                      className="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
-                      Master Agreement
-                    </a>
-                  )}
-                </div>
-              </div>
-            )}
+        <div className="mt-4 pt-4 border-t space-y-3">
+          {vendor.trade && (
+            <div>
+              <p className="text-sm text-gray-500">Trade</p>
+              <p className="text-sm">{vendor.trade}</p>
+            </div>
+          )}
+          {vendor.notes && (
+            <div>
+              <p className="text-sm text-gray-500">Notes</p>
+              <p className="text-sm whitespace-pre-wrap">{vendor.notes}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-sm text-gray-500 mb-1">Documents</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <DocSlot
+                label="W9"
+                url={vendor.w9Url}
+                canManage={canManage}
+                onUpload={(file) => handleUploadDoc('w9', file)}
+              />
+              <DocSlot
+                label="Master Agreement"
+                url={vendor.masterAgreementUrl}
+                canManage={canManage}
+                onUpload={(file) => handleUploadDoc('masterAgreement', file)}
+              />
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Coverage Summary */}

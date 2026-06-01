@@ -28,6 +28,18 @@ const upload = multer({
   },
 });
 
+// Documents (W9 / Master Agreement) accept PDFs and common image types since
+// Airtable historically stored W9s as phone photos (JPG/PNG/HEIC).
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = ['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/heif'];
+    if (ok.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only PDF or image files are allowed'));
+  },
+});
+
 // GET /api/vendors
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -381,5 +393,51 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
     res.status(500).json({ error: 'Failed to send COI request' });
   }
 });
+
+// POST /api/vendors/:id/documents — upload W9 and/or Master Agreement
+router.post(
+  '/:id/documents',
+  authenticate,
+  authorize('ADMIN', 'MEMBER', 'REVIEWER'),
+  docUpload.fields([
+    { name: 'w9', maxCount: 1 },
+    { name: 'masterAgreement', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const vendor = await prisma.vendor.findFirst({
+        where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
+      });
+      if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+      const w9 = req.files?.w9?.[0];
+      const ma = req.files?.masterAgreement?.[0];
+      if (!w9 && !ma) return res.status(400).json({ error: 'No files provided' });
+
+      const data = {};
+      if (w9) {
+        const key = `${uuidv4()}${path.extname(w9.originalname) || ''}`;
+        data.w9Path = await uploadFile(w9.buffer, key, w9.mimetype, 'w9s');
+      }
+      if (ma) {
+        const key = `${uuidv4()}${path.extname(ma.originalname) || ''}`;
+        data.masterAgreementPath = await uploadFile(ma.buffer, key, ma.mimetype, 'master-agreements');
+      }
+
+      const updated = await prisma.vendor.update({ where: { id: vendor.id }, data });
+
+      const [w9Url, masterAgreementUrl] = await Promise.all([
+        updated.w9Path ? getSignedUrl(updated.w9Path).catch(() => null) : null,
+        updated.masterAgreementPath ? getSignedUrl(updated.masterAgreementPath).catch(() => null) : null,
+      ]);
+
+      logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'update', entity: 'vendor', entityId: updated.id, details: { uploaded: Object.keys(data) }, ipAddress: req.ip });
+      res.json({ ...updated, w9Url, masterAgreementUrl });
+    } catch (err) {
+      console.error('Document upload error:', err);
+      res.status(500).json({ error: 'Failed to upload documents' });
+    }
+  }
+);
 
 module.exports = router;

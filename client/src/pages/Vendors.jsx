@@ -31,6 +31,8 @@ export default function Vendors() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
+  const [w9File, setW9File] = useState(null);
+  const [maFile, setMaFile] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [error, setError] = useState('');
@@ -59,8 +61,16 @@ export default function Vendors() {
     e.preventDefault();
     setError('');
     try {
-      await api.post('/vendors', form);
+      const created = await api.post('/vendors', form);
+      if (w9File || maFile) {
+        const fd = new FormData();
+        if (w9File) fd.append('w9', w9File);
+        if (maFile) fd.append('masterAgreement', maFile);
+        await api.upload(`/vendors/${created.id}/documents`, fd);
+      }
       setForm({ name: '', contactName: '', email: '', phone: '', address: '' });
+      setW9File(null);
+      setMaFile(null);
       setShowAdd(false);
       fetchVendors();
     } catch (err) {
@@ -187,10 +197,22 @@ export default function Vendors() {
               <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
                 className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">W9 <span className="text-gray-400 font-normal">(PDF or image)</span></label>
+              <input type="file" accept="application/pdf,image/*"
+                onChange={(e) => setW9File(e.target.files?.[0] || null)}
+                className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm file:cursor-pointer hover:file:bg-gray-50" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Master Agreement <span className="text-gray-400 font-normal">(PDF or image)</span></label>
+              <input type="file" accept="application/pdf,image/*"
+                onChange={(e) => setMaFile(e.target.files?.[0] || null)}
+                className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm file:cursor-pointer hover:file:bg-gray-50" />
+            </div>
           </div>
           <div className="flex gap-2">
             <button type="submit" className="bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm">Save</button>
-            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
+            <button type="button" onClick={() => { setShowAdd(false); setW9File(null); setMaFile(null); }} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
           </div>
         </form>
       )}
