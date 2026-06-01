@@ -272,6 +272,42 @@ export default function VendorDetail() {
               className="text-sm text-blue-600 hover:underline whitespace-nowrap py-1">Copy</button>
           </div>
         </div>
+
+        {(vendor.trade || vendor.notes || vendor.w9Url || vendor.masterAgreementUrl) && (
+          <div className="mt-4 pt-4 border-t space-y-3">
+            {vendor.trade && (
+              <div>
+                <p className="text-sm text-gray-500">Trade</p>
+                <p className="text-sm">{vendor.trade}</p>
+              </div>
+            )}
+            {vendor.notes && (
+              <div>
+                <p className="text-sm text-gray-500">Notes</p>
+                <p className="text-sm whitespace-pre-wrap">{vendor.notes}</p>
+              </div>
+            )}
+            {(vendor.w9Url || vendor.masterAgreementUrl) && (
+              <div>
+                <p className="text-sm text-gray-500">Documents</p>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {vendor.w9Url && (
+                    <a href={vendor.w9Url} target="_blank" rel="noopener noreferrer"
+                      className="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+                      W9
+                    </a>
+                  )}
+                  {vendor.masterAgreementUrl && (
+                    <a href={vendor.masterAgreementUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+                      Master Agreement
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Coverage Summary */}

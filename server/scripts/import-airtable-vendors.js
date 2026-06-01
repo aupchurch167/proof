@@ -169,8 +169,14 @@ async function importOne(record, orgId) {
   if (w9Att) data.w9Path = await uploadAttachment(w9Att, 'w9s');
   if (maAtt) data.masterAgreementPath = await uploadAttachment(maAtt, 'master-agreements');
 
+  data.airtableRecordId = record.id;
+
   const existing = await prisma.vendor.findFirst({
-    where: { orgId, email, deletedAt: null },
+    where: {
+      orgId,
+      deletedAt: null,
+      OR: [{ airtableRecordId: record.id }, { email }],
+    },
   });
 
   if (existing) {

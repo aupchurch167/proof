@@ -8,7 +8,7 @@ const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
-const { uploadFile, deleteFile } = require('../services/storage');
+const { uploadFile, deleteFile, getSignedUrl } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
 const { logAudit } = require('../services/audit');
@@ -137,7 +137,12 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
-    res.json(vendor);
+    const [w9Url, masterAgreementUrl] = await Promise.all([
+      vendor.w9Path ? getSignedUrl(vendor.w9Path).catch(() => null) : null,
+      vendor.masterAgreementPath ? getSignedUrl(vendor.masterAgreementPath).catch(() => null) : null,
+    ]);
+
+    res.json({ ...vendor, w9Url, masterAgreementUrl });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get vendor' });
   }
