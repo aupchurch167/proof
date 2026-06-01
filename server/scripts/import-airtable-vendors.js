@@ -59,6 +59,20 @@ function composeAddress(fields) {
   return [street, cityStateZip].filter(Boolean).join(', ') || null;
 }
 
+function slugify(s) {
+  return s.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'vendor';
+}
+
+// Proof requires an email on every Vendor. For Airtable rows with no email,
+// synthesize one from the name + Airtable record id so the row still imports
+// and the user can fix it later in Proof's UI.
+function synthesizeEmail(name, recordId) {
+  return `${slugify(name)}-${recordId}@no-email.proofcoi.local`;
+}
+
 const prisma = new PrismaClient();
 const dryRun = process.argv.includes('--dry-run');
 
@@ -119,11 +133,14 @@ async function uploadAttachment(att, prefix) {
 async function importOne(record, orgId) {
   const f = record.fields;
   const name = f[FIELD_MAP.name]?.trim();
-  const email = f[FIELD_MAP.email]?.trim();
+  const rawEmail = f[FIELD_MAP.email]?.trim();
 
-  if (!name || !email) {
-    return { status: 'skipped', reason: 'missing name or email' };
+  if (!name) {
+    return { status: 'skipped', reason: 'missing name' };
   }
+
+  const email = rawEmail || synthesizeEmail(name, record.id);
+  const syntheticEmail = !rawEmail;
 
   const baseData = {
     name,
@@ -142,6 +159,7 @@ async function importOne(record, orgId) {
     return {
       status: 'dry',
       data: baseData,
+      syntheticEmail,
       w9: w9Att ? w9Att.filename : null,
       masterAgreement: maAtt ? maAtt.filename : null,
     };
@@ -182,7 +200,10 @@ async function main() {
       if (result.status === 'created')  { created++; console.log(`  + ${r.fields[FIELD_MAP.name]} -> ${result.vendorId}`); }
       if (result.status === 'updated')  { updated++; console.log(`  ~ ${r.fields[FIELD_MAP.name]} -> ${result.vendorId}`); }
       if (result.status === 'skipped')  { skipped++; console.log(`  - skipped: ${result.reason}`); }
-      if (result.status === 'dry')      { console.log(`  ? ${result.data.name} | w9=${result.w9 || '-'} ma=${result.masterAgreement || '-'}`); }
+      if (result.status === 'dry')      {
+        const tag = result.syntheticEmail ? ' [synthetic email]' : '';
+        console.log(`  ? ${result.data.name}${tag} | w9=${result.w9 || '-'} ma=${result.masterAgreement || '-'}`);
+      }
     } catch (err) {
       failed++;
       console.error(`  ! ${r.fields[FIELD_MAP.name] || r.id}: ${err.message}`);
