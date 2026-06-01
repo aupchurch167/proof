@@ -17,6 +17,7 @@ const notificationsRoutes = require('./routes/notifications');
 const organizationRoutes = require('./routes/organization');
 const importRoutes = require('./routes/import');
 const applyRoutes = require('./routes/apply');
+const webhookRoutes = require('./routes/webhooks');
 
 const app = express();
 
@@ -32,6 +33,18 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true,
 }));
+// Mount webhook routes BEFORE the standard json parser so we can preserve the
+// raw body for Svix signature verification, and BEFORE the rate limiter so
+// Resend's retries aren't throttled.
+app.use(
+  '/api/webhooks',
+  express.json({
+    limit: '10mb',
+    verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); },
+  }),
+  webhookRoutes
+);
+
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 

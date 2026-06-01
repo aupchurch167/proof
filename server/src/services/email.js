@@ -17,13 +17,18 @@ async function sendEmail(to, subject, html) {
 
   init();
 
+  const payload = {
+    to,
+    from: process.env.FROM_EMAIL,
+    subject,
+    html,
+  };
+  if (process.env.REPLY_TO_EMAIL) {
+    payload.reply_to = process.env.REPLY_TO_EMAIL;
+  }
+
   try {
-    const { data, error } = await resend.emails.send({
-      to,
-      from: process.env.FROM_EMAIL,
-      subject,
-      html,
-    });
+    const { data, error } = await resend.emails.send(payload);
     if (error) {
       console.error(`[Email] Failed to send to ${to}:`, error.message || error);
       throw new Error(error.message || 'Resend send failed');
