@@ -35,19 +35,29 @@ const path = require('path');
 const { PrismaClient } = require('@prisma/client');
 const { uploadFile } = require('../src/services/storage');
 
-// === EDIT THIS to match your Airtable column names =========================
+// === Edit if your Airtable column names differ from MAC's base =============
 const FIELD_MAP = {
-  name:            'Company Name',
-  contactName:     'Contact Name',
+  name:            'Name',
+  contactName:     'Contact',
   email:           'Email',
-  phone:           'Phone',
-  address:         'Address',
+  phone:           'Number',
+  // Address is composed from these four columns (any missing parts are skipped).
+  addressParts:    ['Address', 'City', 'State', 'Zip'],
   trade:           'Trade',
   notes:           'Notes',
   w9:              'W9',
   masterAgreement: 'Master Agreement',
 };
 // ===========================================================================
+
+function composeAddress(fields) {
+  const street = fields[FIELD_MAP.addressParts[0]]?.trim();
+  const city   = fields[FIELD_MAP.addressParts[1]]?.trim();
+  const state  = fields[FIELD_MAP.addressParts[2]]?.trim();
+  const zip    = fields[FIELD_MAP.addressParts[3]]?.trim();
+  const cityStateZip = [city, [state, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return [street, cityStateZip].filter(Boolean).join(', ') || null;
+}
 
 const prisma = new PrismaClient();
 const dryRun = process.argv.includes('--dry-run');
@@ -120,7 +130,7 @@ async function importOne(record, orgId) {
     contactName: f[FIELD_MAP.contactName]?.trim() || null,
     email,
     phone:   f[FIELD_MAP.phone]?.trim()   || null,
-    address: f[FIELD_MAP.address]?.trim() || null,
+    address: composeAddress(f),
     trade:   f[FIELD_MAP.trade]?.trim()   || null,
     notes:   f[FIELD_MAP.notes]?.trim()   || null,
   };
