@@ -16,6 +16,7 @@ const reportsRoutes = require('./routes/reports');
 const notificationsRoutes = require('./routes/notifications');
 const organizationRoutes = require('./routes/organization');
 const importRoutes = require('./routes/import');
+const applyRoutes = require('./routes/apply');
 
 const app = express();
 
@@ -74,6 +75,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/apply', applyRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {

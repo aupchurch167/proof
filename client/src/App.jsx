@@ -12,6 +12,7 @@ import Settings from './pages/Settings';
 import Users from './pages/Users';
 
 import Portal from './pages/Portal';
+import Apply from './pages/Apply';
 import Import from './pages/Import';
 import AcceptInvite from './pages/AcceptInvite';
 import ForgotPassword from './pages/ForgotPassword';
@@ -41,6 +42,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/portal/:token" element={<Portal />} />
+      <Route path="/apply/:slug" element={<Apply />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route
         path="/*"

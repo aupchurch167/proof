@@ -65,6 +65,7 @@ model Organization {
   address               String?
   plan                  Plan     @default(FREE)
   additionalInsuredNote String?
+  slug                  String?  @unique
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
