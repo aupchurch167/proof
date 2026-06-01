@@ -78,12 +78,19 @@ export default function Vendors() {
     }
   };
 
-  const handleRequestCoi = async (vendorId) => {
+  const handleRequestCoi = async (vendorId, force = false) => {
     try {
-      await api.post(`/vendors/${vendorId}/request-coi`);
+      await api.post(`/vendors/${vendorId}/request-coi`, force ? { force: true } : undefined);
       toast.success('COI request sent!');
     } catch (err) {
-      toast.error('Failed to send request: ' + err.message);
+      const msg = err.message || '';
+      if (msg.toLowerCase().includes('recently')) {
+        if (window.confirm('A COI request was already sent to this vendor in the last 24 hours. Send another anyway?')) {
+          return handleRequestCoi(vendorId, true);
+        }
+      } else {
+        toast.error('Failed to send request: ' + msg);
+      }
     }
   };
 
@@ -110,20 +117,28 @@ export default function Vendors() {
     setRequestingBulk(true);
     let sent = 0;
     let failed = 0;
+    let skipped = 0;
     for (const vendorId of selected) {
       try {
         await api.post(`/vendors/${vendorId}/request-coi`);
         sent++;
-      } catch {
-        failed++;
+      } catch (err) {
+        // Cooldown: vendor was already emailed in the last 24 hours.
+        if ((err.message || '').toLowerCase().includes('recently')) {
+          skipped++;
+        } else {
+          failed++;
+        }
       }
     }
     setRequestingBulk(false);
-    if (failed > 0) {
-      toast.warning(`COI requests sent: ${sent}, ${failed} failed`);
-    } else {
-      toast.success(`COI requests sent: ${sent}`);
-    }
+    const parts = [`${sent} sent`];
+    if (skipped > 0) parts.push(`${skipped} skipped (already requested in last 24h)`);
+    if (failed > 0) parts.push(`${failed} failed`);
+    const msg = `COI requests: ${parts.join(', ')}`;
+    if (failed > 0) toast.warning(msg);
+    else if (skipped > 0) toast.info ? toast.info(msg) : toast.success(msg);
+    else toast.success(msg);
   };
 
   const handleBulkDelete = async () => {

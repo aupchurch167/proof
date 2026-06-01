@@ -226,13 +226,24 @@ export default function VendorDetail() {
     }
   };
 
-  const handleRequestCoi = async () => {
+  const handleRequestCoi = async (force = false) => {
     setRequesting(true);
     try {
-      await api.post(`/vendors/${id}/request-coi`);
+      const result = await api.post(`/vendors/${id}/request-coi`, force ? { force: true } : undefined);
       toast.success('COI request email sent!');
+      setVendor((v) => ({ ...v, lastCoiRequestAt: result.lastSentAt }));
     } catch (err) {
-      toast.error('Failed to send request: ' + err.message);
+      const msg = err.message || '';
+      if (msg.toLowerCase().includes('recently')) {
+        const last = vendor?.lastCoiRequestAt
+          ? new Date(vendor.lastCoiRequestAt).toLocaleString()
+          : 'recently';
+        if (window.confirm(`A COI request was already sent ${last}. Send another anyway?`)) {
+          return handleRequestCoi(true);
+        }
+      } else {
+        toast.error('Failed to send request: ' + msg);
+      }
     } finally {
       setRequesting(false);
     }
@@ -354,12 +365,19 @@ export default function VendorDetail() {
       {vendor.cois?.length > 0 && <CoverageSummary cois={vendor.cois} />}
 
       {/* COI History */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
-        <h2 className="text-lg font-semibold">COI History</h2>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
+        <div>
+          <h2 className="text-lg font-semibold">COI History</h2>
+          {vendor.lastCoiRequestAt && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              Last requested {new Date(vendor.lastCoiRequestAt).toLocaleString()}
+            </p>
+          )}
+        </div>
         {canManage && (
           <div className="flex flex-col sm:flex-row gap-2">
             <button
-              onClick={handleRequestCoi}
+              onClick={() => handleRequestCoi()}
               disabled={requesting}
               className="text-sm border border-blue-600 text-blue-600 px-3 py-2 sm:py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-center"
             >

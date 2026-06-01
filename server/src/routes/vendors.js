@@ -149,12 +149,22 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
-    const [w9Url, masterAgreementUrl] = await Promise.all([
+    const [w9Url, masterAgreementUrl, lastCoiRequest] = await Promise.all([
       vendor.w9Path ? getSignedUrl(vendor.w9Path).catch(() => null) : null,
       vendor.masterAgreementPath ? getSignedUrl(vendor.masterAgreementPath).catch(() => null) : null,
+      prisma.notificationLog.findFirst({
+        where: { vendorId: vendor.id, type: 'UPLOAD_REQUEST', status: 'SENT' },
+        orderBy: { sentAt: 'desc' },
+        select: { sentAt: true },
+      }),
     ]);
 
-    res.json({ ...vendor, w9Url, masterAgreementUrl });
+    res.json({
+      ...vendor,
+      w9Url,
+      masterAgreementUrl,
+      lastCoiRequestAt: lastCoiRequest?.sentAt || null,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get vendor' });
   }
@@ -373,6 +383,30 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
+    // Default 24-hour cooldown so a stray click (or a tab left open) can't
+    // blast the vendor with multiple identical emails. Caller can override
+    // with `force: true` after a confirmation prompt.
+    const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+    if (!req.body?.force) {
+      const recent = await prisma.notificationLog.findFirst({
+        where: {
+          vendorId: vendor.id,
+          type: 'UPLOAD_REQUEST',
+          status: 'SENT',
+          sentAt: { gte: new Date(Date.now() - COOLDOWN_MS) },
+        },
+        orderBy: { sentAt: 'desc' },
+        select: { sentAt: true },
+      });
+      if (recent) {
+        return res.status(429).json({
+          error: 'A COI request was sent recently to this vendor',
+          code: 'RECENT_REQUEST',
+          lastSentAt: recent.sentAt,
+        });
+      }
+    }
+
     // Rotate the upload token on every request. Catches vendors created via
     // the import scripts (where uploadToken is still the default UUID and the
     // portal can't jwt.verify() it) and also limits the lifetime of any
@@ -384,7 +418,7 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
 
     await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization);
 
-    await prisma.notificationLog.create({
+    const log = await prisma.notificationLog.create({
       data: {
         orgId: req.user.orgId,
         vendorId: vendor.id,
@@ -394,7 +428,7 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
       },
     });
 
-    res.json({ message: 'COI request sent' });
+    res.json({ message: 'COI request sent', lastSentAt: log.sentAt });
   } catch (err) {
     console.error('Request COI error:', err);
     res.status(500).json({ error: 'Failed to send COI request' });
