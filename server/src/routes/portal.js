@@ -8,7 +8,6 @@ const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
 const { uploadFile } = require('../services/storage');
-const { verifyUploadToken } = require('../utils/tokens');
 
 const router = express.Router();
 
@@ -27,15 +26,8 @@ const upload = multer({
 // GET /api/portal/:uploadToken
 router.get('/:uploadToken', async (req, res) => {
   try {
-    let payload;
-    try {
-      payload = verifyUploadToken(req.params.uploadToken);
-    } catch (err) {
-      return res.status(401).json({ error: 'Upload link has expired or is invalid' });
-    }
-
     const vendor = await prisma.vendor.findFirst({
-      where: { id: payload.vendorId, uploadToken: req.params.uploadToken },
+      where: { uploadToken: req.params.uploadToken, deletedAt: null },
       select: {
         id: true, name: true, contactName: true, email: true, phone: true, address: true,
         organization: {
@@ -45,7 +37,7 @@ router.get('/:uploadToken', async (req, res) => {
     });
 
     if (!vendor) {
-      return res.status(404).json({ error: 'Invalid upload link', orgName: null });
+      return res.status(404).json({ error: 'Upload link has expired or is invalid', orgName: null });
     }
 
     res.json(vendor);
@@ -57,21 +49,14 @@ router.get('/:uploadToken', async (req, res) => {
 // PUT /api/portal/:uploadToken/info
 router.put('/:uploadToken/info', async (req, res) => {
   try {
-    let payload;
-    try {
-      payload = verifyUploadToken(req.params.uploadToken);
-    } catch (err) {
-      return res.status(401).json({ error: 'Upload link has expired or is invalid' });
-    }
-
     const { name, contactName, email, phone, address } = req.body;
 
     const vendor = await prisma.vendor.findFirst({
-      where: { id: payload.vendorId, uploadToken: req.params.uploadToken },
+      where: { uploadToken: req.params.uploadToken, deletedAt: null },
     });
 
     if (!vendor) {
-      return res.status(404).json({ error: 'Invalid upload link' });
+      return res.status(404).json({ error: 'Upload link has expired or is invalid' });
     }
 
     const updated = await prisma.vendor.update({
@@ -95,20 +80,13 @@ router.put('/:uploadToken/info', async (req, res) => {
 // POST /api/portal/:uploadToken/upload
 router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
   try {
-    let payload;
-    try {
-      payload = verifyUploadToken(req.params.uploadToken);
-    } catch (err) {
-      return res.status(401).json({ error: 'Upload link has expired or is invalid' });
-    }
-
     const vendor = await prisma.vendor.findFirst({
-      where: { id: payload.vendorId, uploadToken: req.params.uploadToken },
+      where: { uploadToken: req.params.uploadToken, deletedAt: null },
       include: { organization: { include: { settings: true } } },
     });
 
     if (!vendor) {
-      return res.status(404).json({ error: 'Invalid upload link' });
+      return res.status(404).json({ error: 'Upload link has expired or is invalid' });
     }
 
     if (!req.file) {
