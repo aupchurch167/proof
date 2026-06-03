@@ -34,24 +34,36 @@ function verifySvixSignature(req, secret) {
 router.post('/resend-inbound', async (req, res) => {
   try {
     if (process.env.RESEND_WEBHOOK_SECRET && !verifySvixSignature(req, process.env.RESEND_WEBHOOK_SECRET)) {
+      console.warn('[Webhook] Resend signature verification FAILED');
       return res.status(401).json({ error: 'Invalid signature' });
     }
 
     const { type, data } = req.body || {};
 
-    // Resend uses event types like "email.received" or "inbound.email". Accept
-    // either; ignore anything else (e.g. delivery events Resend sends here).
-    const inboundTypes = ['email.received', 'inbound.email', 'email.inbound'];
-    if (!inboundTypes.includes(type)) {
+    // Log every payload that reaches us so we can see what Resend is actually
+    // sending. Useful while wiring up the integration.
+    console.log(`[Webhook] Resend payload received: type=${type || '(none)'} keys=${Object.keys(data || {}).join(',')}`);
+
+    // Accept anything that looks like inbound mail. Resend's event taxonomy
+    // has shifted a few times; rather than maintain an allowlist, treat any
+    // event carrying a from-address as inbound.
+    const fromCandidate = data?.from?.email || data?.from || data?.envelope?.from || data?.headers?.from || null;
+    if (!fromCandidate) {
+      console.log(`[Webhook] No from address on payload; skipping (this is normal for outbound delivery events)`);
       return res.json({ received: true, skipped: type });
     }
 
-    const fromEmail = (data?.from?.email || (typeof data?.from === 'string' ? data.from : '') || '').toLowerCase().trim();
-    const subject = data?.subject || null;
-    const body = (data?.text || data?.html || '').toString();
+    const fromEmail = (typeof fromCandidate === 'string' ? fromCandidate : fromCandidate?.email || '')
+      .toLowerCase()
+      .trim()
+      // strip "Name <addr@domain>" wrapper if present
+      .replace(/^.*<([^>]+)>.*$/, '$1');
+
+    const subject = data?.subject || data?.headers?.subject || null;
+    const body = (data?.text || data?.html || data?.body || data?.snippet || '').toString();
 
     if (!fromEmail) {
-      console.warn('[Inbound] payload missing from address; ignoring');
+      console.warn('[Webhook] Could not parse from address; payload:', JSON.stringify(req.body).slice(0, 500));
       return res.json({ received: true });
     }
 
@@ -61,7 +73,7 @@ router.post('/resend-inbound', async (req, res) => {
     });
 
     if (matches.length === 0) {
-      console.log(`[Inbound] No matching vendor for ${fromEmail}: ${subject || '(no subject)'}`);
+      console.log(`[Webhook] No matching vendor for "${fromEmail}" (subject: ${subject || '(none)'})`);
     } else {
       for (const v of matches) {
         await prisma.auditLog.create({
@@ -78,13 +90,13 @@ router.post('/resend-inbound', async (req, res) => {
             },
           },
         });
-        console.log(`[Inbound] Reply from ${fromEmail} -> vendor ${v.id} (${v.name})`);
+        console.log(`[Webhook] Reply recorded: ${fromEmail} -> vendor ${v.id} (${v.name})`);
       }
     }
 
     res.json({ received: true, matched: matches.length });
   } catch (err) {
-    console.error('Inbound webhook error:', err);
+    console.error('[Webhook] Inbound handler error:', err);
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 });
