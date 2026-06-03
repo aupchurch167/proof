@@ -76,7 +76,7 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-3">
               {pendingCois.slice(0, 5).map((coi) => (
-                <Link key={coi.id} to={`/cois/${coi.id}`}
+                <Link key={coi.id} to={`/cois/${coi.id}?queue=pending`}
                   className="block p-3 rounded-lg border hover:bg-gray-50 transition-colors">
                   <div className="flex justify-between items-center">
                     <div>
