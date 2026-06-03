@@ -35,12 +35,56 @@ function verifySvixSignature(req, secret) {
   });
 }
 
+// Resend's inbound payload shape isn't 100% predictable across event types
+// and versions. Pull the body from any text/html-looking field at any depth.
+function extractBody(data) {
+  if (!data || typeof data !== 'object') return '';
+  const seen = new WeakSet();
+  const bodyKeys = new Set(['text', 'html', 'body', 'plain', 'plainText', 'plain_text', 'htmlBody', 'html_body', 'bodyText', 'snippet', 'message']);
+  function walk(obj, depth) {
+    if (!obj || typeof obj !== 'object' || depth > 5 || seen.has(obj)) return null;
+    seen.add(obj);
+    for (const k of bodyKeys) {
+      if (typeof obj[k] === 'string' && obj[k].trim()) return obj[k];
+    }
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === 'object') {
+        const found = walk(v, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return walk(data, 0) || '';
+}
+
+// Best-effort mimetype: trust the claimed type when reasonable, otherwise fall
+// back to the filename extension. Resend sometimes labels attachments as
+// application/octet-stream or omits the type entirely.
+function detectMimetype(att) {
+  const claimed = (att.contentType || att.content_type || att.type || att.mimetype || '').toLowerCase().split(';')[0].trim();
+  if (claimed && claimed !== 'application/octet-stream') return claimed;
+  const filename = (att.filename || att.name || '').toLowerCase();
+  const ext = filename.split('.').pop();
+  const byExt = {
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    png: 'image/png',
+    heic: 'image/heic', heif: 'image/heif',
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff',
+    txt: 'text/plain',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+  return byExt[ext] || claimed || 'application/octet-stream';
+}
+
 // Fetch the raw bytes for an attachment. Resend may give us either a base64
 // `content` payload, a temporary signed `url`, or a few other field names —
 // handle the common shapes.
 async function materializeAttachment(att) {
   const filename = att.filename || att.name || `attachment-${uuidv4()}`;
-  const mimetype = att.contentType || att.content_type || att.type || 'application/octet-stream';
+  const mimetype = detectMimetype(att);
   let buf;
   if (att.content) {
     buf = typeof att.content === 'string'
@@ -78,11 +122,8 @@ async function processAttachment(att, vendor) {
   const isImage = mimetype.startsWith('image/');
   const result = { filename, mimetype, size: buf.length, savedAs: null, coiId: null, classified: 'other' };
 
-  if (!isPdf && !isImage) {
-    console.log(`[Webhook] Attachment ${filename} (${mimetype}) is not a PDF/image; skipping storage`);
-    return result;
-  }
-
+  // Always save the attachment so it's at least downloadable from the UI. AI
+  // extraction is gated to PDFs further down.
   const key = `${uuidv4()}${path.extname(filename) || ''}`;
   result.savedAs = await uploadFile(buf, key, mimetype, 'reply-attachments');
 
@@ -178,11 +219,15 @@ async function handleInbound(req, res, data) {
     .trim()
     .replace(/^.*<([^>]+)>.*$/, '$1');
 
-  const subject = data?.subject || data?.headers?.subject || null;
-  const body = (data?.text || data?.html || data?.body || data?.snippet || '').toString();
-  const attachments = (data?.attachments || data?.files || []).filter(Boolean);
+  const subject = data?.subject || data?.headers?.subject || data?.email?.subject || null;
+  const body = extractBody(data);
+  const attachments = (data?.attachments || data?.files || data?.email?.attachments || []).filter(Boolean);
 
-  console.log(`[Webhook] inbound from=${fromEmail} subject="${subject || ''}" attachments=${attachments.length}`);
+  console.log(`[Webhook] inbound from=${fromEmail} subject="${subject || ''}" bodyLen=${body.length} attachments=${attachments.length}`);
+  if (body.length === 0) {
+    // Help debug Resend's payload shape when extractBody can't find a body.
+    console.log('[Webhook] inbound payload (truncated):', JSON.stringify(data).slice(0, 1500));
+  }
 
   const matches = await prisma.vendor.findMany({
     where: { email: fromEmail, deletedAt: null },
