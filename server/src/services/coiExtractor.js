@@ -36,6 +36,8 @@ async function extractCoiData(pdfInput) {
             type: 'text',
             text: `Extract the following information from this Certificate of Insurance (COI) PDF. Return ONLY a valid JSON object with these fields. For coverage amounts, convert to cents (e.g., $1,000,000 = 100000000). For dates, use ISO 8601 format (YYYY-MM-DD).
 
+This PDF may have multiple pages. The first page is often a cover sheet, transmittal letter, or only contains vendor / insured-party information with no policy data. Scan EVERY page and extract the insurance details from whichever page(s) actually contain the ACORD 25 (or similar) form with policy numbers, coverage limits, and expiration dates. Ignore blank, cover, or non-COI pages. If multiple pages contain COI data, consolidate it into one JSON object.
+
 {
   "coverageType": "GENERAL_LIABILITY | WORKERS_COMP | UMBRELLA | AUTO | OTHER",
   "glPolicyNumber": "string or null",
@@ -59,6 +61,7 @@ async function extractCoiData(pdfInput) {
 }
 
 Important:
+- If the first page has no policy information, do not stop there — continue to subsequent pages until you find the actual certificate data, then extract from there.
 - For coverageType, determine the PRIMARY coverage type of this certificate:
   - "GENERAL_LIABILITY" if the certificate primarily covers General/Commercial General Liability
   - "WORKERS_COMP" if it primarily covers Workers Compensation
