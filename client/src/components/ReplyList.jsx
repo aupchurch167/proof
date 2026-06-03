@@ -1,6 +1,40 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
+function AttachmentChip({ att }) {
+  const tone = att.classified === 'coi'
+    ? 'bg-green-100 text-green-700 border-green-300'
+    : att.error
+      ? 'bg-red-50 text-red-700 border-red-200'
+      : 'bg-gray-100 text-gray-700 border-gray-300';
+
+  const label = att.classified === 'coi'
+    ? `${att.filename} — saved as COI`
+    : att.classified === 'image'
+      ? `${att.filename} — image`
+      : att.classified === 'pdf'
+        ? `${att.filename} — PDF (not COI)`
+        : att.filename || '(unnamed)';
+
+  const inner = (
+    <span className={`inline-flex items-center text-xs px-2 py-1 rounded-md border ${tone}`}>
+      📎 {label}
+    </span>
+  );
+
+  if (att.coiId) {
+    return <Link to={`/cois/${att.coiId}`} onClick={(e) => e.stopPropagation()}>{inner}</Link>;
+  }
+  if (att.url) {
+    return (
+      <a href={att.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+        {inner}
+      </a>
+    );
+  }
+  return inner;
+}
+
 function ReplyRow({ reply, showVendor }) {
   const [open, setOpen] = useState(false);
   const subject = reply.subject || '(no subject)';
@@ -37,6 +71,13 @@ function ReplyRow({ reply, showVendor }) {
         </div>
         {!open && shortPreview && (
           <p className="text-sm text-gray-600 mt-2 line-clamp-2 whitespace-pre-wrap">{shortPreview}</p>
+        )}
+        {reply.attachments && reply.attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {reply.attachments.map((att, i) => (
+              <AttachmentChip key={i} att={att} />
+            ))}
+          </div>
         )}
       </button>
       {open && (

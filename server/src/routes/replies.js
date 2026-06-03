@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticate } = require('../middleware/auth');
+const { getSignedUrl } = require('../services/storage');
 
 const router = express.Router();
 
@@ -14,15 +15,33 @@ async function annotateWithVendor(orgId, rows) {
     select: { id: true, name: true, email: true, deletedAt: true },
   });
   const byId = new Map(vendors.map((v) => [v.id, v]));
-  return rows.map((r) => ({
-    id: r.id,
-    vendorId: r.entityId,
-    vendor: byId.get(r.entityId) || null,
-    from: r.details?.from || null,
-    subject: r.details?.subject || null,
-    preview: r.details?.preview || '',
-    receivedAt: r.details?.receivedAt || r.createdAt,
-    createdAt: r.createdAt,
+
+  return Promise.all(rows.map(async (r) => {
+    const rawAttachments = Array.isArray(r.details?.attachments) ? r.details.attachments : [];
+    const attachments = await Promise.all(rawAttachments.map(async (a) => {
+      const url = a?.savedAs ? await getSignedUrl(a.savedAs).catch(() => null) : null;
+      return {
+        filename: a.filename || null,
+        mimetype: a.mimetype || null,
+        size: a.size || null,
+        classified: a.classified || null,
+        coiId: a.coiId || null,
+        url,
+        error: a.error || null,
+      };
+    }));
+
+    return {
+      id: r.id,
+      vendorId: r.entityId,
+      vendor: byId.get(r.entityId) || null,
+      from: r.details?.from || null,
+      subject: r.details?.subject || null,
+      preview: r.details?.preview || '',
+      receivedAt: r.details?.receivedAt || r.createdAt,
+      createdAt: r.createdAt,
+      attachments,
+    };
   }));
 }
 
