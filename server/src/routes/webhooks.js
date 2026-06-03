@@ -138,7 +138,8 @@ async function processAttachment(att, vendor) {
   return result;
 }
 
-// POST /api/webhooks/resend-inbound — inbound reply payload from Resend.
+// POST /api/webhooks/resend-inbound — generic Resend webhook endpoint.
+// Subscribe email.received (inbound replies), email.bounced, email.failed.
 router.post('/resend-inbound', async (req, res) => {
   try {
     if (process.env.RESEND_WEBHOOK_SECRET && !verifySvixSignature(req, process.env.RESEND_WEBHOOK_SECRET)) {
@@ -147,79 +148,130 @@ router.post('/resend-inbound', async (req, res) => {
     }
 
     const { type, data } = req.body || {};
+    console.log(`[Webhook] Resend ${type || '(no type)'} keys=${Object.keys(data || {}).join(',')}`);
 
-    // Log every payload that reaches us so we can see what Resend is actually
-    // sending. Useful while wiring up the integration.
-    console.log(`[Webhook] Resend payload received: type=${type || '(none)'} keys=${Object.keys(data || {}).join(',')}`);
-
-    // Accept anything that looks like inbound mail. Resend's event taxonomy
-    // has shifted a few times; rather than maintain an allowlist, treat any
-    // event carrying a from-address as inbound.
-    const fromCandidate = data?.from?.email || data?.from || data?.envelope?.from || data?.headers?.from || null;
-    if (!fromCandidate) {
-      console.log(`[Webhook] No from address on payload; skipping (this is normal for outbound delivery events)`);
-      return res.json({ received: true, skipped: type });
+    if (type === 'email.received' || type === 'email.inbound' || type === 'inbound.email') {
+      return handleInbound(req, res, data);
+    }
+    if (type === 'email.bounced' || type === 'email.failed' || type === 'email.complained') {
+      return handleFailure(req, res, type, data);
     }
 
-    const fromEmail = (typeof fromCandidate === 'string' ? fromCandidate : fromCandidate?.email || '')
-      .toLowerCase()
-      .trim()
-      // strip "Name <addr@domain>" wrapper if present
-      .replace(/^.*<([^>]+)>.*$/, '$1');
-
-    const subject = data?.subject || data?.headers?.subject || null;
-    const body = (data?.text || data?.html || data?.body || data?.snippet || '').toString();
-
-    if (!fromEmail) {
-      console.warn('[Webhook] Could not parse from address; payload:', JSON.stringify(req.body).slice(0, 500));
-      return res.json({ received: true });
-    }
-
-    const attachments = (data?.attachments || data?.files || []).filter(Boolean);
-
-    const matches = await prisma.vendor.findMany({
-      where: { email: fromEmail, deletedAt: null },
-      select: { id: true, orgId: true, name: true },
-    });
-
-    if (matches.length === 0) {
-      console.log(`[Webhook] No matching vendor for "${fromEmail}" (subject: ${subject || '(none)'}, attachments: ${attachments.length})`);
-    } else {
-      for (const v of matches) {
-        const processed = [];
-        for (const att of attachments) {
-          try {
-            processed.push(await processAttachment(att, v));
-          } catch (err) {
-            console.error(`[Webhook] Failed to process attachment ${att?.filename || '(unknown)'}: ${err.message}`);
-            processed.push({ filename: att?.filename || null, error: err.message });
-          }
-        }
-
-        await prisma.auditLog.create({
-          data: {
-            orgId: v.orgId,
-            action: 'vendor_reply',
-            entity: 'vendor',
-            entityId: v.id,
-            details: {
-              from: fromEmail,
-              subject,
-              preview: body.slice(0, 1000),
-              receivedAt: new Date().toISOString(),
-              attachments: processed,
-            },
-          },
-        });
-        console.log(`[Webhook] Reply recorded: ${fromEmail} -> vendor ${v.id} (${v.name}); attachments=${processed.length}`);
-      }
-    }
-
-    res.json({ received: true, matched: matches.length, attachments: attachments.length });
+    // Other event types (delivered, sent, opened, clicked, etc.). Ack so
+    // Resend doesn't retry, but otherwise ignore.
+    return res.json({ received: true, skipped: type });
   } catch (err) {
     console.error('[Webhook] Inbound handler error:', err);
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 });
+
+async function handleInbound(req, res, data) {
+  const fromCandidate = data?.from?.email || data?.from || data?.envelope?.from || data?.headers?.from || data?.sender?.email || data?.sender || null;
+  if (!fromCandidate) {
+    console.warn('[Webhook] email.received but no from address; payload preview:', JSON.stringify(data).slice(0, 600));
+    return res.json({ received: true });
+  }
+
+  const fromEmail = (typeof fromCandidate === 'string' ? fromCandidate : fromCandidate?.email || '')
+    .toLowerCase()
+    .trim()
+    .replace(/^.*<([^>]+)>.*$/, '$1');
+
+  const subject = data?.subject || data?.headers?.subject || null;
+  const body = (data?.text || data?.html || data?.body || data?.snippet || '').toString();
+  const attachments = (data?.attachments || data?.files || []).filter(Boolean);
+
+  console.log(`[Webhook] inbound from=${fromEmail} subject="${subject || ''}" attachments=${attachments.length}`);
+
+  const matches = await prisma.vendor.findMany({
+    where: { email: fromEmail, deletedAt: null },
+    select: { id: true, orgId: true, name: true },
+  });
+
+  if (matches.length === 0) {
+    console.log(`[Webhook] No matching vendor for "${fromEmail}"`);
+    return res.json({ received: true, matched: 0, attachments: attachments.length });
+  }
+
+  for (const v of matches) {
+    const processed = [];
+    for (const att of attachments) {
+      try {
+        processed.push(await processAttachment(att, v));
+      } catch (err) {
+        console.error(`[Webhook] Failed to process attachment ${att?.filename || '(unknown)'}: ${err.message}`);
+        processed.push({ filename: att?.filename || null, error: err.message });
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        orgId: v.orgId,
+        action: 'vendor_reply',
+        entity: 'vendor',
+        entityId: v.id,
+        details: {
+          from: fromEmail,
+          subject,
+          preview: body.slice(0, 1000),
+          receivedAt: new Date().toISOString(),
+          attachments: processed,
+        },
+      },
+    });
+    console.log(`[Webhook] Reply recorded: ${fromEmail} -> vendor ${v.id} (${v.name}); attachments=${processed.length}`);
+  }
+  res.json({ received: true, matched: matches.length, attachments: attachments.length });
+}
+
+async function handleFailure(req, res, type, data) {
+  // Resend bounce/fail payloads carry the failed recipient and the original
+  // email_id. We can't always reconnect to a specific NotificationLog row, but
+  // we can mark the most recent SENT entry to that recipient as FAILED and
+  // record the reason in an audit row so admins can see what happened.
+  const to = data?.to?.[0] || data?.to || data?.email?.to?.[0] || data?.email?.to || null;
+  const recipient = (Array.isArray(to) ? to[0] : to || '').toString().toLowerCase().trim().replace(/^.*<([^>]+)>.*$/, '$1');
+  const reason = data?.reason || data?.bounce?.message || data?.error || data?.bounceType || type;
+
+  console.log(`[Webhook] delivery failure (${type}) to=${recipient || '(unknown)'} reason="${reason || ''}"`);
+
+  if (!recipient) return res.json({ received: true });
+
+  // Update the most recent SENT NotificationLog for this recipient (within the
+  // last 7 days) to FAILED.
+  const recent = await prisma.notificationLog.findFirst({
+    where: {
+      recipientEmail: recipient,
+      status: 'SENT',
+      sentAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+    },
+    orderBy: { sentAt: 'desc' },
+    include: { vendor: { select: { id: true, orgId: true, name: true } } },
+  });
+
+  if (recent) {
+    await prisma.notificationLog.update({
+      where: { id: recent.id },
+      data: { status: 'FAILED' },
+    });
+    if (recent.vendor) {
+      await prisma.auditLog.create({
+        data: {
+          orgId: recent.vendor.orgId,
+          action: 'vendor_email_failed',
+          entity: 'vendor',
+          entityId: recent.vendor.id,
+          details: { type, recipient, reason, notificationLogId: recent.id, receivedAt: new Date().toISOString() },
+        },
+      });
+      console.log(`[Webhook] Marked NotificationLog ${recent.id} FAILED (vendor ${recent.vendor.name})`);
+    }
+  } else {
+    console.log(`[Webhook] No recent SENT NotificationLog found for ${recipient}`);
+  }
+
+  res.json({ received: true });
+}
 
 module.exports = router;
