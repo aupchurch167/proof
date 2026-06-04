@@ -30,6 +30,12 @@ export default function Vendors() {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [orgSlug, setOrgSlug] = useState(null);
+  const applyUrl = orgSlug ? `${window.location.origin}/apply/${orgSlug}` : null;
+
+  useEffect(() => {
+    api.get('/organization').then((org) => setOrgSlug(org.slug || org.id)).catch(() => {});
+  }, []);
   const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
   const [w9File, setW9File] = useState(null);
   const [maFile, setMaFile] = useState(null);
@@ -174,10 +180,24 @@ export default function Vendors() {
             </button>
           )}
           {canManage && (
-            <button onClick={() => setShowAdd(!showAdd)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
-              Add Vendor
-            </button>
+            <>
+              {applyUrl && (
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(applyUrl);
+                    toast.success('Application link copied to clipboard');
+                  }}
+                  className="border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium"
+                  title={applyUrl}
+                >
+                  Copy Application Link
+                </button>
+              )}
+              <button onClick={() => setShowAdd(!showAdd)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+                Add Vendor
+              </button>
+            </>
           )}
         </div>
       </div>
