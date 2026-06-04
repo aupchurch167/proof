@@ -12,6 +12,8 @@ import Settings from './pages/Settings';
 import Users from './pages/Users';
 
 import Portal from './pages/Portal';
+import Apply from './pages/Apply';
+import Replies from './pages/Replies';
 import Import from './pages/Import';
 import AcceptInvite from './pages/AcceptInvite';
 import ForgotPassword from './pages/ForgotPassword';
@@ -41,6 +43,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/portal/:token" element={<Portal />} />
+      <Route path="/apply/:slug" element={<Apply />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route
         path="/*"
@@ -53,6 +56,7 @@ export default function App() {
                 <Route path="/vendors/:id" element={<VendorDetail />} />
                 <Route path="/cois" element={<Cois />} />
                 <Route path="/cois/:id" element={<CoiDetail />} />
+                <Route path="/replies" element={<Replies />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/users" element={<AdminRoute><Users /></AdminRoute>} />
 

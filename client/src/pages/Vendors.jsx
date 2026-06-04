@@ -30,7 +30,15 @@ export default function Vendors() {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [orgSlug, setOrgSlug] = useState(null);
+  const applyUrl = orgSlug ? `${window.location.origin}/apply/${orgSlug}` : null;
+
+  useEffect(() => {
+    api.get('/organization').then((org) => setOrgSlug(org.slug || org.id)).catch(() => {});
+  }, []);
   const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
+  const [w9File, setW9File] = useState(null);
+  const [maFile, setMaFile] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [error, setError] = useState('');
@@ -59,8 +67,16 @@ export default function Vendors() {
     e.preventDefault();
     setError('');
     try {
-      await api.post('/vendors', form);
+      const created = await api.post('/vendors', form);
+      if (w9File || maFile) {
+        const fd = new FormData();
+        if (w9File) fd.append('w9', w9File);
+        if (maFile) fd.append('masterAgreement', maFile);
+        await api.upload(`/vendors/${created.id}/documents`, fd);
+      }
       setForm({ name: '', contactName: '', email: '', phone: '', address: '' });
+      setW9File(null);
+      setMaFile(null);
       setShowAdd(false);
       fetchVendors();
     } catch (err) {
@@ -68,12 +84,19 @@ export default function Vendors() {
     }
   };
 
-  const handleRequestCoi = async (vendorId) => {
+  const handleRequestCoi = async (vendorId, force = false) => {
     try {
-      await api.post(`/vendors/${vendorId}/request-coi`);
+      await api.post(`/vendors/${vendorId}/request-coi`, force ? { force: true } : undefined);
       toast.success('COI request sent!');
     } catch (err) {
-      toast.error('Failed to send request: ' + err.message);
+      const msg = err.message || '';
+      if (msg.toLowerCase().includes('recently')) {
+        if (window.confirm('A COI request was already sent to this vendor in the last 24 hours. Send another anyway?')) {
+          return handleRequestCoi(vendorId, true);
+        }
+      } else {
+        toast.error('Failed to send request: ' + msg);
+      }
     }
   };
 
@@ -100,20 +123,28 @@ export default function Vendors() {
     setRequestingBulk(true);
     let sent = 0;
     let failed = 0;
+    let skipped = 0;
     for (const vendorId of selected) {
       try {
         await api.post(`/vendors/${vendorId}/request-coi`);
         sent++;
-      } catch {
-        failed++;
+      } catch (err) {
+        // Cooldown: vendor was already emailed in the last 24 hours.
+        if ((err.message || '').toLowerCase().includes('recently')) {
+          skipped++;
+        } else {
+          failed++;
+        }
       }
     }
     setRequestingBulk(false);
-    if (failed > 0) {
-      toast.warning(`COI requests sent: ${sent}, ${failed} failed`);
-    } else {
-      toast.success(`COI requests sent: ${sent}`);
-    }
+    const parts = [`${sent} sent`];
+    if (skipped > 0) parts.push(`${skipped} skipped (already requested in last 24h)`);
+    if (failed > 0) parts.push(`${failed} failed`);
+    const msg = `COI requests: ${parts.join(', ')}`;
+    if (failed > 0) toast.warning(msg);
+    else if (skipped > 0) toast.info ? toast.info(msg) : toast.success(msg);
+    else toast.success(msg);
   };
 
   const handleBulkDelete = async () => {
@@ -149,10 +180,24 @@ export default function Vendors() {
             </button>
           )}
           {canManage && (
-            <button onClick={() => setShowAdd(!showAdd)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
-              Add Vendor
-            </button>
+            <>
+              {applyUrl && (
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(applyUrl);
+                    toast.success('Application link copied to clipboard');
+                  }}
+                  className="border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium"
+                  title={applyUrl}
+                >
+                  Copy Application Link
+                </button>
+              )}
+              <button onClick={() => setShowAdd(!showAdd)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+                Add Vendor
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -187,10 +232,22 @@ export default function Vendors() {
               <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
                 className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">W9 <span className="text-gray-400 font-normal">(PDF or image)</span></label>
+              <input type="file" accept="application/pdf,image/*"
+                onChange={(e) => setW9File(e.target.files?.[0] || null)}
+                className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm file:cursor-pointer hover:file:bg-gray-50" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Master Agreement <span className="text-gray-400 font-normal">(PDF or image)</span></label>
+              <input type="file" accept="application/pdf,image/*"
+                onChange={(e) => setMaFile(e.target.files?.[0] || null)}
+                className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm file:cursor-pointer hover:file:bg-gray-50" />
+            </div>
           </div>
           <div className="flex gap-2">
             <button type="submit" className="bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm">Save</button>
-            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
+            <button type="button" onClick={() => { setShowAdd(false); setW9File(null); setMaFile(null); }} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
           </div>
         </form>
       )}

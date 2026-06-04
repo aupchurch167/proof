@@ -16,15 +16,36 @@ const reportsRoutes = require('./routes/reports');
 const notificationsRoutes = require('./routes/notifications');
 const organizationRoutes = require('./routes/organization');
 const importRoutes = require('./routes/import');
+const applyRoutes = require('./routes/apply');
+const webhookRoutes = require('./routes/webhooks');
+const repliesRoutes = require('./routes/replies');
 
 const app = express();
 
 app.set('trust proxy', 1);
 app.use(helmet());
+const allowedOrigins = [
+  'https://app.proofcoi.com',
+  'https://proof.up.railway.app',
+  'http://localhost:5173',
+  ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) : []),
+];
 app.use(cors({
-  origin: ['https://app.proofcoi.com', 'http://localhost:5173'],
+  origin: allowedOrigins,
   credentials: true,
 }));
+// Mount webhook routes BEFORE the standard json parser so we can preserve the
+// raw body for Svix signature verification, and BEFORE the rate limiter so
+// Resend's retries aren't throttled.
+app.use(
+  '/api/webhooks',
+  express.json({
+    limit: '10mb',
+    verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); },
+  }),
+  webhookRoutes
+);
+
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
@@ -68,6 +89,8 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/apply', applyRoutes);
+app.use('/api/replies', repliesRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../utils/api';
+import { api, API_BASE } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 
 const statusColors = {
@@ -174,7 +174,7 @@ export default function Cois() {
     setExportingPdfs(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const res = await fetch('/api/reports/export-pdfs', {
+      const res = await fetch(`${API_BASE}/reports/export-pdfs`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -323,7 +323,10 @@ export default function Cois() {
                 {filtered.map((coi) => (
                   <tr key={coi.id} className="border-b last:border-0 hover:bg-gray-50">
                     <td className="px-4 py-4">
-                      <Link to={`/cois/${coi.id}`} className="text-blue-600 hover:underline font-medium">
+                      <Link
+                        to={`/cois/${coi.id}${coi.status === 'PENDING_REVIEW' ? '?queue=pending' : ''}`}
+                        className="text-blue-600 hover:underline font-medium"
+                      >
                         {coi.vendor?.name}
                       </Link>
                       <p className="text-xs text-gray-400">{new Date(coi.submittedAt).toLocaleDateString()}</p>
@@ -356,7 +359,7 @@ export default function Cois() {
             {filtered.map((coi) => {
               const soonest = soonestExpiration(coi);
               return (
-                <Link key={coi.id} to={`/cois/${coi.id}`}
+                <Link key={coi.id} to={`/cois/${coi.id}${coi.status === 'PENDING_REVIEW' ? '?queue=pending' : ''}`}
                   className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <span className="font-medium text-blue-600 truncate">{coi.vendor?.name}</span>

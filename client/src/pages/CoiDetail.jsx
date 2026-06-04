@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -20,6 +20,8 @@ export default function CoiDetail() {
   const { user } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const queueMode = searchParams.get('queue') === 'pending';
   const [coi, setCoi] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -28,6 +30,7 @@ export default function CoiDetail() {
   const [showReject, setShowReject] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [queueCount, setQueueCount] = useState(null);
 
   useEffect(() => {
     api.get(`/cois/${id}`)
@@ -35,6 +38,28 @@ export default function CoiDetail() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!queueMode) return;
+    api.get('/cois?status=PENDING_REVIEW')
+      .then((rows) => setQueueCount(rows.length))
+      .catch(console.error);
+  }, [queueMode, id]);
+
+  async function advanceQueue() {
+    try {
+      const rows = await api.get('/cois?status=PENDING_REVIEW');
+      const next = rows.find((c) => c.id !== id);
+      if (next) {
+        navigate(`/cois/${next.id}?queue=pending`);
+      } else {
+        toast.success('All pending COIs reviewed!');
+        navigate('/cois?status=PENDING_REVIEW');
+      }
+    } catch (err) {
+      toast.error('Could not load next pending COI');
+    }
+  }
 
   const handleSave = async () => {
     try {
@@ -52,6 +77,7 @@ export default function CoiDetail() {
       const updated = await api.post(`/cois/${id}/approve`);
       setCoi({ ...coi, ...updated, status: 'APPROVED' });
       toast.success('COI approved');
+      if (queueMode) await advanceQueue();
     } catch (err) {
       toast.error(err.message);
     }
@@ -63,7 +89,9 @@ export default function CoiDetail() {
       const updated = await api.post(`/cois/${id}/reject`, { reason: rejectReason });
       setCoi({ ...coi, ...updated, status: 'REJECTED' });
       setShowReject(false);
+      setRejectReason('');
       toast.success('COI rejected');
+      if (queueMode) await advanceQueue();
     } catch (err) {
       toast.error(err.message);
     }
@@ -93,7 +121,25 @@ export default function CoiDetail() {
 
   return (
     <div>
-      <Link to="/cois" className="text-sm text-blue-600 hover:underline mb-4 inline-block">Back to COIs</Link>
+      <Link to="/cois?status=PENDING_REVIEW" className="text-sm text-blue-600 hover:underline mb-4 inline-block">
+        {queueMode ? '← Back to pending reviews' : 'Back to COIs'}
+      </Link>
+
+      {queueMode && queueCount !== null && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <p className="text-sm text-blue-900">
+            Reviewing pending COIs — <strong>{queueCount}</strong> remaining
+          </p>
+          {canReview && (
+            <button
+              onClick={advanceQueue}
+              className="text-sm text-blue-700 hover:underline self-start sm:self-auto"
+            >
+              Skip to next →
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-6">
         <div>

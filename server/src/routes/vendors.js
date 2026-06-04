@@ -8,10 +8,11 @@ const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
-const { uploadFile, deleteFile } = require('../services/storage');
+const { uploadFile, deleteFile, getSignedUrl } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
 const { logAudit } = require('../services/audit');
+const core = require('../lib/core');
 
 const router = express.Router();
 
@@ -24,6 +25,18 @@ const upload = multer({
     } else {
       cb(new Error('Only PDF files are allowed'));
     }
+  },
+});
+
+// Documents (W9 / Master Agreement) accept PDFs and common image types since
+// Airtable historically stored W9s as phone photos (JPG/PNG/HEIC).
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = ['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/heif'];
+    if (ok.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only PDF or image files are allowed'));
   },
 });
 
@@ -75,12 +88,52 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
     });
 
     logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'create', entity: 'vendor', entityId: updated.id, details: { name, email }, ipAddress: req.ip });
+
+    mirrorCreateToCore(updated);
+
     res.status(201).json(updated);
   } catch (err) {
     console.error('Create vendor error:', err);
     res.status(500).json({ error: 'Failed to create vendor' });
   }
 });
+
+async function mirrorCreateToCore(vendor) {
+  if (!core.isEnabled()) return;
+  try {
+    const result = await core.createVendor(vendor);
+    const coreId = result && result.data && result.data.id;
+    if (coreId) {
+      await prisma.vendor.update({ where: { id: vendor.id }, data: { coreId } });
+    } else {
+      console.warn('[Core] createVendor returned no id; vendor not linked', { vendorId: vendor.id });
+    }
+  } catch (err) {
+    console.error('[Core] Failed to mirror vendor create:', core.formatError(err));
+  }
+}
+
+async function mirrorUpdateToCore(vendor) {
+  if (!core.isEnabled()) return;
+  if (!vendor.coreId) {
+    // No link yet — treat as a create so we don't drop the update.
+    return mirrorCreateToCore(vendor);
+  }
+  try {
+    await core.updateVendor(vendor.coreId, core.vendorToCorePayload(vendor));
+  } catch (err) {
+    console.error('[Core] Failed to mirror vendor update:', core.formatError(err));
+  }
+}
+
+async function mirrorDeleteToCore(coreId) {
+  if (!core.isEnabled() || !coreId) return;
+  try {
+    await core.updateVendor(coreId, { status: 'inactive' });
+  } catch (err) {
+    console.error('[Core] Failed to mirror vendor delete:', core.formatError(err));
+  }
+}
 
 // GET /api/vendors/:id
 router.get('/:id', authenticate, async (req, res) => {
@@ -96,7 +149,22 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
-    res.json(vendor);
+    const [w9Url, masterAgreementUrl, lastCoiRequest] = await Promise.all([
+      vendor.w9Path ? getSignedUrl(vendor.w9Path).catch(() => null) : null,
+      vendor.masterAgreementPath ? getSignedUrl(vendor.masterAgreementPath).catch(() => null) : null,
+      prisma.notificationLog.findFirst({
+        where: { vendorId: vendor.id, type: 'UPLOAD_REQUEST', status: 'SENT' },
+        orderBy: { sentAt: 'desc' },
+        select: { sentAt: true },
+      }),
+    ]);
+
+    res.json({
+      ...vendor,
+      w9Url,
+      masterAgreementUrl,
+      lastCoiRequestAt: lastCoiRequest?.sentAt || null,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get vendor' });
   }
@@ -126,6 +194,8 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
       },
     });
 
+    mirrorUpdateToCore(updated);
+
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: 'Failed to update vendor' });
@@ -139,6 +209,12 @@ router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, r
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'ids must be a non-empty array' });
     }
+
+    // Capture coreIds before soft-delete so we can mirror to Core after.
+    const linked = await prisma.vendor.findMany({
+      where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null, coreId: { not: null } },
+      select: { coreId: true },
+    });
 
     // Delete COI files from Spaces, then delete records
     const coisToDelete = await prisma.coi.findMany({
@@ -160,6 +236,8 @@ router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, r
       where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
+
+    for (const v of linked) mirrorDeleteToCore(v.coreId);
 
     res.json({ message: `${count} vendor(s) deleted` });
   } catch (err) {
@@ -199,6 +277,8 @@ router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, re
       where: { id: req.params.id },
       data: { deletedAt: new Date() },
     });
+
+    mirrorDeleteToCore(vendor.coreId);
 
     logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'delete', entity: 'vendor', entityId: req.params.id, ipAddress: req.ip });
     res.json({ message: 'Vendor deleted' });
@@ -303,11 +383,42 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
-    const portalUrl = `${process.env.APP_URL}/portal/${vendor.uploadToken}`;
+    // Default 24-hour cooldown so a stray click (or a tab left open) can't
+    // blast the vendor with multiple identical emails. Caller can override
+    // with `force: true` after a confirmation prompt.
+    const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+    if (!req.body?.force) {
+      const recent = await prisma.notificationLog.findFirst({
+        where: {
+          vendorId: vendor.id,
+          type: 'UPLOAD_REQUEST',
+          status: 'SENT',
+          sentAt: { gte: new Date(Date.now() - COOLDOWN_MS) },
+        },
+        orderBy: { sentAt: 'desc' },
+        select: { sentAt: true },
+      });
+      if (recent) {
+        return res.status(429).json({
+          error: 'A COI request was sent recently to this vendor',
+          code: 'RECENT_REQUEST',
+          lastSentAt: recent.sentAt,
+        });
+      }
+    }
+
+    // Rotate the upload token on every request. Catches vendors created via
+    // the import scripts (where uploadToken is still the default UUID and the
+    // portal can't jwt.verify() it) and also limits the lifetime of any
+    // previously-shared link.
+    const uploadToken = generateUploadToken(vendor.id);
+    await prisma.vendor.update({ where: { id: vendor.id }, data: { uploadToken } });
+
+    const portalUrl = `${process.env.APP_URL}/portal/${uploadToken}`;
 
     await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization);
 
-    await prisma.notificationLog.create({
+    const log = await prisma.notificationLog.create({
       data: {
         orgId: req.user.orgId,
         vendorId: vendor.id,
@@ -317,11 +428,57 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
       },
     });
 
-    res.json({ message: 'COI request sent' });
+    res.json({ message: 'COI request sent', lastSentAt: log.sentAt });
   } catch (err) {
     console.error('Request COI error:', err);
     res.status(500).json({ error: 'Failed to send COI request' });
   }
 });
+
+// POST /api/vendors/:id/documents — upload W9 and/or Master Agreement
+router.post(
+  '/:id/documents',
+  authenticate,
+  authorize('ADMIN', 'MEMBER', 'REVIEWER'),
+  docUpload.fields([
+    { name: 'w9', maxCount: 1 },
+    { name: 'masterAgreement', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const vendor = await prisma.vendor.findFirst({
+        where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
+      });
+      if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+      const w9 = req.files?.w9?.[0];
+      const ma = req.files?.masterAgreement?.[0];
+      if (!w9 && !ma) return res.status(400).json({ error: 'No files provided' });
+
+      const data = {};
+      if (w9) {
+        const key = `${uuidv4()}${path.extname(w9.originalname) || ''}`;
+        data.w9Path = await uploadFile(w9.buffer, key, w9.mimetype, 'w9s');
+      }
+      if (ma) {
+        const key = `${uuidv4()}${path.extname(ma.originalname) || ''}`;
+        data.masterAgreementPath = await uploadFile(ma.buffer, key, ma.mimetype, 'master-agreements');
+      }
+
+      const updated = await prisma.vendor.update({ where: { id: vendor.id }, data });
+
+      const [w9Url, masterAgreementUrl] = await Promise.all([
+        updated.w9Path ? getSignedUrl(updated.w9Path).catch(() => null) : null,
+        updated.masterAgreementPath ? getSignedUrl(updated.masterAgreementPath).catch(() => null) : null,
+      ]);
+
+      logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'update', entity: 'vendor', entityId: updated.id, details: { uploaded: Object.keys(data) }, ipAddress: req.ip });
+      res.json({ ...updated, w9Url, masterAgreementUrl });
+    } catch (err) {
+      console.error('Document upload error:', err);
+      res.status(500).json({ error: 'Failed to upload documents' });
+    }
+  }
+);
 
 module.exports = router;

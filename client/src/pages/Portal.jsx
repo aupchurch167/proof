@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
-
-const API_BASE = '/api';
+import { API_BASE } from '../utils/api';
 
 export default function Portal() {
   const { token } = useParams();

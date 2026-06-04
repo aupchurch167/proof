@@ -32,8 +32,10 @@ export default function Settings() {
 
   // Organization info
   const [orgForm, setOrgForm] = useState({ name: '', email: '', phone: '', address: '', additionalInsuredNote: '' });
+  const [orgSlug, setOrgSlug] = useState(null);
   const [orgMsg, setOrgMsg] = useState('');
   const [savingOrg, setSavingOrg] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // User profile
   const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', email: '' });
@@ -62,6 +64,7 @@ export default function Settings() {
           notifyOnExpiration: s.notifyOnExpiration,
         });
         setOrgForm({ name: org.name, email: org.email, phone: org.phone || '', address: org.address || '', additionalInsuredNote: org.additionalInsuredNote || '' });
+        setOrgSlug(org.slug || org.id);
         setProfileForm({ firstName: me.firstName, lastName: me.lastName, email: me.email });
       })
       .catch(console.error)
@@ -264,6 +267,40 @@ export default function Settings() {
               {savingOrg ? 'Saving...' : 'Update Company Info'}
             </button>
           </form>
+
+          {/* Vendor Application Link */}
+          {orgSlug && (
+            <div className="bg-white rounded-xl border p-6 mb-6">
+              <h2 className="text-lg font-semibold mb-1">Vendor Application Link</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Share this link with subcontractors so they can apply to join your vendor list directly.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <code className="flex-1 text-xs sm:text-sm bg-gray-100 px-3 py-2.5 rounded-lg overflow-x-auto break-all">
+                  {`${window.location.origin}/apply/${orgSlug}`}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/apply/${orgSlug}`);
+                    setLinkCopied(true);
+                    setTimeout(() => setLinkCopied(false), 1500);
+                  }}
+                  className="bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-medium whitespace-nowrap"
+                >
+                  {linkCopied ? 'Copied!' : 'Copy Link'}
+                </button>
+                <a
+                  href={`${window.location.origin}/apply/${orgSlug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-gray-300 px-4 py-2.5 rounded-lg hover:bg-gray-50 text-sm font-medium text-center"
+                >
+                  Preview
+                </a>
+              </div>
+            </div>
+          )}
 
           {/* Coverage Requirements */}
           <form onSubmit={handleSaveSettings}>

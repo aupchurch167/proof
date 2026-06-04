@@ -65,6 +65,7 @@ model Organization {
   address               String?
   plan                  Plan     @default(FREE)
   additionalInsuredNote String?
+  slug                  String?  @unique
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -118,18 +119,24 @@ model User {
 }
 
 model Vendor {
-  id          String    @id @default(uuid())
-  orgId       String
-  name        String
-  contactName String?
-  email       String
-  phone       String?
-  address     String?
-  uploadToken String    @unique @default(uuid())
-  coiStatus   CoiStatus @default(NO_COI)
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                  String    @id @default(uuid())
+  orgId               String
+  name                String
+  contactName         String?
+  email               String
+  phone               String?
+  address             String?
+  trade               String?
+  notes               String?
+  w9Path              String?
+  masterAgreementPath String?
+  uploadToken         String    @unique @default(uuid())
+  coiStatus           CoiStatus @default(NO_COI)
+  coreId              String?   @unique
+  airtableRecordId    String?   @unique
+  deletedAt           DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   organization  Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   cois          Coi[]
@@ -182,6 +189,7 @@ model Coi {
   reviewedById    String?
   reviewedAt      DateTime?
   reviewNotes     String?
+  airtableRecordId String?       @unique
   submittedAt     DateTime        @default(now())
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt

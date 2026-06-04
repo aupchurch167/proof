@@ -1,3 +1,5 @@
+const core = require('../lib/core');
+
 function checkCompliance(extractedData, settings, orgName) {
   const flags = [];
 
@@ -93,10 +95,13 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
       where: { vendorId, status: 'PENDING_REVIEW' },
     });
 
-    await prisma.vendor.update({
+    const newStatus = pendingCoi ? 'PENDING' : 'NO_COI';
+    const updated = await prisma.vendor.update({
       where: { id: vendorId },
-      data: { coiStatus: pendingCoi ? 'PENDING' : 'NO_COI' },
+      data: { coiStatus: newStatus },
+      select: { coreId: true },
     });
+    mirrorComplianceStatusToCore(updated.coreId, newStatus);
     return;
   }
 
@@ -139,10 +144,21 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
     status = 'COMPLIANT';
   }
 
-  await prisma.vendor.update({
+  const updated = await prisma.vendor.update({
     where: { id: vendorId },
     data: { coiStatus: status },
+    select: { coreId: true },
   });
+  mirrorComplianceStatusToCore(updated.coreId, status);
+}
+
+async function mirrorComplianceStatusToCore(coreId, coiStatus) {
+  if (!core.isEnabled() || !coreId) return;
+  try {
+    await core.updateVendor(coreId, { complianceStatus: core.mapComplianceStatus(coiStatus) });
+  } catch (err) {
+    console.error('[Core] Failed to mirror compliance status:', core.formatError(err));
+  }
 }
 
 module.exports = { checkCompliance, updateVendorStatus };

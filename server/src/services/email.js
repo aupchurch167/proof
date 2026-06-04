@@ -1,36 +1,41 @@
-const sgMail = require('@sendgrid/mail');
+const { Resend } = require('resend');
 
-let initialized = false;
+let resend = null;
 
 function init() {
-  if (!initialized && process.env.SENDGRID_API_KEY) {
-    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-    initialized = true;
+  if (!resend && process.env.RESEND_API_KEY) {
+    resend = new Resend(process.env.RESEND_API_KEY);
   }
 }
 
 async function sendEmail(to, subject, html) {
-  // Skip if SendGrid not configured
-  if (!process.env.SENDGRID_API_KEY || !process.env.FROM_EMAIL) {
+  // Skip if Resend not configured.
+  if (!process.env.RESEND_API_KEY || !process.env.FROM_EMAIL) {
     console.log(`[Email] Would send to ${to}: ${subject}`);
     return;
   }
 
   init();
 
+  const payload = {
+    to,
+    from: process.env.FROM_EMAIL,
+    subject,
+    html,
+  };
+  if (process.env.REPLY_TO_EMAIL) {
+    payload.reply_to = process.env.REPLY_TO_EMAIL;
+  }
+
   try {
-    const [response] = await sgMail.send({
-      to,
-      from: process.env.FROM_EMAIL,
-      subject,
-      html,
-    });
-    console.log(`[Email] Sent to ${to}: "${subject}" — status ${response.statusCode}`);
+    const { data, error } = await resend.emails.send(payload);
+    if (error) {
+      console.error(`[Email] Failed to send to ${to}:`, error.message || error);
+      throw new Error(error.message || 'Resend send failed');
+    }
+    console.log(`[Email] Sent to ${to}: "${subject}" — id ${data?.id || 'unknown'}`);
   } catch (err) {
     console.error(`[Email] Failed to send to ${to}:`, err.message);
-    if (err.response) {
-      console.error(`[Email] SendGrid response body:`, JSON.stringify(err.response.body, null, 2));
-    }
     throw err;
   }
 }

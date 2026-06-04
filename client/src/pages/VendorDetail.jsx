@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import PdfUploadZone from '../components/PdfUploadZone';
+import ReplyList from '../components/ReplyList';
 
 const reviewStatusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -41,6 +42,32 @@ function ExpirationBadge({ dateStr }) {
   };
   const labels = { valid: dateLabel, expiring: `${dateLabel} (expiring)`, expired: `${dateLabel} (expired)` };
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status]}`}>{labels[status]}</span>;
+}
+
+function DocSlot({ label, url, canManage, onUpload }) {
+  const inputId = `doc-${label.replace(/\s+/g, '-')}`;
+  return (
+    <div className="flex items-center gap-2">
+      {url ? (
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          className="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+          {label}
+        </a>
+      ) : (
+        <span className="text-sm text-gray-400 px-3 py-1.5">No {label}</span>
+      )}
+      {canManage && (
+        <>
+          <label htmlFor={inputId}
+            className="text-xs text-blue-600 hover:underline cursor-pointer">
+            {url ? 'Replace' : 'Upload'}
+          </label>
+          <input id={inputId} type="file" accept="application/pdf,image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ''; }} />
+        </>
+      )}
+    </div>
+  );
 }
 
 function CoverageBreakdown({ coi }) {
@@ -127,6 +154,7 @@ export default function VendorDetail() {
   const toast = useToast();
   const navigate = useNavigate();
   const [vendor, setVendor] = useState(null);
+  const [replies, setReplies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
@@ -142,6 +170,9 @@ export default function VendorDetail() {
       .then((v) => { setVendor(v); setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '' }); })
       .catch(console.error)
       .finally(() => setLoading(false));
+    api.get(`/replies/vendor/${id}`)
+      .then(setReplies)
+      .catch(() => {}); // non-fatal if replies endpoint hiccups
   }, [id]);
 
   const handleSave = async () => {
@@ -165,6 +196,19 @@ export default function VendorDetail() {
     }
   };
 
+  const handleUploadDoc = async (field, file) => {
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append(field, file);
+      const updated = await api.upload(`/vendors/${id}/documents`, fd);
+      setVendor((v) => ({ ...v, ...updated }));
+      toast.success(`${field === 'w9' ? 'W9' : 'Master Agreement'} uploaded`);
+    } catch (err) {
+      toast.error('Upload failed: ' + (err.message || 'unknown error'));
+    }
+  };
+
   const handleUploadCoi = async (file) => {
     setUploading(true);
     setUploadError('');
@@ -182,13 +226,24 @@ export default function VendorDetail() {
     }
   };
 
-  const handleRequestCoi = async () => {
+  const handleRequestCoi = async (force = false) => {
     setRequesting(true);
     try {
-      await api.post(`/vendors/${id}/request-coi`);
+      const result = await api.post(`/vendors/${id}/request-coi`, force ? { force: true } : undefined);
       toast.success('COI request email sent!');
+      setVendor((v) => ({ ...v, lastCoiRequestAt: result.lastSentAt }));
     } catch (err) {
-      toast.error('Failed to send request: ' + err.message);
+      const msg = err.message || '';
+      if (msg.toLowerCase().includes('recently')) {
+        const last = vendor?.lastCoiRequestAt
+          ? new Date(vendor.lastCoiRequestAt).toLocaleString()
+          : 'recently';
+        if (window.confirm(`A COI request was already sent ${last}. Send another anyway?`)) {
+          return handleRequestCoi(true);
+        }
+      } else {
+        toast.error('Failed to send request: ' + msg);
+      }
     } finally {
       setRequesting(false);
     }
@@ -272,18 +327,57 @@ export default function VendorDetail() {
               className="text-sm text-blue-600 hover:underline whitespace-nowrap py-1">Copy</button>
           </div>
         </div>
+
+        <div className="mt-4 pt-4 border-t space-y-3">
+          {vendor.trade && (
+            <div>
+              <p className="text-sm text-gray-500">Trade</p>
+              <p className="text-sm">{vendor.trade}</p>
+            </div>
+          )}
+          {vendor.notes && (
+            <div>
+              <p className="text-sm text-gray-500">Notes</p>
+              <p className="text-sm whitespace-pre-wrap">{vendor.notes}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-sm text-gray-500 mb-1">Documents</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <DocSlot
+                label="W9"
+                url={vendor.w9Url}
+                canManage={canManage}
+                onUpload={(file) => handleUploadDoc('w9', file)}
+              />
+              <DocSlot
+                label="Master Agreement"
+                url={vendor.masterAgreementUrl}
+                canManage={canManage}
+                onUpload={(file) => handleUploadDoc('masterAgreement', file)}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Coverage Summary */}
       {vendor.cois?.length > 0 && <CoverageSummary cois={vendor.cois} />}
 
       {/* COI History */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
-        <h2 className="text-lg font-semibold">COI History</h2>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
+        <div>
+          <h2 className="text-lg font-semibold">COI History</h2>
+          {vendor.lastCoiRequestAt && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              Last requested {new Date(vendor.lastCoiRequestAt).toLocaleString()}
+            </p>
+          )}
+        </div>
         {canManage && (
           <div className="flex flex-col sm:flex-row gap-2">
             <button
-              onClick={handleRequestCoi}
+              onClick={() => handleRequestCoi()}
               disabled={requesting}
               className="text-sm border border-blue-600 text-blue-600 px-3 py-2 sm:py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-center"
             >
@@ -373,6 +467,18 @@ export default function VendorDetail() {
           )}
         </div>
       )}
+
+      <div className="flex justify-between items-center mt-8 mb-4">
+        <h2 className="text-lg font-semibold">Replies</h2>
+        {replies.length > 0 && (
+          <span className="text-xs text-gray-500">{replies.length}</span>
+        )}
+      </div>
+      <ReplyList
+        replies={replies}
+        showVendor={false}
+        emptyText="No replies yet. When this vendor replies to a Proof email, it'll show here."
+      />
 
       <DeleteConfirmationModal
         isOpen={showDeleteModal}

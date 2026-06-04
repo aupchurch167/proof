@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../utils/api';
+import { api, API_BASE } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 
 const statusColors = {
@@ -136,7 +136,7 @@ export default function Reports() {
     setExportingPdfs(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const res = await fetch('/api/reports/export-pdfs', {
+      const res = await fetch(`${API_BASE}/reports/export-pdfs`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

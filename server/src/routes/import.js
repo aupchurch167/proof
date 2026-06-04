@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
 const { checkCompliance } = require('../services/compliance');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
+const core = require('../lib/core');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -140,7 +141,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
       }
 
       try {
-        await prisma.vendor.create({
+        const created = await prisma.vendor.create({
           data: {
             orgId: req.user.orgId,
             name,
@@ -152,6 +153,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
         });
         vendorCount++;
         results.created++;
+        mirrorImportedVendorToCore(created);
       } catch (err) {
         results.errors.push({ row: i + 2, message: err.message });
         results.skipped++;
@@ -164,6 +166,21 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
     res.status(500).json({ error: 'Failed to import vendors' });
   }
 });
+
+async function mirrorImportedVendorToCore(vendor) {
+  if (!core.isEnabled()) return;
+  try {
+    const result = await core.createVendor(vendor);
+    const coreId = result && result.data && result.data.id;
+    if (coreId) {
+      await prisma.vendor.update({ where: { id: vendor.id }, data: { coreId } });
+    } else {
+      console.warn('[Core] import: createVendor returned no id; vendor not linked', { vendorId: vendor.id });
+    }
+  } catch (err) {
+    console.error('[Core] import: failed to mirror vendor:', core.formatError(err));
+  }
+}
 
 // POST /api/import/cois — bulk import COIs
 router.post('/cois', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upload.single('file'), async (req, res) => {
