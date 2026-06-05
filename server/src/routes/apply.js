@@ -8,6 +8,7 @@ const { uploadFile } = require('../services/storage');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
 const { generateUploadToken } = require('../utils/tokens');
+const { isValidTrade } = require('../constants/trades');
 
 const router = express.Router();
 
@@ -63,6 +64,10 @@ router.post(
       const { name, contactName, phone, email, trade, notes, address, city, state, zip } = req.body;
       if (!name || !email || !phone || !address) {
         return res.status(400).json({ error: 'Business name, email, phone, and address are required' });
+      }
+
+      if (trade && !isValidTrade(trade)) {
+        return res.status(400).json({ error: 'Invalid trade value' });
       }
 
       const composedAddress = [

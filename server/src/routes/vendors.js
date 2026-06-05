@@ -13,6 +13,7 @@ const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
 const { logAudit } = require('../services/audit');
 const core = require('../lib/core');
+const { isValidTrade, CANONICAL_TRADES } = require('../constants/trades');
 
 const router = express.Router();
 
@@ -43,10 +44,11 @@ const docUpload = multer({
 // GET /api/vendors
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, trade } = req.query;
     const where = { orgId: req.user.orgId, deletedAt: null };
 
     if (status) where.coiStatus = status;
+    if (trade) where.trade = trade;
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -72,13 +74,22 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/vendors/trades — canonical trade list for dropdowns
+router.get('/trades', authenticate, (req, res) => {
+  res.json(CANONICAL_TRADES);
+});
+
 // POST /api/vendors
 router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('vendor'), validate('createVendor'), async (req, res) => {
   try {
-    const { name, contactName, email, phone, address } = req.body;
+    const { name, contactName, email, phone, address, trade } = req.body;
+
+    if (trade && !isValidTrade(trade)) {
+      return res.status(400).json({ error: 'Invalid trade value' });
+    }
 
     const vendor = await prisma.vendor.create({
-      data: { orgId: req.user.orgId, name, contactName, email, phone, address },
+      data: { orgId: req.user.orgId, name, contactName, email, phone, address, trade: trade || null },
     });
 
     // Replace default UUID token with a signed JWT
@@ -173,7 +184,11 @@ router.get('/:id', authenticate, async (req, res) => {
 // PUT /api/vendors/:id
 router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
-    const { name, contactName, email, phone, address } = req.body;
+    const { name, contactName, email, phone, address, trade } = req.body;
+
+    if (trade && !isValidTrade(trade)) {
+      return res.status(400).json({ error: 'Invalid trade value' });
+    }
 
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
@@ -191,6 +206,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
         ...(email && { email }),
         ...(phone !== undefined && { phone }),
         ...(address !== undefined && { address }),
+        ...(trade !== undefined && { trade: trade || null }),
       },
     });
 

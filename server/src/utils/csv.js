@@ -94,6 +94,7 @@ const VENDOR_HEADERS = [
   'email',
   'phone',
   'address',
+  'trade',
 ];
 
 const COI_HEADERS = [

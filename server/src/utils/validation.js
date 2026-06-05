@@ -41,6 +41,7 @@ const schemas = {
     contactName: z.string().optional(),
     phone: z.string().optional(),
     address: z.string().optional(),
+    trade: z.string().optional(),
   }),
 
   createCoi: z.object({

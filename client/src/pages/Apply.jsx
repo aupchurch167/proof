@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { API_BASE } from '../utils/api';
+import { CANONICAL_TRADES } from '../constants/trades';
 
 const blankForm = {
   name: '', contactName: '', phone: '', email: '', trade: '', notes: '',
@@ -102,7 +103,12 @@ export default function Apply() {
         </div>
         <div>
           <label className={labelClass}>Trade / tipo de trabajo</label>
-          <input value={form.trade} onChange={set('trade')} className={inputClass} />
+          <select value={form.trade} onChange={set('trade')} className={inputClass}>
+            <option value="">Select a trade...</option>
+            {CANONICAL_TRADES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className={labelClass}>Notes / Notas</label>
