@@ -73,6 +73,8 @@ function vendorToCorePayload(vendor) {
     email: vendor.email,
     phone: vendor.phone || undefined,
     addressLine1: vendor.address || undefined,
+    trade: vendor.trade || undefined,
+    additionalEmails: vendor.additionalEmails?.length > 0 ? vendor.additionalEmails : undefined,
     complianceStatus: mapComplianceStatus(vendor.coiStatus),
     status: vendor.deletedAt ? 'inactive' : 'active',
   };

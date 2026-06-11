@@ -8,10 +8,10 @@ function init() {
   }
 }
 
-async function sendEmail(to, subject, html) {
+async function sendEmail(to, subject, html, cc) {
   // Skip if Resend not configured.
   if (!process.env.RESEND_API_KEY || !process.env.FROM_EMAIL) {
-    console.log(`[Email] Would send to ${to}: ${subject}`);
+    console.log(`[Email] Would send to ${to}${cc?.length ? ` cc=${cc.join(',')}` : ''}: ${subject}`);
     return;
   }
 
@@ -23,6 +23,9 @@ async function sendEmail(to, subject, html) {
     subject,
     html,
   };
+  if (cc && cc.length > 0) {
+    payload.cc = cc;
+  }
   if (process.env.REPLY_TO_EMAIL) {
     payload.reply_to = process.env.REPLY_TO_EMAIL;
   }
@@ -33,14 +36,14 @@ async function sendEmail(to, subject, html) {
       console.error(`[Email] Failed to send to ${to}:`, error.message || error);
       throw new Error(error.message || 'Resend send failed');
     }
-    console.log(`[Email] Sent to ${to}: "${subject}" — id ${data?.id || 'unknown'}`);
+    console.log(`[Email] Sent to ${to}${cc?.length ? ` cc=${cc.join(',')}` : ''}: "${subject}" — id ${data?.id || 'unknown'}`);
   } catch (err) {
     console.error(`[Email] Failed to send to ${to}:`, err.message);
     throw err;
   }
 }
 
-async function sendUploadRequestEmail(to, vendorName, portalUrl, org) {
+async function sendUploadRequestEmail(to, vendorName, portalUrl, org, cc) {
   const orgName = org?.name || 'our company';
   const orgEmail = org?.email || '';
   const orgAddress = org?.address || '';
@@ -69,7 +72,8 @@ async function sendUploadRequestEmail(to, vendorName, portalUrl, org) {
      <p style="font-size:12px;color:#9ca3af;text-align:center;">
        Powered by <a href="https://proofcoi.com" style="color:#6b7280;text-decoration:none;font-weight:500;">Proof</a> &mdash; COI management for general contractors.
        <a href="https://proofcoi.com" style="color:#3b82f6;text-decoration:none;">Learn more at proofcoi.com</a>
-     </p>`
+     </p>`,
+    cc
   );
 }
 
@@ -83,7 +87,7 @@ async function sendUploadNotificationEmail(to, vendorName) {
   );
 }
 
-async function sendRejectionEmail(to, vendorName, reason, portalUrl) {
+async function sendRejectionEmail(to, vendorName, reason, portalUrl, cc) {
   await sendEmail(
     to,
     'COI Rejected - Action Required',
@@ -92,11 +96,12 @@ async function sendRejectionEmail(to, vendorName, reason, portalUrl) {
      <p>Your Certificate of Insurance has been rejected for the following reason:</p>
      <blockquote style="border-left:4px solid #ef4444;padding:8px 16px;margin:16px 0;background:#fef2f2;">${reason}</blockquote>
      <p>Please upload a corrected COI using the link below:</p>
-     <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload New COI</a></p>`
+     <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload New COI</a></p>`,
+    cc
   );
 }
 
-async function sendExpirationReminderEmail(to, vendorName, daysUntil, portalUrl) {
+async function sendExpirationReminderEmail(to, vendorName, daysUntil, portalUrl, cc) {
   const urgency = daysUntil <= 0 ? 'has expired' : `expires in ${daysUntil} day(s)`;
   await sendEmail(
     to,
@@ -104,7 +109,8 @@ async function sendExpirationReminderEmail(to, vendorName, daysUntil, portalUrl)
     `<h2>COI Expiration Notice</h2>
      <p>Hello ${vendorName},</p>
      <p>Your Certificate of Insurance ${urgency}. Please upload an updated COI.</p>
-     <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload Updated COI</a></p>`
+     <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload Updated COI</a></p>`,
+    cc
   );
 }
 

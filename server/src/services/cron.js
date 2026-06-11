@@ -73,11 +73,13 @@ function startExpirationCron(prisma) {
             });
 
             if (!alreadySent) {
+              const cc = vendor.additionalEmails?.length > 0 ? vendor.additionalEmails : undefined;
               await sendExpirationReminderEmail(
                 vendor.email,
                 vendor.name,
                 daysUntil,
-                portalUrl
+                portalUrl,
+                cc
               ).catch(console.error);
 
               await prisma.notificationLog.create({

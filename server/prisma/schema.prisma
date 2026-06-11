@@ -127,6 +127,7 @@ model Vendor {
   phone               String?
   address             String?
   trade               String?
+  additionalEmails    String[]  @default([])
   notes               String?
   w9Path              String?
   masterAgreementPath String?

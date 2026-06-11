@@ -4,6 +4,8 @@ import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
+import { CANONICAL_TRADES } from '../constants/trades';
+import EmailTagInput from '../components/EmailTagInput';
 
 const statusColors = {
   COMPLIANT: 'bg-green-100 text-green-800',
@@ -36,11 +38,12 @@ export default function Vendors() {
   useEffect(() => {
     api.get('/organization').then((org) => setOrgSlug(org.slug || org.id)).catch(() => {});
   }, []);
-  const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
+  const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '', trade: '', additionalEmails: [] });
   const [w9File, setW9File] = useState(null);
   const [maFile, setMaFile] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
+  const [tradeFilter, setTradeFilter] = useState(searchParams.get('trade') || '');
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -52,6 +55,7 @@ export default function Vendors() {
       let url = '/vendors?';
       if (search) url += `search=${encodeURIComponent(search)}&`;
       if (statusFilter) url += `status=${statusFilter}&`;
+      if (tradeFilter) url += `trade=${encodeURIComponent(tradeFilter)}&`;
       const data = await api.get(url);
       setVendors(data);
     } catch (err) {
@@ -61,20 +65,23 @@ export default function Vendors() {
     }
   };
 
-  useEffect(() => { fetchVendors(); }, [search, statusFilter]);
+  useEffect(() => { fetchVendors(); }, [search, statusFilter, tradeFilter]);
 
   const handleAdd = async (e) => {
     e.preventDefault();
     setError('');
     try {
-      const created = await api.post('/vendors', form);
+      const payload = { ...form };
+      if (!payload.trade) delete payload.trade;
+      if (!payload.additionalEmails?.length) delete payload.additionalEmails;
+      const created = await api.post('/vendors', payload);
       if (w9File || maFile) {
         const fd = new FormData();
         if (w9File) fd.append('w9', w9File);
         if (maFile) fd.append('masterAgreement', maFile);
         await api.upload(`/vendors/${created.id}/documents`, fd);
       }
-      setForm({ name: '', contactName: '', email: '', phone: '', address: '' });
+      setForm({ name: '', contactName: '', email: '', phone: '', address: '', trade: '', additionalEmails: [] });
       setW9File(null);
       setMaFile(null);
       setShowAdd(false);
@@ -227,10 +234,28 @@ export default function Vendors() {
               <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
                 className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
             </div>
-            <div className="sm:col-span-2">
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
               <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
                 className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Trade</label>
+              <select value={form.trade} onChange={(e) => setForm({ ...form, trade: e.target.value })}
+                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm">
+                <option value="">Select a trade...</option>
+                {CANONICAL_TRADES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Additional Emails <span className="text-gray-400 font-normal">(CC on COI requests)</span></label>
+              <EmailTagInput
+                value={form.additionalEmails}
+                onChange={(emails) => setForm({ ...form, additionalEmails: emails })}
+                placeholder="Add email addresses..."
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">W9 <span className="text-gray-400 font-normal">(PDF or image)</span></label>
@@ -258,16 +283,28 @@ export default function Vendors() {
           className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-64" />
         <select value={statusFilter} onChange={(e) => {
             setStatusFilter(e.target.value);
-            if (e.target.value) {
-              setSearchParams({ status: e.target.value });
-            } else {
-              setSearchParams({});
-            }
+            const params = {};
+            if (e.target.value) params.status = e.target.value;
+            if (tradeFilter) params.trade = tradeFilter;
+            setSearchParams(params);
           }}
           className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
           <option value="">All Statuses</option>
           {Object.entries(statusLabels).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+        <select value={tradeFilter} onChange={(e) => {
+            setTradeFilter(e.target.value);
+            const params = {};
+            if (statusFilter) params.status = statusFilter;
+            if (e.target.value) params.trade = e.target.value;
+            setSearchParams(params);
+          }}
+          className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
+          <option value="">All Trades</option>
+          {CANONICAL_TRADES.map((t) => (
+            <option key={t} value={t}>{t}</option>
           ))}
         </select>
       </div>
@@ -294,6 +331,7 @@ export default function Vendors() {
                     </th>
                   )}
                   <th className="text-left px-6 py-3 font-medium text-gray-600">Name</th>
+                  <th className="text-left px-6 py-3 font-medium text-gray-600">Trade</th>
                   <th className="text-left px-6 py-3 font-medium text-gray-600">Email</th>
                   <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
                   <th className="text-left px-6 py-3 font-medium text-gray-600">Latest COI</th>
@@ -314,6 +352,7 @@ export default function Vendors() {
                         {vendor.name}
                       </Link>
                     </td>
+                    <td className="px-6 py-4 text-gray-500 text-xs">{vendor.trade || ''}</td>
                     <td className="px-6 py-4 text-gray-600">{vendor.email}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[vendor.coiStatus]}`}>
@@ -364,6 +403,7 @@ export default function Vendors() {
                         {statusLabels[vendor.coiStatus]}
                       </span>
                     </div>
+                    {vendor.trade && <p className="text-xs text-gray-400 mt-0.5">{vendor.trade}</p>}
                     <p className="text-sm text-gray-500 truncate mt-1">{vendor.email}</p>
                     <div className="flex items-center justify-between mt-2">
                       <span className="text-xs text-gray-400">

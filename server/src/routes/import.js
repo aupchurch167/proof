@@ -6,6 +6,7 @@ const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils
 const { checkCompliance } = require('../services/compliance');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
 const core = require('../lib/core');
+const { mapTradeToCanonical } = require('../constants/trades');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -18,6 +19,7 @@ router.get('/template/vendors', (req, res) => {
     email: 'billing@acmeplumbing.com',
     phone: '555-0101',
     address: '456 Oak St, Austin, TX 78702',
+    trade: 'Plumbing',
   }];
   const csv = generateCsv(VENDOR_HEADERS, sample);
   res.setHeader('Content-Type', 'text/csv');
@@ -115,6 +117,8 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
       const email = row[headerMap.email]?.trim();
       const phone = headerMap.phone ? row[headerMap.phone]?.trim() : null;
       const address = headerMap.address ? row[headerMap.address]?.trim() : null;
+      const rawTrade = headerMap.trade ? row[headerMap.trade]?.trim() : null;
+      const trade = rawTrade ? mapTradeToCanonical(rawTrade) : null;
 
       if (!name || !email) {
         results.errors.push({ row: i + 2, message: 'Missing name or email' });
@@ -149,6 +153,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
             email,
             phone: phone || null,
             address: address || null,
+            trade: trade || null,
           },
         });
         vendorCount++;

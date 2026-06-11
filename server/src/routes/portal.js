@@ -160,6 +160,19 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
 
     const coi = await prisma.coi.create({ data: coiData });
 
+    // Auto-add agent email to vendor's additional emails
+    if (extractedData?.agentEmail) {
+      const agentEmail = extractedData.agentEmail.trim();
+      const normalized = agentEmail.toLowerCase();
+      const existing = (vendor.additionalEmails || []).map(e => e.toLowerCase());
+      if (!existing.includes(normalized)) {
+        await prisma.vendor.update({
+          where: { id: vendor.id },
+          data: { additionalEmails: { push: agentEmail } },
+        });
+      }
+    }
+
     // Update vendor status
     await prisma.vendor.update({
       where: { id: vendor.id },
