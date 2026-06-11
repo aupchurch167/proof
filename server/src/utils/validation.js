@@ -42,6 +42,7 @@ const schemas = {
     phone: z.string().optional(),
     address: z.string().optional(),
     trade: z.string().optional(),
+    additionalEmails: z.array(z.string().email('Invalid email in additional emails')).optional(),
   }),
 
   createCoi: z.object({

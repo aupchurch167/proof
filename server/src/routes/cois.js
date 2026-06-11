@@ -247,7 +247,8 @@ router.post('/:id/reject', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'
     // Send rejection notification
     const { sendRejectionEmail } = require('../services/email');
     const portalUrl = `${process.env.APP_URL}/portal/${coi.vendor.uploadToken}`;
-    await sendRejectionEmail(coi.vendor.email, coi.vendor.name, reason, portalUrl).catch(console.error);
+    const cc = coi.vendor.additionalEmails?.length > 0 ? coi.vendor.additionalEmails : undefined;
+    await sendRejectionEmail(coi.vendor.email, coi.vendor.name, reason, portalUrl, cc).catch(console.error);
 
     await prisma.notificationLog.create({
       data: {

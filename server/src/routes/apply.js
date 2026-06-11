@@ -150,6 +150,14 @@ router.post(
             certificateHolderAddress: extracted?.certificateHolderAddress || null,
           },
         });
+        // Auto-add agent email to vendor's additional emails
+        if (extracted?.agentEmail) {
+          await prisma.vendor.update({
+            where: { id: vendor.id },
+            data: { additionalEmails: { push: extracted.agentEmail.trim() } },
+          });
+        }
+
         await updateVendorStatus(prisma, vendor.id, org.id);
       }
 

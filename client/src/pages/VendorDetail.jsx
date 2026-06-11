@@ -7,6 +7,7 @@ import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import PdfUploadZone from '../components/PdfUploadZone';
 import ReplyList from '../components/ReplyList';
 import { CANONICAL_TRADES } from '../constants/trades';
+import EmailTagInput from '../components/EmailTagInput';
 
 const reviewStatusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -168,7 +169,7 @@ export default function VendorDetail() {
 
   useEffect(() => {
     api.get(`/vendors/${id}`)
-      .then((v) => { setVendor(v); setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '', trade: v.trade || '' }); })
+      .then((v) => { setVendor(v); setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '', trade: v.trade || '', additionalEmails: v.additionalEmails || [] }); })
       .catch(console.error)
       .finally(() => setLoading(false));
     api.get(`/replies/vendor/${id}`)
@@ -302,6 +303,14 @@ export default function VendorDetail() {
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
+                <div>
+                  <label className="block text-sm text-gray-500 mb-1">Additional Emails (CC on COI requests)</label>
+                  <EmailTagInput
+                    value={form.additionalEmails}
+                    onChange={(emails) => setForm({ ...form, additionalEmails: emails })}
+                    placeholder="Add email addresses..."
+                  />
+                </div>
                 <div className="flex gap-2">
                   <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm">Save</button>
                   <button onClick={() => setEditing(false)} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
@@ -312,6 +321,13 @@ export default function VendorDetail() {
                 <h1 className="text-xl sm:text-2xl font-bold">{vendor.name}</h1>
                 {vendor.contactName && <p className="text-gray-600 mt-1">{vendor.contactName}</p>}
                 <p className="text-gray-600 mt-1 break-all">{vendor.email}</p>
+                {vendor.additionalEmails?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {vendor.additionalEmails.map((e, i) => (
+                      <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">CC: {e}</span>
+                    ))}
+                  </div>
+                )}
                 {vendor.phone && <p className="text-gray-600">{vendor.phone}</p>}
                 {vendor.address && <p className="text-gray-600">{vendor.address}</p>}
               </>

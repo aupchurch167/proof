@@ -82,14 +82,18 @@ router.get('/trades', authenticate, (req, res) => {
 // POST /api/vendors
 router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('vendor'), validate('createVendor'), async (req, res) => {
   try {
-    const { name, contactName, email, phone, address, trade } = req.body;
+    const { name, contactName, email, phone, address, trade, additionalEmails } = req.body;
 
     if (trade && !isValidTrade(trade)) {
       return res.status(400).json({ error: 'Invalid trade value' });
     }
 
     const vendor = await prisma.vendor.create({
-      data: { orgId: req.user.orgId, name, contactName, email, phone, address, trade: trade || null },
+      data: {
+        orgId: req.user.orgId, name, contactName, email, phone, address,
+        trade: trade || null,
+        additionalEmails: Array.isArray(additionalEmails) ? additionalEmails : [],
+      },
     });
 
     // Replace default UUID token with a signed JWT
@@ -146,6 +150,17 @@ async function mirrorDeleteToCore(coreId) {
   }
 }
 
+async function maybeAddAgentEmail(prisma, vendorId, agentEmail, currentAdditionalEmails) {
+  if (!agentEmail) return;
+  const normalized = agentEmail.trim().toLowerCase();
+  const existing = (currentAdditionalEmails || []).map(e => e.toLowerCase());
+  if (existing.includes(normalized)) return;
+  await prisma.vendor.update({
+    where: { id: vendorId },
+    data: { additionalEmails: { push: agentEmail.trim() } },
+  });
+}
+
 // GET /api/vendors/:id
 router.get('/:id', authenticate, async (req, res) => {
   try {
@@ -184,7 +199,7 @@ router.get('/:id', authenticate, async (req, res) => {
 // PUT /api/vendors/:id
 router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
-    const { name, contactName, email, phone, address, trade } = req.body;
+    const { name, contactName, email, phone, address, trade, additionalEmails } = req.body;
 
     if (trade && !isValidTrade(trade)) {
       return res.status(400).json({ error: 'Invalid trade value' });
@@ -207,6 +222,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
         ...(phone !== undefined && { phone }),
         ...(address !== undefined && { address }),
         ...(trade !== undefined && { trade: trade || null }),
+        ...(additionalEmails !== undefined && { additionalEmails: Array.isArray(additionalEmails) ? additionalEmails : [] }),
       },
     });
 
@@ -373,6 +389,11 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
 
     const coi = await prisma.coi.create({ data: coiData });
 
+    // Auto-add agent email to vendor's additional emails
+    if (extractedData?.agentEmail) {
+      await maybeAddAgentEmail(prisma, vendor.id, extractedData.agentEmail, vendor.additionalEmails);
+    }
+
     // Update vendor status
     await updateVendorStatus(prisma, vendor.id, vendor.orgId);
 
@@ -432,7 +453,8 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
 
     const portalUrl = `${process.env.APP_URL}/portal/${uploadToken}`;
 
-    await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization);
+    const cc = vendor.additionalEmails?.length > 0 ? vendor.additionalEmails : undefined;
+    await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization, cc);
 
     const log = await prisma.notificationLog.create({
       data: {

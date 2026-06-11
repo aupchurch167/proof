@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import { CANONICAL_TRADES } from '../constants/trades';
+import EmailTagInput from '../components/EmailTagInput';
 
 const statusColors = {
   COMPLIANT: 'bg-green-100 text-green-800',
@@ -37,7 +38,7 @@ export default function Vendors() {
   useEffect(() => {
     api.get('/organization').then((org) => setOrgSlug(org.slug || org.id)).catch(() => {});
   }, []);
-  const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '', trade: '' });
+  const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '', trade: '', additionalEmails: [] });
   const [w9File, setW9File] = useState(null);
   const [maFile, setMaFile] = useState(null);
   const [search, setSearch] = useState('');
@@ -72,6 +73,7 @@ export default function Vendors() {
     try {
       const payload = { ...form };
       if (!payload.trade) delete payload.trade;
+      if (!payload.additionalEmails?.length) delete payload.additionalEmails;
       const created = await api.post('/vendors', payload);
       if (w9File || maFile) {
         const fd = new FormData();
@@ -79,7 +81,7 @@ export default function Vendors() {
         if (maFile) fd.append('masterAgreement', maFile);
         await api.upload(`/vendors/${created.id}/documents`, fd);
       }
-      setForm({ name: '', contactName: '', email: '', phone: '', address: '', trade: '' });
+      setForm({ name: '', contactName: '', email: '', phone: '', address: '', trade: '', additionalEmails: [] });
       setW9File(null);
       setMaFile(null);
       setShowAdd(false);
@@ -246,6 +248,14 @@ export default function Vendors() {
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Additional Emails <span className="text-gray-400 font-normal">(CC on COI requests)</span></label>
+              <EmailTagInput
+                value={form.additionalEmails}
+                onChange={(emails) => setForm({ ...form, additionalEmails: emails })}
+                placeholder="Add email addresses..."
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">W9 <span className="text-gray-400 font-normal">(PDF or image)</span></label>
