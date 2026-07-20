@@ -23,7 +23,23 @@ const repliesRoutes = require('./routes/replies');
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(helmet());
+// Allow Google Identity Services (the "Sign in with Google" button) to load when
+// the SPA is served through this API. Extends helmet's defaults rather than
+// replacing them so the rest of the CSP hardening stays intact.
+const gsi = 'https://accounts.google.com/gsi/';
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        'script-src': ["'self'", `${gsi}client`],
+        'connect-src': ["'self'", gsi],
+        'frame-src': ["'self'", gsi],
+        'style-src': ["'self'", "'unsafe-inline'", `${gsi}style`],
+      },
+    },
+  })
+);
 const allowedOrigins = [
   'https://app.proofcoi.com',
   'https://proof.up.railway.app',
@@ -68,6 +84,7 @@ const generalLimiter = rateLimit({
 
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
+app.use('/api/auth/google', authLimiter);
 app.use('/api/auth/accept-invite', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);

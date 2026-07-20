@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 
 export default function Signup() {
   const [form, setForm] = useState({ orgName: '', email: '', password: '', firstName: '', lastName: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signup } = useAuth();
+  const { signup, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
@@ -22,6 +23,16 @@ export default function Signup() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogle = async (credential) => {
+    setError('');
+    try {
+      await loginWithGoogle(credential, form.orgName);
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -67,6 +78,7 @@ export default function Signup() {
             className="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
             {loading ? 'Creating account...' : 'Create account'}
           </button>
+          <GoogleSignInButton onCredential={handleGoogle} onError={(err) => setError(err.message)} text="signup_with" />
           <p className="text-center mt-4 text-sm text-gray-500">
             Already have an account? <Link to="/login" className="text-blue-600 hover:underline">Sign in</Link>
           </p>
