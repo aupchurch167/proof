@@ -83,6 +83,7 @@ model Organization {
   auditLogs     AuditLog[]
   apiClients    ApiClient[]
   coiRequests   CoiRequest[]
+  webhookEndpoints WebhookEndpoint[]
 }
 
 model OrganizationSettings {
@@ -296,4 +297,25 @@ model CoiRequest {
 
   @@index([vendorId, status])
   @@index([orgId, createdAt])
+}
+
+// A subscription for an external consumer to receive signed event callbacks
+// (e.g. coi.updated). Scoped to one org or all orgs, mirroring ApiClient.
+model WebhookEndpoint {
+  id                 String    @id @default(uuid())
+  name               String
+  url                String
+  secret             String
+  events             String[]  @default([])
+  orgId              String?
+  allOrgs            Boolean   @default(false)
+  active             Boolean   @default(true)
+  lastDeliveryAt     DateTime?
+  lastDeliveryStatus String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }

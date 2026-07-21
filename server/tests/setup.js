@@ -78,6 +78,7 @@ async function cleanupTestData() {
   await prisma.notificationLog.deleteMany({});
   await prisma.coi.deleteMany({});
   await prisma.vendor.deleteMany({});
+  await prisma.webhookEndpoint.deleteMany({});
   await prisma.apiClient.deleteMany({});
   await prisma.user.deleteMany({});
   await prisma.organizationSettings.deleteMany({});

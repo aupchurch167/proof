@@ -1,4 +1,5 @@
 const core = require('../lib/core');
+const { emitCoiUpdated } = require('./webhookDispatcher');
 
 function checkCompliance(extractedData, settings, orgName) {
   const flags = [];
@@ -89,61 +90,54 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
     orderBy: { submittedAt: 'desc' },
   });
 
+  let status;
   if (!latestCoi) {
-    // Check if there's a pending one
+    // No approved COI: pending if one is under review, otherwise none on file.
     const pendingCoi = await prisma.coi.findFirst({
       where: { vendorId, status: 'PENDING_REVIEW' },
     });
-
-    const newStatus = pendingCoi ? 'PENDING' : 'NO_COI';
-    const updated = await prisma.vendor.update({
-      where: { id: vendorId },
-      data: { coiStatus: newStatus },
-      select: { coreId: true },
-    });
-    mirrorComplianceStatusToCore(updated.coreId, newStatus);
-    return;
-  }
-
-  // Check if any coverage is expired
-  const now = new Date();
-  const expirationDates = [
-    latestCoi.glExpirationDate,
-    latestCoi.wcExpirationDate,
-    latestCoi.umbExpirationDate,
-    latestCoi.autoExpirationDate,
-  ].filter(Boolean);
-
-  const allExpired = expirationDates.length > 0 && expirationDates.every(d => d < now);
-  const someExpiringSoon = expirationDates.some(d => {
-    const daysUntil = (d - now) / (1000 * 60 * 60 * 24);
-    return daysUntil > 0 && daysUntil <= 30;
-  });
-
-  // Check compliance
-  const complianceFlags = settings ? checkCompliance({
-    glCoverageAmount: latestCoi.glCoverageAmount,
-    wcCoverageAmount: latestCoi.wcCoverageAmount,
-    umbCoverageAmount: latestCoi.umbCoverageAmount,
-    autoCoverageAmount: latestCoi.autoCoverageAmount,
-    glExpirationDate: latestCoi.glExpirationDate?.toISOString(),
-    wcExpirationDate: latestCoi.wcExpirationDate?.toISOString(),
-    umbExpirationDate: latestCoi.umbExpirationDate?.toISOString(),
-    autoExpirationDate: latestCoi.autoExpirationDate?.toISOString(),
-    certificateHolderName: latestCoi.certificateHolderName,
-  }, settings, org?.name) : [];
-
-  let status;
-  if (allExpired) {
-    status = 'EXPIRED';
-  } else if (someExpiringSoon) {
-    status = 'EXPIRING_SOON';
-  } else if (complianceFlags.some(f => f.type === 'INSUFFICIENT' || f.type === 'MISSING')) {
-    status = 'NON_COMPLIANT';
+    status = pendingCoi ? 'PENDING' : 'NO_COI';
   } else {
-    status = 'COMPLIANT';
+    // Check if any coverage is expired
+    const now = new Date();
+    const expirationDates = [
+      latestCoi.glExpirationDate,
+      latestCoi.wcExpirationDate,
+      latestCoi.umbExpirationDate,
+      latestCoi.autoExpirationDate,
+    ].filter(Boolean);
+
+    const allExpired = expirationDates.length > 0 && expirationDates.every(d => d < now);
+    const someExpiringSoon = expirationDates.some(d => {
+      const daysUntil = (d - now) / (1000 * 60 * 60 * 24);
+      return daysUntil > 0 && daysUntil <= 30;
+    });
+
+    // Check compliance
+    const complianceFlags = settings ? checkCompliance({
+      glCoverageAmount: latestCoi.glCoverageAmount,
+      wcCoverageAmount: latestCoi.wcCoverageAmount,
+      umbCoverageAmount: latestCoi.umbCoverageAmount,
+      autoCoverageAmount: latestCoi.autoCoverageAmount,
+      glExpirationDate: latestCoi.glExpirationDate?.toISOString(),
+      wcExpirationDate: latestCoi.wcExpirationDate?.toISOString(),
+      umbExpirationDate: latestCoi.umbExpirationDate?.toISOString(),
+      autoExpirationDate: latestCoi.autoExpirationDate?.toISOString(),
+      certificateHolderName: latestCoi.certificateHolderName,
+    }, settings, org?.name) : [];
+
+    if (allExpired) {
+      status = 'EXPIRED';
+    } else if (someExpiringSoon) {
+      status = 'EXPIRING_SOON';
+    } else if (complianceFlags.some(f => f.type === 'INSUFFICIENT' || f.type === 'MISSING')) {
+      status = 'NON_COMPLIANT';
+    } else {
+      status = 'COMPLIANT';
+    }
   }
 
+  const prev = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { coiStatus: true } });
   const updated = await prisma.vendor.update({
     where: { id: vendorId },
     data: { coiStatus: status },
@@ -158,6 +152,13 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
       where: { vendorId, status: 'REQUESTED' },
       data: { status: 'FULFILLED', fulfilledAt: new Date() },
     });
+  }
+
+  // Notify external subscribers only when the status actually changes.
+  // Best-effort: never block or fail status computation on webhook delivery.
+  if (!prev || prev.coiStatus !== status) {
+    emitCoiUpdated({ orgId, vendorId, coiStatus: status, latestApprovedCoi: latestCoi || null })
+      .catch((err) => console.error('[Webhook] emit failed:', err.message));
   }
 }
 

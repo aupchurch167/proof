@@ -153,10 +153,45 @@ Request history, newest first (paginated). Scope: `coi-requests:read`.
 
 ---
 
-## Not built (yet)
+## Webhooks (live COI freshness)
 
-- **Outbound webhooks** for live COI freshness (`coi.updated`). Planned as a
-  general `WebhookEndpoint` subscription system; until then, consumers re-fetch
-  a vendor (`GET /vendors/:id`) or re-list to refresh. The `CoiRequest` model and
-  serializers are already in place to support it.
+Instead of polling, a consumer can subscribe an endpoint and receive a signed
+callback whenever a vendor's COI status changes.
+
+Register an endpoint (prints the signing secret once):
+
+```bash
+node scripts/create-webhook-endpoint.js \
+  --name "Quill" --url https://quill.example.com/api/webhooks/proof/coi \
+  --all-orgs --events coi.updated
+```
+
+Endpoints are scoped per-org or `--all-orgs`, exactly like tokens. On a status
+change Proof POSTs:
+
+```
+POST <your url>
+X-Proof-Event: coi.updated
+X-Proof-Signature: <hex HMAC-SHA256 of the raw body, using the endpoint secret>
+
+{
+  "event": "coi.updated",
+  "orgSlug": "buildco",
+  "vendorId": "9c4e...-uuid",
+  "coi": { "status": "expired", "expiresAt": "2026-07-20" },
+  "sentAt": "2026-07-21T16:40:00Z"
+}
+```
+
+Verify the signature by recomputing `HMAC-SHA256(secret, rawBody)` and comparing
+to `X-Proof-Signature`. Delivery is best-effort (single attempt, 5s timeout);
+the last delivery outcome is recorded on the endpoint. Events fire only on an
+actual status transition, not on every recompute.
+
+`coi.updated` is the only event today; the subscription model is general, so new
+event types slot in without new plumbing. Consumers that prefer not to wire
+webhooks can still re-fetch (`GET /vendors/:id`) or re-list to refresh.
+
+## Not built
+
 - **Bid pricing / vendor portal** — out of scope; the consumer owns that.
