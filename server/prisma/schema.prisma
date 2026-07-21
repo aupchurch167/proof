@@ -57,6 +57,12 @@ enum CoverageType {
   OTHER
 }
 
+enum CoiRequestStatus {
+  REQUESTED
+  FULFILLED
+  CANCELLED
+}
+
 model Organization {
   id                    String   @id @default(uuid())
   name                  String
@@ -75,6 +81,8 @@ model Organization {
   cois          Coi[]
   notifications NotificationLog[]
   auditLogs     AuditLog[]
+  apiClients    ApiClient[]
+  coiRequests   CoiRequest[]
 }
 
 model OrganizationSettings {
@@ -143,6 +151,7 @@ model Vendor {
   organization  Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   cois          Coi[]
   notifications NotificationLog[]
+  coiRequests   CoiRequest[]
 
   @@index([orgId, deletedAt])
 }
@@ -239,4 +248,52 @@ model AuditLog {
 
   @@index([orgId, createdAt])
   @@index([orgId, entity, action])
+}
+
+// A service-to-service API consumer (e.g. Quill, Core, or a future integration).
+// The raw bearer token is never stored — only its SHA-256 hash. Scope an
+// individual token to one org (orgId) or grant it platform access to every org
+// (allOrgs) for a multi-tenant consumer.
+model ApiClient {
+  id          String    @id @default(uuid())
+  name        String
+  tokenHash   String    @unique
+  tokenPrefix String
+  scopes      String[]  @default([])
+  orgId       String?
+  allOrgs     Boolean   @default(false)
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  coiRequests  CoiRequest[]
+
+  @@index([orgId])
+}
+
+// The canonical record of a COI request for a vendor. Created by both the app UI
+// and the public API so "is a request open?" has a single source of truth.
+// Auto-resolved to FULFILLED when the vendor next becomes compliant.
+model CoiRequest {
+  id               String           @id @default(uuid())
+  orgId            String
+  vendorId         String
+  status           CoiRequestStatus @default(REQUESTED)
+  coverageTypes    String[]         @default([])
+  note             String?
+  requestedByEmail String?
+  source           String           @default("app")
+  apiClientId      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  fulfilledAt      DateTime?
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  vendor       Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  apiClient    ApiClient?   @relation(fields: [apiClientId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId, status])
+  @@index([orgId, createdAt])
 }

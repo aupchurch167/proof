@@ -74,9 +74,11 @@ function getAuthToken(user) {
 
 async function cleanupTestData() {
   // Delete in dependency order
+  await prisma.coiRequest.deleteMany({});
   await prisma.notificationLog.deleteMany({});
   await prisma.coi.deleteMany({});
   await prisma.vendor.deleteMany({});
+  await prisma.apiClient.deleteMany({});
   await prisma.user.deleteMany({});
   await prisma.organizationSettings.deleteMany({});
   await prisma.organization.deleteMany({});

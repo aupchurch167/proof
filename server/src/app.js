@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const morgan = require('morgan');
 const path = require('path');
 
@@ -19,6 +19,8 @@ const importRoutes = require('./routes/import');
 const applyRoutes = require('./routes/apply');
 const webhookRoutes = require('./routes/webhooks');
 const repliesRoutes = require('./routes/replies');
+const v1Routes = require('./routes/v1');
+const { hashToken } = require('./lib/apiTokens');
 
 const app = express();
 
@@ -80,6 +82,24 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
+  // The versioned service API has its own, higher, per-token limiter below.
+  skip: (req) => req.path === '/v1' || req.path.startsWith('/v1/'),
+});
+
+// Service-to-service traffic (one consumer, one IP, many orgs) needs a higher
+// ceiling than the browser-facing API, keyed by token rather than IP so one
+// noisy client can't starve another.
+const apiV1Limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const header = req.headers.authorization;
+    if (header && header.startsWith('Bearer ')) return `tok:${hashToken(header.slice(7).trim())}`;
+    return `ip:${ipKeyGenerator(req.ip)}`;
+  },
+  message: { error: { code: 'rate_limited', message: 'Too many requests, please try again later', details: {} } },
 });
 
 app.use('/api/auth/login', authLimiter);
@@ -88,6 +108,7 @@ app.use('/api/auth/google', authLimiter);
 app.use('/api/auth/accept-invite', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);
+app.use('/api/v1', apiV1Limiter);
 app.use('/api', generalLimiter);
 
 // Serve client build in production
@@ -108,6 +129,9 @@ app.use('/api/organization', organizationRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/apply', applyRoutes);
 app.use('/api/replies', repliesRoutes);
+
+// Versioned, org-scoped public API for service-to-service integrations.
+app.use('/api/v1/orgs/:orgSlug', v1Routes);
 
 // Health check
 app.get('/api/health', async (req, res) => {

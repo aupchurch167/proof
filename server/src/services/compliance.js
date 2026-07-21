@@ -150,6 +150,15 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
     select: { coreId: true },
   });
   mirrorComplianceStatusToCore(updated.coreId, status);
+
+  // A valid COI resolves any outstanding COI request so "is a request open?"
+  // stays accurate for API consumers.
+  if (status === 'COMPLIANT' || status === 'EXPIRING_SOON') {
+    await prisma.coiRequest.updateMany({
+      where: { vendorId, status: 'REQUESTED' },
+      data: { status: 'FULFILLED', fulfilledAt: new Date() },
+    });
+  }
 }
 
 async function mirrorComplianceStatusToCore(coreId, coiStatus) {
