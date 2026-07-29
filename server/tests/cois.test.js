@@ -20,6 +20,7 @@ jest.mock('../src/services/coiExtractor', () => ({
 
 const request = require('supertest');
 const app = require('../src/app');
+const { extractCoiData } = require('../src/services/coiExtractor');
 const {
   prisma,
   createTestOrg,
@@ -160,5 +161,49 @@ describe('PUT /api/cois/:id', () => {
       .send({ glCoverageAmount: 'not-a-number' });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/cois/:id/reanalyze', () => {
+  it('re-runs extraction and overwrites the COI fields', async () => {
+    extractCoiData.mockResolvedValueOnce({
+      coverageType: 'GENERAL_LIABILITY',
+      glPolicyNumber: 'GL-REANALYZED',
+      glCoverageAmount: 150000000,
+      glExpirationDate: '2027-03-01',
+    });
+
+    const res = await request(app)
+      .post(`/api/cois/${coi.id}/reanalyze`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.glPolicyNumber).toBe('GL-REANALYZED');
+    expect(res.body.glCoverageAmount).toBe(150000000);
+    expect(res.body.coverageType).toBe('GENERAL_LIABILITY');
+  });
+
+  it('returns 422 (with the reason) when extraction yields no data', async () => {
+    extractCoiData.mockRejectedValueOnce(new Error('ANTHROPIC_API_KEY is not set — AI extraction is disabled'));
+
+    const res = await request(app)
+      .post(`/api/cois/${coi.id}/reanalyze`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/ANTHROPIC_API_KEY/);
+  });
+
+  it('returns 404 for a non-existent COI', async () => {
+    const res = await request(app)
+      .post('/api/cois/00000000-0000-0000-0000-000000000000/reanalyze')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 401 without auth', async () => {
+    const res = await request(app).post(`/api/cois/${coi.id}/reanalyze`);
+    expect(res.status).toBe(401);
   });
 });

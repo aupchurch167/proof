@@ -30,6 +30,7 @@ export default function CoiDetail() {
   const [showReject, setShowReject] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [reanalyzing, setReanalyzing] = useState(false);
   const [queueCount, setQueueCount] = useState(null);
 
   useEffect(() => {
@@ -85,6 +86,20 @@ export default function CoiDetail() {
       toast.success('Changes saved');
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  const handleReanalyze = async () => {
+    setReanalyzing(true);
+    try {
+      const updated = await api.post(`/cois/${id}/reanalyze`);
+      setCoi(updated);
+      setForm(updated);
+      toast.success('COI re-analyzed');
+    } catch (err) {
+      toast.error(`Re-analysis failed: ${err.message}`);
+    } finally {
+      setReanalyzing(false);
     }
   };
 
@@ -356,6 +371,12 @@ export default function CoiDetail() {
         {['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role) && !editing && (
           <button onClick={() => setEditing(true)}
             className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50">Edit Data</button>
+        )}
+        {['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role) && !editing && coi.pdfPath && (
+          <button onClick={handleReanalyze} disabled={reanalyzing}
+            className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
+            {reanalyzing ? 'Re-analyzing…' : 'Re-analyze'}
+          </button>
         )}
         {editing && (
           <>
