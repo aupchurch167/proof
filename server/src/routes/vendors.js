@@ -341,9 +341,11 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
 
     // Extract data with Claude AI
     let extractedData = null;
+    let extractionError = null;
     try {
       extractedData = await extractCoiData(req.file.buffer);
     } catch (extractErr) {
+      extractionError = extractErr.message;
       console.error('AI extraction failed:', extractErr);
     }
 
@@ -401,6 +403,7 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
       message: 'COI uploaded successfully',
       coiId: coi.id,
       complianceFlags,
+      extractionError,
     });
   } catch (err) {
     console.error('COI upload error:', err);

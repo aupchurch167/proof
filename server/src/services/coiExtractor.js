@@ -1,6 +1,18 @@
 const Anthropic = require('@anthropic-ai/sdk');
 
-const client = new Anthropic.default();
+// Construct lazily so a missing key produces a clear, surfaced error at call
+// time rather than a silent failure (the SDK defers the key check to the first
+// request, which callers were swallowing).
+let client;
+function getClient() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not set — AI extraction is disabled');
+  }
+  if (!client) {
+    client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+  }
+  return client;
+}
 
 /**
  * Extract COI data from a PDF.
@@ -17,8 +29,8 @@ async function extractCoiData(pdfInput) {
   }
   const base64Pdf = pdfBuffer.toString('base64');
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+  const response = await getClient().messages.create({
+    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
     max_tokens: 4096,
     messages: [
       {
@@ -84,7 +96,12 @@ Important:
     ],
   });
 
-  const text = response.content[0].text.trim();
+  // Find the text block rather than assuming it's first.
+  const textBlock = Array.isArray(response.content) && response.content.find((b) => b.type === 'text');
+  if (!textBlock || !textBlock.text) {
+    throw new Error('Model returned no text content');
+  }
+  const text = textBlock.text.trim();
 
   // Parse the JSON, handling potential markdown code blocks
   let jsonStr = text;

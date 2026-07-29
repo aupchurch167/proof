@@ -122,11 +122,42 @@ describe('DELETE /api/cois/:id', () => {
 });
 
 describe('PUT /api/cois/:id', () => {
-  it('returns 400 with invalid field', async () => {
+  it('accepts the full COI object the client echoes back (extra keys stripped)', async () => {
+    const full = await prisma.coi.findUnique({ where: { id: coi.id } });
     const res = await request(app)
       .put(`/api/cois/${coi.id}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ unknownField: 'value' });
+      // Mirror the real client payload: the whole COI plus nested relations and
+      // a null coverageType — the exact shape that used to 400.
+      .send({
+        ...full,
+        vendor: { id: vendor.id, name: 'X' },
+        organization: { name: 'Y' },
+        reviewedBy: null,
+        coverageType: null,
+        glPolicyNumber: 'GL-123',
+        glCoverageAmount: 200000000,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.glPolicyNumber).toBe('GL-123');
+    expect(res.body.glCoverageAmount).toBe(200000000);
+  });
+
+  it('accepts a null coverageType', async () => {
+    const res = await request(app)
+      .put(`/api/cois/${coi.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ coverageType: null });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('still rejects an invalid value for a known field', async () => {
+    const res = await request(app)
+      .put(`/api/cois/${coi.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ glCoverageAmount: 'not-a-number' });
 
     expect(res.status).toBe(400);
   });

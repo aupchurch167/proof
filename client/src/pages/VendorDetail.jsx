@@ -217,8 +217,11 @@ export default function VendorDetail() {
     try {
       const formData = new FormData();
       formData.append('pdf', file);
-      await api.upload(`/vendors/${id}/coi/upload`, formData);
+      const result = await api.upload(`/vendors/${id}/coi/upload`, formData);
       setShowUpload(false);
+      if (result?.extractionError) {
+        toast.warning('COI uploaded, but automatic data extraction failed. Enter the details manually.');
+      }
       const updated = await api.get(`/vendors/${id}`);
       setVendor(updated);
     } catch (err) {

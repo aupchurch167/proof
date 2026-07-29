@@ -8,8 +8,12 @@ const { logAudit } = require('../services/audit');
 
 const router = express.Router();
 
+// Not `.strict()`: the client sends the whole COI object back (including id,
+// vendor, etc.), so unknown keys are stripped rather than rejected. Only the
+// whitelisted `allowedFields` below are ever written. `coverageType` and the
+// amounts must accept null so a reviewer can clear a field.
 const coiUpdateSchema = z.object({
-  coverageType: z.string().optional(),
+  coverageType: z.string().nullable().optional(),
   glPolicyNumber: z.string().nullable().optional(),
   glCoverageAmount: z.number().nullable().optional(),
   glExpirationDate: z.string().nullable().optional(),
@@ -23,12 +27,13 @@ const coiUpdateSchema = z.object({
   autoCoverageAmount: z.number().nullable().optional(),
   autoExpirationDate: z.string().nullable().optional(),
   agentName: z.string().nullable().optional(),
-  agentEmail: z.string().email('Invalid agent email').nullable().optional(),
+  // Tolerate an empty string (a cleared field) in addition to a valid email/null.
+  agentEmail: z.union([z.string().email('Invalid agent email'), z.literal('')]).nullable().optional(),
   agentPhone: z.string().nullable().optional(),
   insuranceCompany: z.string().nullable().optional(),
   certificateHolderName: z.string().nullable().optional(),
   certificateHolderAddress: z.string().nullable().optional(),
-}).strict();
+});
 
 // GET /api/cois
 router.get('/', authenticate, async (req, res) => {

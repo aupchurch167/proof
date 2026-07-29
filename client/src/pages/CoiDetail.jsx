@@ -61,9 +61,25 @@ export default function CoiDetail() {
     }
   }
 
+  // The form holds the full COI object, but the update endpoint only accepts
+  // these editable fields — send just those so we don't ship id/vendor/etc.
+  const EDITABLE_COI_FIELDS = [
+    'coverageType',
+    'glPolicyNumber', 'glCoverageAmount', 'glExpirationDate',
+    'wcPolicyNumber', 'wcCoverageAmount', 'wcExpirationDate',
+    'umbPolicyNumber', 'umbCoverageAmount', 'umbExpirationDate',
+    'autoPolicyNumber', 'autoCoverageAmount', 'autoExpirationDate',
+    'agentName', 'agentEmail', 'agentPhone', 'insuranceCompany',
+    'certificateHolderName', 'certificateHolderAddress',
+  ];
+
   const handleSave = async () => {
     try {
-      const updated = await api.put(`/cois/${id}`, form);
+      const payload = {};
+      for (const f of EDITABLE_COI_FIELDS) {
+        if (form[f] !== undefined) payload[f] = form[f];
+      }
+      const updated = await api.put(`/cois/${id}`, payload);
       setCoi({ ...coi, ...updated });
       setEditing(false);
       toast.success('Changes saved');
