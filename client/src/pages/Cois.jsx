@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api, API_BASE } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const statusColors = {
   PENDING_REVIEW: 'bg-blue-100 text-blue-800',
@@ -43,7 +44,10 @@ function soonestExpiration(coi) {
 
 export default function Cois() {
   const toast = useToast();
+  const { user } = useAuth();
+  const canReview = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
   const [cois, setCois] = useState([]);
+  const [reanalyzingId, setReanalyzingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [coverageFilter, setCoverageFilter] = useState('');
@@ -64,6 +68,23 @@ export default function Cois() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [statusFilter]);
+
+  // Re-run AI extraction on a row's PDF without opening the COI. Guard against
+  // the row also navigating (mobile cards are links).
+  const handleReanalyze = async (e, coiId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setReanalyzingId(coiId);
+    try {
+      const updated = await api.post(`/cois/${coiId}/reanalyze`);
+      setCois((prev) => prev.map((c) => (c.id === coiId ? { ...c, ...updated } : c)));
+      toast.success(`Re-analyzed ${updated.vendor?.name || 'COI'}`);
+    } catch (err) {
+      toast.error(`Re-analysis failed: ${err.message}`);
+    } finally {
+      setReanalyzingId(null);
+    }
+  };
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -317,6 +338,7 @@ export default function Cois() {
                     Umbrella Expires{sortIndicator('umbExpirationDate')}
                   </th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Reviewed By</th>
+                  {canReview && <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -348,6 +370,18 @@ export default function Cois() {
                     <td className="px-4 py-4 text-gray-600">
                       {coi.reviewedBy ? `${coi.reviewedBy.firstName} ${coi.reviewedBy.lastName}` : '—'}
                     </td>
+                    {canReview && (
+                      <td className="px-4 py-4 text-right">
+                        {coi.pdfPath && (
+                          <button
+                            onClick={(e) => handleReanalyze(e, coi.id)}
+                            disabled={reanalyzingId === coi.id}
+                            className="text-xs border rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap">
+                            {reanalyzingId === coi.id ? 'Analyzing…' : 'Re-analyze'}
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -359,41 +393,51 @@ export default function Cois() {
             {filtered.map((coi) => {
               const soonest = soonestExpiration(coi);
               return (
-                <Link key={coi.id} to={`/cois/${coi.id}${coi.status === 'PENDING_REVIEW' ? '?queue=pending' : ''}`}
-                  className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="font-medium text-blue-600 truncate">{coi.vendor?.name}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[coi.status]}`}>
-                      {coi.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <div className="text-sm text-gray-500 space-y-1">
-                    <div className="flex justify-between">
-                      <span>Submitted</span>
-                      <span>{new Date(coi.submittedAt).toLocaleDateString()}</span>
+                <div key={coi.id} className="bg-white rounded-xl border p-4">
+                  <Link to={`/cois/${coi.id}${coi.status === 'PENDING_REVIEW' ? '?queue=pending' : ''}`}
+                    className="block hover:opacity-80 transition-opacity">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="font-medium text-blue-600 truncate">{coi.vendor?.name}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[coi.status]}`}>
+                        {coi.status.replace('_', ' ')}
+                      </span>
                     </div>
-                    {soonest && (
+                    <div className="text-sm text-gray-500 space-y-1">
                       <div className="flex justify-between">
-                        <span>Soonest Expiration</span>
-                        <span className={new Date(soonest) < new Date() ? 'text-red-600 font-medium' : ''}>
-                          {new Date(soonest).toLocaleDateString()}
-                        </span>
+                        <span>Submitted</span>
+                        <span>{new Date(coi.submittedAt).toLocaleDateString()}</span>
                       </div>
-                    )}
-                    {coi.coverageType && (
-                      <div className="flex justify-between">
-                        <span>Coverage Type</span>
-                        <span>{coverageTypeLabels[coi.coverageType] || coi.coverageType}</span>
-                      </div>
-                    )}
-                    {coi.glCoverageAmount && (
-                      <div className="flex justify-between">
-                        <span>GL Coverage</span>
-                        <span>{formatCurrency(coi.glCoverageAmount)}</span>
-                      </div>
-                    )}
-                  </div>
-                </Link>
+                      {soonest && (
+                        <div className="flex justify-between">
+                          <span>Soonest Expiration</span>
+                          <span className={new Date(soonest) < new Date() ? 'text-red-600 font-medium' : ''}>
+                            {new Date(soonest).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                      {coi.coverageType && (
+                        <div className="flex justify-between">
+                          <span>Coverage Type</span>
+                          <span>{coverageTypeLabels[coi.coverageType] || coi.coverageType}</span>
+                        </div>
+                      )}
+                      {coi.glCoverageAmount && (
+                        <div className="flex justify-between">
+                          <span>GL Coverage</span>
+                          <span>{formatCurrency(coi.glCoverageAmount)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+                  {canReview && coi.pdfPath && (
+                    <button
+                      onClick={(e) => handleReanalyze(e, coi.id)}
+                      disabled={reanalyzingId === coi.id}
+                      className="mt-3 w-full text-sm border rounded-lg py-2 hover:bg-gray-50 disabled:opacity-50">
+                      {reanalyzingId === coi.id ? 'Analyzing…' : 'Re-analyze'}
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
