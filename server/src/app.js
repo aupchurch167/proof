@@ -19,6 +19,7 @@ const importRoutes = require('./routes/import');
 const applyRoutes = require('./routes/apply');
 const webhookRoutes = require('./routes/webhooks');
 const repliesRoutes = require('./routes/replies');
+const integrationsRoutes = require('./routes/integrations');
 const v1Routes = require('./routes/v1');
 const { hashToken } = require('./lib/apiTokens');
 
@@ -129,6 +130,7 @@ app.use('/api/organization', organizationRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/apply', applyRoutes);
 app.use('/api/replies', repliesRoutes);
+app.use('/api/integrations', integrationsRoutes);
 
 // Versioned, org-scoped public API for service-to-service integrations.
 app.use('/api/v1/orgs/:orgSlug', v1Routes);

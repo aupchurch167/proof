@@ -10,6 +10,7 @@ import Cois from './pages/Cois';
 import CoiDetail from './pages/CoiDetail';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
+import Integrations from './pages/Integrations';
 
 import Portal from './pages/Portal';
 import Apply from './pages/Apply';
@@ -59,6 +60,7 @@ export default function App() {
                 <Route path="/replies" element={<Replies />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/users" element={<AdminRoute><Users /></AdminRoute>} />
+                <Route path="/settings/integrations" element={<AdminRoute><Integrations /></AdminRoute>} />
 
                 <Route path="/import" element={<Import />} />
               </Routes>
