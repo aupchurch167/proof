@@ -33,9 +33,11 @@ enum CoiReviewStatus {
 enum NotificationType {
   EXPIRATION_REMINDER
   UPLOAD_REQUEST
+  UPLOAD_CHASE
   REVIEW_COMPLETE
   COI_REJECTED
   WEEKLY_SUMMARY
+  MANUAL_CONTACT
 }
 
 enum NotificationStatus {
@@ -95,9 +97,11 @@ model OrganizationSettings {
   minUmbrella         Int @default(100000000)
   minAutomobile       Int @default(100000000)
 
-  reminderDaysBefore  Json    @default("[30, 14, 7, 0]")
-  notifyOnUpload      Boolean @default(true)
-  notifyOnExpiration  Boolean @default(true)
+  reminderDaysBefore     Json    @default("[30, 14, 7, 0]")
+  chaseDaysAfterRequest  Json    @default("[3, 7, 14]")
+  notifyOnUpload         Boolean @default(true)
+  notifyOnExpiration     Boolean @default(true)
+  chaseNonResponders     Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -225,6 +229,9 @@ model NotificationLog {
   recipientEmail String
   sentAt         DateTime           @default(now())
   status         NotificationStatus
+  // Free-form context for the send: which reminder window fired, which chase
+  // step, why a send was skipped. Read back to dedupe reminders/chases.
+  meta           Json?
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   vendor       Vendor?      @relation(fields: [vendorId], references: [id])

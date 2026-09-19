@@ -11,6 +11,7 @@ const { checkCompliance, updateVendorStatus } = require('../services/compliance'
 const { uploadFile, deleteFile, getSignedUrl } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
+const { isPlaceholderEmail, placeholderReason } = require('../utils/email');
 const { logAudit } = require('../services/audit');
 const core = require('../lib/core');
 const { isValidTrade, CANONICAL_TRADES } = require('../constants/trades');
@@ -421,6 +422,26 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
 
     if (!vendor) {
       return res.status(404).json({ error: 'Vendor not found' });
+    }
+
+    // Vendors imported without a contact address carry a synthesized one that
+    // will never deliver. Record the attempt as FAILED so the cockpit can flag
+    // the vendor, and tell the caller to fix the address instead.
+    if (isPlaceholderEmail(vendor.email)) {
+      await prisma.notificationLog.create({
+        data: {
+          orgId: req.user.orgId,
+          vendorId: vendor.id,
+          type: 'UPLOAD_REQUEST',
+          recipientEmail: vendor.email,
+          status: 'FAILED',
+          meta: { reason: placeholderReason(vendor.email) },
+        },
+      });
+      return res.status(400).json({
+        error: 'This vendor has no deliverable email address on file',
+        code: 'BAD_EMAIL',
+      });
     }
 
     // Default 24-hour cooldown so a stray click (or a tab left open) can't

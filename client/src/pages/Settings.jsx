@@ -12,6 +12,14 @@ function centsToDollars(dollars) {
   return isNaN(num) ? 0 : Math.round(num * 100);
 }
 
+// "30, 14, 7, 0" -> [30, 14, 7, 0]; the API normalizes again on the way in.
+function parseDayList(value) {
+  return (value || '')
+    .split(',')
+    .map((d) => parseInt(d.trim(), 10))
+    .filter((n) => !isNaN(n));
+}
+
 function SectionMessage({ message }) {
   if (!message) return null;
   return (
@@ -60,8 +68,10 @@ export default function Settings() {
           minUmbrella: dollarsFromCents(s.minUmbrella),
           minAutomobile: dollarsFromCents(s.minAutomobile),
           reminderDaysBefore: (s.reminderDaysBefore || [30, 14, 7, 0]).join(', '),
+          chaseDaysAfterRequest: (s.chaseDaysAfterRequest || [3, 7, 14]).join(', '),
           notifyOnUpload: s.notifyOnUpload,
           notifyOnExpiration: s.notifyOnExpiration,
+          chaseNonResponders: s.chaseNonResponders,
         });
         setOrgForm({ name: org.name, email: org.email, phone: org.phone || '', address: org.address || '', additionalInsuredNote: org.additionalInsuredNote || '' });
         setOrgSlug(org.slug || org.id);
@@ -81,9 +91,11 @@ export default function Settings() {
         minWorkersComp: centsToDollars(settingsForm.minWorkersComp),
         minUmbrella: centsToDollars(settingsForm.minUmbrella),
         minAutomobile: centsToDollars(settingsForm.minAutomobile),
-        reminderDaysBefore: settingsForm.reminderDaysBefore.split(',').map(d => parseInt(d.trim())).filter(n => !isNaN(n)),
+        reminderDaysBefore: parseDayList(settingsForm.reminderDaysBefore),
+        chaseDaysAfterRequest: parseDayList(settingsForm.chaseDaysAfterRequest).filter(n => n > 0),
         notifyOnUpload: settingsForm.notifyOnUpload,
         notifyOnExpiration: settingsForm.notifyOnExpiration,
+        chaseNonResponders: settingsForm.chaseNonResponders,
       });
       setSettingsMsg('Coverage settings saved!');
     } catch (err) {
@@ -350,6 +362,20 @@ export default function Settings() {
                   <input type="checkbox" checked={settingsForm.notifyOnExpiration} onChange={(e) => setSettingsForm({ ...settingsForm, notifyOnExpiration: e.target.checked })}
                     className="rounded" />
                   <span className="text-sm">Send expiration reminders to vendors</span>
+                </label>
+                <div className="pt-4 border-t">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Follow-Up Days After a COI Request</label>
+                  <input value={settingsForm.chaseDaysAfterRequest} onChange={(e) => setSettingsForm({ ...settingsForm, chaseDaysAfterRequest: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg" placeholder="3, 7, 14" />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Comma-separated list of days. A vendor who never uploads gets one nudge per entry,
+                    then the request is flagged for manual follow-up.
+                  </p>
+                </div>
+                <label className="flex items-center gap-3">
+                  <input type="checkbox" checked={settingsForm.chaseNonResponders} onChange={(e) => setSettingsForm({ ...settingsForm, chaseNonResponders: e.target.checked })}
+                    className="rounded" />
+                  <span className="text-sm">Automatically follow up with vendors who ignore a COI request</span>
                 </label>
               </div>
             </div>

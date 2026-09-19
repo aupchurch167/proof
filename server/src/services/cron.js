@@ -1,105 +1,293 @@
 const { CronJob } = require('cron');
-const { sendExpirationReminderEmail, sendWeeklySummaryEmail } = require('./email');
+const {
+  sendExpirationReminderEmail,
+  sendWeeklySummaryEmail,
+  sendChaseEmail,
+} = require('./email');
 const { updateVendorStatus } = require('./compliance');
 const { generateUploadToken } = require('../utils/tokens');
+const { isPlaceholderEmail, placeholderReason } = require('../utils/email');
+const {
+  DEFAULT_REMINDER_DAYS,
+  DEFAULT_CHASE_DAYS,
+  normalizeDayList,
+  daysUntil,
+  daysSince,
+  reminderWindowFor,
+  chaseStepFor,
+  shouldEscalateChase,
+  earliestExpiration,
+} = require('./reminders');
+
+// Both vendor-facing jobs mint a fresh token before emailing, the same way
+// POST /api/vendors/:id/request-coi does. Vendors created by the import
+// scripts still carry the default UUID, which the portal can't jwt.verify(),
+// so without this their link 404s.
+async function rotateUploadToken(prisma, vendorId) {
+  const uploadToken = generateUploadToken(vendorId);
+  await prisma.vendor.update({ where: { id: vendorId }, data: { uploadToken } });
+  return `${process.env.APP_URL}/portal/${uploadToken}`;
+}
+
+function ccFor(vendor) {
+  const extras = (vendor.additionalEmails || []).filter((e) => !isPlaceholderEmail(e));
+  return extras.length > 0 ? extras : undefined;
+}
+
+/**
+ * Daily expiration reminders.
+ *
+ * Reminders fire on the *window* a COI has entered rather than on an exact day
+ * match, so a skipped run (deploy, outage) no longer drops the notification
+ * entirely: a COI 27 days out still gets the "30 day" reminder. Each window
+ * sends at most once per COI, tracked via NotificationLog.meta.window.
+ */
+async function runExpirationSweep(prisma, { now = new Date() } = {}) {
+  const stats = { sent: 0, skipped: 0, failed: 0 };
+
+  const orgs = await prisma.organization.findMany({ include: { settings: true } });
+
+  for (const org of orgs) {
+    if (!org.settings || !org.settings.notifyOnExpiration) continue;
+
+    const reminderDays = normalizeDayList(org.settings.reminderDaysBefore, DEFAULT_REMINDER_DAYS);
+
+    const vendors = await prisma.vendor.findMany({
+      where: { orgId: org.id, deletedAt: null },
+      include: {
+        cois: {
+          where: { status: 'APPROVED' },
+          orderBy: { submittedAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    for (const vendor of vendors) {
+      await updateVendorStatus(prisma, vendor.id, org.id);
+
+      const latestCoi = vendor.cois[0];
+      if (!latestCoi) continue;
+
+      const expiration = earliestExpiration(latestCoi);
+      if (!expiration) continue;
+
+      const days = daysUntil(expiration, now);
+      const window = reminderWindowFor(days, reminderDays);
+      if (window === null) continue;
+
+      // One notification per (COI, window) — including the skip we record for
+      // an unroutable address, so a bad email doesn't log every morning.
+      const prior = await prisma.notificationLog.findMany({
+        where: { vendorId: vendor.id, coiId: latestCoi.id, type: 'EXPIRATION_REMINDER' },
+        select: { status: true, meta: true },
+      });
+      if (prior.some((log) => log.meta && log.meta.window === window)) {
+        stats.skipped++;
+        continue;
+      }
+
+      const base = {
+        orgId: org.id,
+        vendorId: vendor.id,
+        coiId: latestCoi.id,
+        type: 'EXPIRATION_REMINDER',
+        recipientEmail: vendor.email,
+      };
+
+      if (isPlaceholderEmail(vendor.email)) {
+        await prisma.notificationLog.create({
+          data: {
+            ...base,
+            status: 'FAILED',
+            meta: { window, daysUntil: days, reason: placeholderReason(vendor.email) },
+          },
+        });
+        stats.failed++;
+        console.warn(`[Cron] Skipped ${window}-day reminder for ${vendor.name} — unroutable address "${vendor.email}"`);
+        continue;
+      }
+
+      try {
+        const portalUrl = await rotateUploadToken(prisma, vendor.id);
+        await sendExpirationReminderEmail(vendor.email, vendor.name, days, portalUrl, ccFor(vendor));
+
+        await prisma.notificationLog.create({
+          data: { ...base, status: 'SENT', meta: { window, daysUntil: days } },
+        });
+        stats.sent++;
+        console.log(`[Cron] Sent ${window}-day reminder to ${vendor.name} (${vendor.email}), ${days} day(s) out`);
+      } catch (err) {
+        await prisma.notificationLog.create({
+          data: {
+            ...base,
+            status: 'FAILED',
+            meta: { window, daysUntil: days, reason: 'SEND_ERROR', error: err.message },
+          },
+        }).catch(() => {});
+        stats.failed++;
+        console.error(`[Cron] Failed ${window}-day reminder for ${vendor.name}:`, err.message);
+      }
+    }
+  }
+
+  return stats;
+}
+
+/**
+ * Daily non-responder chase.
+ *
+ * A vendor who was sent an upload request and never uploaded gets follow-ups
+ * at the org's configured offsets (3/7/14 days by default). Once every
+ * follow-up has gone out and the vendor is still silent, the request is
+ * escalated to an audit-log flag so it surfaces in the compliance cockpit
+ * instead of quietly aging out.
+ */
+async function runChaseSweep(prisma, { now = new Date() } = {}) {
+  const stats = { sent: 0, skipped: 0, failed: 0, escalated: 0 };
+
+  const orgs = await prisma.organization.findMany({ include: { settings: true } });
+
+  for (const org of orgs) {
+    if (!org.settings || org.settings.chaseNonResponders === false) continue;
+
+    const chaseDays = normalizeDayList(org.settings.chaseDaysAfterRequest, DEFAULT_CHASE_DAYS)
+      .filter((d) => d > 0)
+      .sort((a, b) => a - b);
+    if (chaseDays.length === 0) continue;
+
+    const vendors = await prisma.vendor.findMany({
+      where: { orgId: org.id, deletedAt: null },
+    });
+
+    for (const vendor of vendors) {
+      const lastRequest = await prisma.notificationLog.findFirst({
+        where: { vendorId: vendor.id, type: 'UPLOAD_REQUEST', status: 'SENT' },
+        orderBy: { sentAt: 'desc' },
+        select: { id: true, sentAt: true },
+      });
+      if (!lastRequest) continue;
+
+      // Any upload after the request means they responded — nothing to chase.
+      const uploadsSince = await prisma.coi.count({
+        where: { vendorId: vendor.id, submittedAt: { gt: lastRequest.sentAt } },
+      });
+      if (uploadsSince > 0) continue;
+
+      const days = daysSince(lastRequest.sentAt, now);
+      const step = chaseStepFor(days, chaseDays);
+      if (step === null) continue;
+
+      // Chases are scoped to the request that triggered them, so a fresh
+      // request restarts the ladder from the first step.
+      const prior = await prisma.notificationLog.findMany({
+        where: {
+          vendorId: vendor.id,
+          type: 'UPLOAD_CHASE',
+          sentAt: { gte: lastRequest.sentAt },
+        },
+        select: { status: true, meta: true },
+      });
+
+      if (prior.some((log) => log.meta && log.meta.step === step)) {
+        stats.skipped++;
+      } else {
+        const base = {
+          orgId: org.id,
+          vendorId: vendor.id,
+          type: 'UPLOAD_CHASE',
+          recipientEmail: vendor.email,
+        };
+
+        if (isPlaceholderEmail(vendor.email)) {
+          await prisma.notificationLog.create({
+            data: {
+              ...base,
+              status: 'FAILED',
+              meta: { step, daysSinceRequest: days, reason: placeholderReason(vendor.email) },
+            },
+          });
+          stats.failed++;
+          console.warn(`[Cron] Skipped day-${step} chase for ${vendor.name} — unroutable address "${vendor.email}"`);
+        } else {
+          try {
+            const portalUrl = await rotateUploadToken(prisma, vendor.id);
+            await sendChaseEmail(vendor.email, vendor.name, portalUrl, org, days, ccFor(vendor));
+
+            await prisma.notificationLog.create({
+              data: { ...base, status: 'SENT', meta: { step, daysSinceRequest: days } },
+            });
+            stats.sent++;
+            console.log(`[Cron] Sent day-${step} chase to ${vendor.name} (${vendor.email})`);
+          } catch (err) {
+            await prisma.notificationLog.create({
+              data: {
+                ...base,
+                status: 'FAILED',
+                meta: { step, daysSinceRequest: days, reason: 'SEND_ERROR', error: err.message },
+              },
+            }).catch(() => {});
+            stats.failed++;
+            console.error(`[Cron] Failed day-${step} chase for ${vendor.name}:`, err.message);
+          }
+        }
+      }
+
+      if (shouldEscalateChase(days, chaseDays)) {
+        const escalated = await escalateIgnoredRequest(prisma, org, vendor, lastRequest, days, chaseDays);
+        if (escalated) stats.escalated++;
+      }
+    }
+  }
+
+  return stats;
+}
+
+// Flag a request the vendor has ignored through the whole chase ladder. Writes
+// one audit entry per request so the cockpit can surface it without the job
+// re-flagging the same vendor every morning.
+async function escalateIgnoredRequest(prisma, org, vendor, lastRequest, days, chaseDays) {
+  const already = await prisma.auditLog.findFirst({
+    where: {
+      orgId: org.id,
+      entity: 'vendor',
+      entityId: vendor.id,
+      action: 'chase_escalated',
+      createdAt: { gte: lastRequest.sentAt },
+    },
+    select: { id: true },
+  });
+  if (already) return false;
+
+  await prisma.auditLog.create({
+    data: {
+      orgId: org.id,
+      action: 'chase_escalated',
+      entity: 'vendor',
+      entityId: vendor.id,
+      details: {
+        vendorName: vendor.name,
+        vendorEmail: vendor.email,
+        requestedAt: lastRequest.sentAt,
+        daysSinceRequest: days,
+        chaseDays,
+        badEmail: isPlaceholderEmail(vendor.email),
+        reason: 'No COI uploaded after all configured follow-ups',
+      },
+    },
+  });
+
+  console.warn(`[Cron] Escalated ignored COI request for ${vendor.name} (${days} days, no upload)`);
+  return true;
+}
 
 function startExpirationCron(prisma) {
   // Run daily at 8 AM
   const job = new CronJob('0 8 * * *', async () => {
     console.log('[Cron] Running expiration check...');
-
     try {
-      const orgs = await prisma.organization.findMany({
-        include: { settings: true },
-      });
-
-      for (const org of orgs) {
-        if (!org.settings) continue;
-
-        const reminderDays = org.settings.reminderDaysBefore || [30, 14, 7, 0];
-        if (!org.settings.notifyOnExpiration) continue;
-
-        // Get all vendors with approved COIs
-        const vendors = await prisma.vendor.findMany({
-          where: { orgId: org.id, deletedAt: null },
-          include: {
-            cois: {
-              where: { status: 'APPROVED' },
-              orderBy: { submittedAt: 'desc' },
-              take: 1,
-            },
-          },
-        });
-
-        for (const vendor of vendors) {
-          // Update vendor status
-          await updateVendorStatus(prisma, vendor.id, org.id);
-
-          if (vendor.cois.length === 0) continue;
-
-          const latestCoi = vendor.cois[0];
-          const expirationDates = [
-            latestCoi.glExpirationDate,
-            latestCoi.wcExpirationDate,
-            latestCoi.umbExpirationDate,
-            latestCoi.autoExpirationDate,
-          ].filter(Boolean);
-
-          // Find earliest expiration
-          const earliestExpiration = expirationDates.reduce(
-            (min, d) => (d < min ? d : min),
-            expirationDates[0]
-          );
-
-          if (!earliestExpiration) continue;
-
-          const now = new Date();
-          const daysUntil = Math.ceil((earliestExpiration - now) / (1000 * 60 * 60 * 24));
-
-          // Check if this matches any reminder interval
-          if (reminderDays.includes(daysUntil)) {
-            const portalUrl = `${process.env.APP_URL}/portal/${vendor.uploadToken}`;
-
-            // Check if we already sent a notification today
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
-            const alreadySent = await prisma.notificationLog.findFirst({
-              where: {
-                vendorId: vendor.id,
-                type: 'EXPIRATION_REMINDER',
-                sentAt: { gte: today },
-              },
-            });
-
-            if (!alreadySent) {
-              const cc = vendor.additionalEmails?.length > 0 ? vendor.additionalEmails : undefined;
-              await sendExpirationReminderEmail(
-                vendor.email,
-                vendor.name,
-                daysUntil,
-                portalUrl,
-                cc
-              ).catch(console.error);
-
-              await prisma.notificationLog.create({
-                data: {
-                  orgId: org.id,
-                  vendorId: vendor.id,
-                  coiId: latestCoi.id,
-                  type: 'EXPIRATION_REMINDER',
-                  recipientEmail: vendor.email,
-                  status: 'SENT',
-                },
-              });
-
-              console.log(`[Cron] Sent ${daysUntil}-day reminder to ${vendor.name} (${vendor.email})`);
-            }
-          }
-        }
-      }
-
-      console.log('[Cron] Expiration check complete');
+      const stats = await runExpirationSweep(prisma);
+      console.log(`[Cron] Expiration check complete — ${stats.sent} sent, ${stats.skipped} already notified, ${stats.failed} failed`);
     } catch (err) {
       console.error('[Cron] Expiration check failed:', err);
     }
@@ -107,6 +295,23 @@ function startExpirationCron(prisma) {
 
   job.start();
   console.log('[Cron] Expiration reminder job scheduled (daily at 8 AM)');
+}
+
+function startChaseCron(prisma) {
+  // Run daily at 9 AM, an hour after the expiration sweep so the two jobs
+  // don't compete for the same DB connections or email quota.
+  const job = new CronJob('0 9 * * *', async () => {
+    console.log('[Cron] Running non-responder chase...');
+    try {
+      const stats = await runChaseSweep(prisma);
+      console.log(`[Cron] Chase complete — ${stats.sent} sent, ${stats.skipped} already chased, ${stats.failed} failed, ${stats.escalated} escalated`);
+    } catch (err) {
+      console.error('[Cron] Chase failed:', err);
+    }
+  });
+
+  job.start();
+  console.log('[Cron] Non-responder chase job scheduled (daily at 9 AM)');
 }
 
 function startTokenRefreshCron(prisma) {
@@ -185,37 +390,22 @@ function startWeeklySummaryCron(prisma) {
         const urgentList = [];
 
         for (const vendor of vendors) {
-          if (vendor.cois.length === 0) {
-            noCoi++;
-            continue;
-          }
-
           const latestCoi = vendor.cois[0];
-          const expirationDates = [
-            latestCoi.glExpirationDate,
-            latestCoi.wcExpirationDate,
-            latestCoi.umbExpirationDate,
-            latestCoi.autoExpirationDate,
-          ].filter(Boolean);
+          const earliestExpirationDate = earliestExpiration(latestCoi);
 
-          if (expirationDates.length === 0) {
+          if (!earliestExpirationDate) {
             noCoi++;
             continue;
           }
 
-          const earliestExpiration = expirationDates.reduce(
-            (min, d) => (d < min ? d : min),
-            expirationDates[0]
-          );
+          const days = daysUntil(earliestExpirationDate, now);
 
-          const daysUntil = Math.ceil((earliestExpiration - now) / (1000 * 60 * 60 * 24));
-
-          if (daysUntil < 0) {
+          if (days < 0) {
             expired++;
-            urgentList.push({ name: vendor.name, expirationDate: earliestExpiration, daysUntil });
-          } else if (daysUntil <= 30) {
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
+          } else if (days <= 30) {
             expiringSoon++;
-            urgentList.push({ name: vendor.name, expirationDate: earliestExpiration, daysUntil });
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
           } else {
             compliant++;
           }
@@ -271,4 +461,11 @@ function startWeeklySummaryCron(prisma) {
   console.log('[Cron] Weekly summary job scheduled (Mondays at 8 AM)');
 }
 
-module.exports = { startExpirationCron, startTokenRefreshCron, startWeeklySummaryCron };
+module.exports = {
+  startExpirationCron,
+  startChaseCron,
+  startTokenRefreshCron,
+  startWeeklySummaryCron,
+  runExpirationSweep,
+  runChaseSweep,
+};
