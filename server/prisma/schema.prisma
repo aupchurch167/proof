@@ -74,6 +74,9 @@ model Organization {
   plan                  Plan     @default(FREE)
   additionalInsuredNote String?
   slug                  String?  @unique
+  // The window a carrier audits: { mode, start, end, warnInPeriod, retainForPeriod }.
+  // Drives the Requirements coverage-period block and the Audit log presets.
+  coveragePeriod        Json?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -102,6 +105,12 @@ model OrganizationSettings {
   notifyOnUpload         Boolean @default(true)
   notifyOnExpiration     Boolean @default(true)
   chaseNonResponders     Boolean @default(true)
+
+  // Requirement-template settings. These live alongside the coverage minimums
+  // because today every org has exactly one (default) template; per-trade
+  // templates need their own model.
+  requireHolderMatch     Boolean @default(true)
+  expiringWindowDays     Int     @default(30)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

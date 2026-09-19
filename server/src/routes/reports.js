@@ -3,6 +3,8 @@ const prisma = require('../lib/prisma');
 const { PDFDocument } = require('pdf-lib');
 const { authenticate } = require('../middleware/auth');
 const { downloadFile } = require('../services/storage');
+const { buildTimeline } = require('../services/coverageTimeline');
+const { COVERAGE_LINES } = require('../services/coverage');
 
 const router = express.Router();
 
@@ -26,6 +28,66 @@ router.get('/compliance', authenticate, async (req, res) => {
     res.json(summary);
   } catch (err) {
     res.status(500).json({ error: 'Failed to get compliance summary' });
+  }
+});
+
+// GET /api/reports/coverage?from&to&type — the audit coverage timeline.
+//
+// `type` is a coverage key ('gl','auto','wc','umb') or 'all'. The server does
+// the interval maths and hands back per-vendor segments so the client only
+// draws bars.
+router.get('/coverage', authenticate, async (req, res) => {
+  try {
+    const { from, to, type = 'all' } = req.query;
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to are required (YYYY-MM-DD)' });
+    }
+    if (Number.isNaN(new Date(from).getTime()) || Number.isNaN(new Date(to).getTime())) {
+      return res.status(400).json({ error: 'from and to must be valid dates' });
+    }
+
+    const validKeys = COVERAGE_LINES.map((l) => l.key);
+    if (type !== 'all' && !validKeys.includes(type)) {
+      return res.status(400).json({ error: `type must be 'all' or one of: ${validKeys.join(', ')}` });
+    }
+    const keys = type === 'all' ? validKeys : [type];
+
+    // Every vendor that existed at any point in the window, deleted or not —
+    // a sub who left mid-period still has to have been covered while active.
+    const vendors = await prisma.vendor.findMany({
+      where: {
+        orgId: req.user.orgId,
+        createdAt: { lte: new Date(to) },
+        OR: [{ deletedAt: null }, { deletedAt: { gte: new Date(from) } }],
+      },
+      select: {
+        id: true, name: true, trade: true, createdAt: true, deletedAt: true,
+        cois: {
+          where: { status: 'APPROVED' },
+          select: {
+            submittedAt: true,
+            glExpirationDate: true, autoExpirationDate: true,
+            wcExpirationDate: true, umbExpirationDate: true,
+          },
+        },
+      },
+    });
+
+    const { rows, days } = buildTimeline(vendors, { from, to, keys });
+
+    res.json({
+      from,
+      to,
+      type,
+      days,
+      vendors: rows.length,
+      fullCoverage: rows.filter((r) => r.full).length,
+      withGap: rows.filter((r) => !r.full).length,
+      rows,
+    });
+  } catch (err) {
+    console.error('Coverage report error:', err);
+    res.status(500).json({ error: 'Failed to build coverage report' });
   }
 });
 
