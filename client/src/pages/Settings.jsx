@@ -2,361 +2,323 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { Button, Card, PageTitle } from '../components/ui';
 
-function dollarsFromCents(cents) {
-  return cents != null ? (cents / 100).toString() : '';
-}
+const TABS = ['Company', 'Team', 'Plan & billing', 'Vendor portal', 'Profile'];
 
-function centsToDollars(dollars) {
-  const num = parseFloat(dollars);
-  return isNaN(num) ? 0 : Math.round(num * 100);
-}
-
-function SectionMessage({ message }) {
-  if (!message) return null;
+function Field({ label, hint, children, className = '' }) {
   return (
-    <div className={`px-4 py-3 rounded-lg mb-4 text-sm ${message.startsWith('Error') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
-      {message}
+    <div className={`flex flex-col gap-1.5 ${className}`}>
+      <span className="text-xs font-semibold text-ink-2">
+        {label}
+        {hint && <span className="text-faint font-normal"> ({hint})</span>}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+const input = 'px-3 py-2.5 rounded-control border border-line-strong bg-white text-sm text-ink focus:outline-none focus:border-navy transition-colors duration-150';
+
+// Usage meter on the navy plan card.
+function Meter({ label, used, limit }) {
+  const percent = limit == null ? 0 : Math.min(100, Math.round((used / limit) * 100));
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex justify-between text-[13px]">
+        <span className="text-on-navy-2">{label}</span>
+        <span>{used} / {limit ?? '∞'}</span>
+      </div>
+      <div className="h-1.5 rounded-[3px] bg-white/[.12]">
+        <div className="h-full rounded-[3px] bg-amber transition-[width] duration-300" style={{ width: `${percent}%` }} />
+      </div>
     </div>
   );
 }
 
 export default function Settings() {
   const { user } = useAuth();
+  const toast = useToast();
+
+  const [tab, setTab] = useState('Company');
   const [loading, setLoading] = useState(true);
-
-  // Coverage & notification settings
-  const [settingsForm, setSettingsForm] = useState({});
-  const [settingsMsg, setSettingsMsg] = useState('');
-  const [savingSettings, setSavingSettings] = useState(false);
-
-  // Organization info
+  const [org, setOrg] = useState(null);
   const [orgForm, setOrgForm] = useState({ name: '', email: '', phone: '', address: '', additionalInsuredNote: '' });
-  const [orgSlug, setOrgSlug] = useState(null);
-  const [orgMsg, setOrgMsg] = useState('');
-  const [savingOrg, setSavingOrg] = useState(false);
-  const [linkCopied, setLinkCopied] = useState(false);
-
-  // User profile
+  const [usage, setUsage] = useState(null);
+  const [team, setTeam] = useState([]);
   const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', email: '' });
-  const [profileMsg, setProfileMsg] = useState('');
-  const [savingProfile, setSavingProfile] = useState(false);
-
-  // Password change
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
-  const [passwordMsg, setPasswordMsg] = useState('');
-  const [savingPassword, setSavingPassword] = useState(false);
+  const [saving, setSaving] = useState('');
+
+  const isAdmin = user?.role === 'ADMIN';
+  const applyUrl = org ? `${window.location.origin}/apply/${org.slug || org.id}` : null;
 
   useEffect(() => {
     Promise.all([
-      api.get('/settings'),
       api.get('/organization'),
       api.get('/auth/me'),
+      api.get('/organization/usage').catch(() => null),
+      api.get('/users').catch(() => []),
     ])
-      .then(([s, org, me]) => {
-        setSettingsForm({
-          minGeneralLiability: dollarsFromCents(s.minGeneralLiability),
-          minWorkersComp: dollarsFromCents(s.minWorkersComp),
-          minUmbrella: dollarsFromCents(s.minUmbrella),
-          minAutomobile: dollarsFromCents(s.minAutomobile),
-          reminderDaysBefore: (s.reminderDaysBefore || [30, 14, 7, 0]).join(', '),
-          notifyOnUpload: s.notifyOnUpload,
-          notifyOnExpiration: s.notifyOnExpiration,
+      .then(([o, me, u, t]) => {
+        setOrg(o);
+        setOrgForm({
+          name: o.name || '', email: o.email || '', phone: o.phone || '',
+          address: o.address || '', additionalInsuredNote: o.additionalInsuredNote || '',
         });
-        setOrgForm({ name: org.name, email: org.email, phone: org.phone || '', address: org.address || '', additionalInsuredNote: org.additionalInsuredNote || '' });
-        setOrgSlug(org.slug || org.id);
         setProfileForm({ firstName: me.firstName, lastName: me.lastName, email: me.email });
+        setUsage(u);
+        setTeam(Array.isArray(t) ? t : []);
       })
-      .catch(console.error)
+      .catch(() => toast.error("Couldn't load settings"))
       .finally(() => setLoading(false));
   }, []);
 
-  const handleSaveSettings = async (e) => {
-    e.preventDefault();
-    setSavingSettings(true);
-    setSettingsMsg('');
-    try {
-      await api.put('/settings', {
-        minGeneralLiability: centsToDollars(settingsForm.minGeneralLiability),
-        minWorkersComp: centsToDollars(settingsForm.minWorkersComp),
-        minUmbrella: centsToDollars(settingsForm.minUmbrella),
-        minAutomobile: centsToDollars(settingsForm.minAutomobile),
-        reminderDaysBefore: settingsForm.reminderDaysBefore.split(',').map(d => parseInt(d.trim())).filter(n => !isNaN(n)),
-        notifyOnUpload: settingsForm.notifyOnUpload,
-        notifyOnExpiration: settingsForm.notifyOnExpiration,
-      });
-      setSettingsMsg('Coverage settings saved!');
-    } catch (err) {
-      setSettingsMsg('Error: ' + err.message);
-    } finally {
-      setSavingSettings(false);
-    }
-  };
-
-  const handleSaveOrg = async (e) => {
-    e.preventDefault();
-    setSavingOrg(true);
-    setOrgMsg('');
+  const saveOrg = async () => {
+    setSaving('org');
     try {
       await api.put('/organization', orgForm);
-      setOrgMsg('Company info saved!');
+      toast.success('Company details saved');
     } catch (err) {
-      setOrgMsg('Error: ' + err.message);
+      toast.error(err.message);
     } finally {
-      setSavingOrg(false);
+      setSaving('');
     }
   };
 
-  const handleSaveProfile = async (e) => {
-    e.preventDefault();
-    setSavingProfile(true);
-    setProfileMsg('');
+  const saveProfile = async () => {
+    setSaving('profile');
     try {
-      const updated = await api.put('/auth/me', profileForm);
-      setProfileForm({ firstName: updated.firstName, lastName: updated.lastName, email: updated.email });
-      setProfileMsg('Profile updated!');
+      await api.put('/auth/me', profileForm);
+      toast.success('Profile saved');
     } catch (err) {
-      setProfileMsg('Error: ' + err.message);
+      toast.error(err.message);
     } finally {
-      setSavingProfile(false);
+      setSaving('');
     }
   };
 
-  const handleChangePassword = async (e) => {
-    e.preventDefault();
-    setPasswordMsg('');
+  const savePassword = async () => {
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      setPasswordMsg('Error: Passwords do not match');
-      return;
+      return toast.error("The new passwords don't match");
     }
-    if (passwordForm.newPassword.length < 8) {
-      setPasswordMsg('Error: Password must be at least 8 characters');
-      return;
-    }
-    setSavingPassword(true);
+    setSaving('password');
     try {
       await api.put('/auth/me', {
         currentPassword: passwordForm.currentPassword,
         newPassword: passwordForm.newPassword,
       });
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      setPasswordMsg('Password changed!');
+      toast.success('Password changed');
     } catch (err) {
-      setPasswordMsg('Error: ' + err.message);
+      toast.error(err.message);
     } finally {
-      setSavingPassword(false);
+      setSaving('');
     }
   };
 
-  if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
-
-  const isAdmin = user?.role === 'ADMIN';
+  if (loading) return <div className="p-9 text-[13px] text-muted">Loading…</div>;
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Settings</h1>
+    <div className="px-9 py-8 max-w-settings w-full flex flex-col gap-[22px]">
+      <PageTitle>Settings</PageTitle>
 
-      {isAdmin && (
-        <div className="flex border-b mb-6">
-          <Link to="/settings"
-            className="px-4 py-2.5 text-sm font-medium border-b-2 border-blue-600 text-blue-600">
-            General
-          </Link>
-          <Link to="/settings/users"
-            className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
-            Users
-          </Link>
-        </div>
-      )}
+      <div className="flex gap-1 border-b border-line overflow-x-auto">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-3.5 py-2.5 text-[13px] whitespace-nowrap border-b-2 -mb-px transition-colors duration-150
+              ${tab === t ? 'font-bold text-navy border-amber' : 'font-semibold text-muted border-transparent hover:text-navy'}`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
 
-      {/* User Profile */}
-      <form onSubmit={handleSaveProfile} className="bg-white rounded-xl border p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Your Profile</h2>
-        <SectionMessage message={profileMsg} />
-        <div className="grid md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-            <input value={profileForm.firstName} onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg" required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-            <input value={profileForm.lastName} onChange={(e) => setProfileForm({ ...profileForm, lastName: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg" required />
-          </div>
-        </div>
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-          <input type="email" value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
-            className="w-full px-3 py-2 border rounded-lg" required />
-        </div>
-        <button type="submit" disabled={savingProfile}
-          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-          {savingProfile ? 'Saving...' : 'Update Profile'}
-        </button>
-      </form>
-
-      {/* Change Password */}
-      <form onSubmit={handleChangePassword} className="bg-white rounded-xl border p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Change Password</h2>
-        <SectionMessage message={passwordMsg} />
-        <div className="space-y-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
-            <input type="password" value={passwordForm.currentPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg" required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
-            <input type="password" value={passwordForm.newPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg" required minLength={8} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
-            <input type="password" value={passwordForm.confirmPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg" required minLength={8} />
-          </div>
-        </div>
-        <button type="submit" disabled={savingPassword}
-          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-          {savingPassword ? 'Changing...' : 'Change Password'}
-        </button>
-      </form>
-
-      {isAdmin && (
-        <>
-          {/* Company Information */}
-          <form onSubmit={handleSaveOrg} className="bg-white rounded-xl border p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4">Company Information</h2>
-            <SectionMessage message={orgMsg} />
-            <div className="grid md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
-                <input value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" required />
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] items-start">
+        <div className="flex flex-col gap-5">
+          {tab === 'Company' && (
+            <Card className="p-[22px] flex flex-col gap-4">
+              <span className="text-[15px] font-bold text-navy">Company</span>
+              <div className="grid sm:grid-cols-2 gap-3.5">
+                <Field label="Legal name">
+                  <input value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })} className={input} disabled={!isAdmin} />
+                </Field>
+                <Field label="Notification email">
+                  <input value={orgForm.email} onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })} className={input} disabled={!isAdmin} />
+                </Field>
+                <Field label="Address" hint="appears as certificate holder" className="sm:col-span-2">
+                  <input value={orgForm.address} onChange={(e) => setOrgForm({ ...orgForm, address: e.target.value })} className={input} disabled={!isAdmin} />
+                </Field>
+                <Field label="Note shown to vendors on the upload page" className="sm:col-span-2">
+                  <textarea
+                    rows={3}
+                    value={orgForm.additionalInsuredNote}
+                    onChange={(e) => setOrgForm({ ...orgForm, additionalInsuredNote: e.target.value })}
+                    className={`${input} leading-[1.5]`}
+                    disabled={!isAdmin}
+                  />
+                </Field>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Company Email</label>
-                <input type="email" value={orgForm.email} onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input value={orgForm.phone} onChange={(e) => setOrgForm({ ...orgForm, phone: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                <input value={orgForm.address} onChange={(e) => setOrgForm({ ...orgForm, address: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" />
-              </div>
-            </div>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Additional Insured Note</label>
-              <textarea value={orgForm.additionalInsuredNote}
-                onChange={(e) => setOrgForm({ ...orgForm, additionalInsuredNote: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" rows={3}
-                placeholder="Please list the above company as Additionally Insured on your Certificate of Insurance." />
-              <p className="text-xs text-gray-500 mt-1">This note is shown to vendors on the COI upload portal. Leave blank for the default message.</p>
-            </div>
-            <button type="submit" disabled={savingOrg}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-              {savingOrg ? 'Saving...' : 'Update Company Info'}
-            </button>
-          </form>
-
-          {/* Vendor Application Link */}
-          {orgSlug && (
-            <div className="bg-white rounded-xl border p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-1">Vendor Application Link</h2>
-              <p className="text-sm text-gray-500 mb-4">
-                Share this link with subcontractors so they can apply to join your vendor list directly.
+              {isAdmin && (
+                <div className="flex justify-end">
+                  <Button variant="navy" onClick={saveOrg} disabled={saving === 'org'}>
+                    {saving === 'org' ? 'Saving…' : 'Save'}
+                  </Button>
+                </div>
+              )}
+              <p className="text-xs text-muted border-t border-line-divider pt-3">
+                Coverage minimums moved to <Link to="/requirements" className="font-semibold text-navy hover:text-amber">Requirements</Link>,
+                and reminder settings to <Link to="/reminders" className="font-semibold text-navy hover:text-amber">Reminders</Link>.
               </p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <code className="flex-1 text-xs sm:text-sm bg-gray-100 px-3 py-2.5 rounded-lg overflow-x-auto break-all">
-                  {`${window.location.origin}/apply/${orgSlug}`}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/apply/${orgSlug}`);
-                    setLinkCopied(true);
-                    setTimeout(() => setLinkCopied(false), 1500);
-                  }}
-                  className="bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-medium whitespace-nowrap"
-                >
-                  {linkCopied ? 'Copied!' : 'Copy Link'}
-                </button>
-                <a
-                  href={`${window.location.origin}/apply/${orgSlug}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="border border-gray-300 px-4 py-2.5 rounded-lg hover:bg-gray-50 text-sm font-medium text-center"
-                >
-                  Preview
-                </a>
+            </Card>
+          )}
+
+          {tab === 'Team' && (
+            <Card className="p-[22px] flex flex-col gap-3.5">
+              <span className="text-[15px] font-bold text-navy">Team · {team.length}</span>
+              {team.map((m) => (
+                <div key={m.id} className="flex justify-between items-center text-[13px] py-1.5 border-b border-line-divider last:border-0">
+                  <span className="text-ink">{m.firstName} {m.lastName}</span>
+                  <span className="text-muted capitalize">{(m.role || '').toLowerCase()}</span>
+                </div>
+              ))}
+              {isAdmin && (
+                <Button as={Link} to="/settings/users" variant="secondary" className="!border-dashed justify-center">
+                  + Invite teammate
+                </Button>
+              )}
+            </Card>
+          )}
+
+          {tab === 'Plan & billing' && (
+            <Card className="p-[22px] flex flex-col gap-3">
+              <span className="text-[15px] font-bold text-navy">Plan & billing</span>
+              <p className="text-[13px] text-ink-2 leading-[1.55]">
+                You're on the <b className="text-navy">{usage?.planLabel}</b> plan.
+                Billing is not yet self-serve — to change plans, contact us and we'll move you over.
+              </p>
+              {isAdmin && (
+                <Button as={Link} to="/settings/integrations" className="self-start">
+                  API keys & webhooks →
+                </Button>
+              )}
+            </Card>
+          )}
+
+          {tab === 'Vendor portal' && (
+            <Card className="p-[22px] flex flex-col gap-3.5">
+              <span className="text-[15px] font-bold text-navy">Vendor portal</span>
+              <p className="text-[13px] text-ink-2 leading-[1.55]">
+                Anyone with this link can apply to become one of your vendors. Each vendor also gets
+                their own private upload link in every certificate request.
+              </p>
+              {applyUrl && (
+                <div className="flex gap-2 items-center flex-wrap">
+                  <code className="px-3 py-2 bg-card-alt border border-line rounded-control text-xs text-ink break-all">
+                    {applyUrl}
+                  </code>
+                  <Button onClick={() => { navigator.clipboard.writeText(applyUrl); toast.success('Link copied'); }}>
+                    Copy
+                  </Button>
+                  <Button as="a" href={applyUrl} target="_blank" rel="noreferrer">Preview ↗</Button>
+                </div>
+              )}
+              {usage?.portalPreviewToken && (
+                <p className="text-xs text-muted">
+                  <a href={`/portal/${usage.portalPreviewToken}`} target="_blank" rel="noreferrer" className="font-semibold text-navy hover:text-amber">
+                    See what a vendor sees ↗
+                  </a>
+                </p>
+              )}
+            </Card>
+          )}
+
+          {tab === 'Profile' && (
+            <>
+              <Card className="p-[22px] flex flex-col gap-4">
+                <span className="text-[15px] font-bold text-navy">Your profile</span>
+                <div className="grid sm:grid-cols-2 gap-3.5">
+                  <Field label="First name">
+                    <input value={profileForm.firstName} onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })} className={input} />
+                  </Field>
+                  <Field label="Last name">
+                    <input value={profileForm.lastName} onChange={(e) => setProfileForm({ ...profileForm, lastName: e.target.value })} className={input} />
+                  </Field>
+                  <Field label="Email" className="sm:col-span-2">
+                    <input value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} className={input} />
+                  </Field>
+                </div>
+                <div className="flex justify-end">
+                  <Button variant="navy" onClick={saveProfile} disabled={saving === 'profile'}>
+                    {saving === 'profile' ? 'Saving…' : 'Save'}
+                  </Button>
+                </div>
+              </Card>
+
+              <Card className="p-[22px] flex flex-col gap-4">
+                <span className="text-[15px] font-bold text-navy">Change password</span>
+                <div className="grid sm:grid-cols-2 gap-3.5">
+                  <Field label="Current password" className="sm:col-span-2">
+                    <input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} className={input} />
+                  </Field>
+                  <Field label="New password">
+                    <input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} className={input} />
+                  </Field>
+                  <Field label="Confirm new password">
+                    <input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} className={input} />
+                  </Field>
+                </div>
+                <div className="flex justify-end">
+                  <Button variant="navy" onClick={savePassword} disabled={saving === 'password'}>
+                    {saving === 'password' ? 'Saving…' : 'Change password'}
+                  </Button>
+                </div>
+              </Card>
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-5">
+          {usage && (
+            <div className="bg-navy text-white rounded-card p-5 flex flex-col gap-3">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-amber-light">
+                  {usage.planLabel} plan
+                </span>
               </div>
+              <Meter label="Vendors" used={usage.vendors.used} limit={usage.vendors.limit} />
+              <Meter label="Certificates read" used={usage.cois.used} limit={usage.cois.limit} />
+              {usage.plan !== 'UNLIMITED' && (
+                <button className="mt-1 py-2.5 rounded-control bg-white text-navy text-[13px] font-semibold hover:bg-amber-light transition-colors duration-150">
+                  Upgrade to Unlimited
+                </button>
+              )}
             </div>
           )}
 
-          {/* Coverage Requirements */}
-          <form onSubmit={handleSaveSettings}>
-            <div className="bg-white rounded-xl border p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-4">Minimum Coverage Requirements</h2>
-              <SectionMessage message={settingsMsg} />
-              <p className="text-sm text-gray-500 mb-4">Enter amounts in dollars. COIs will be flagged if coverage is below these minimums.</p>
-              <div className="grid md:grid-cols-2 gap-4">
-                {[
-                  { key: 'minGeneralLiability', label: 'General Liability' },
-                  { key: 'minWorkersComp', label: 'Workers Compensation' },
-                  { key: 'minUmbrella', label: 'Umbrella' },
-                  { key: 'minAutomobile', label: 'Automobile' },
-                ].map(({ key, label }) => (
-                  <div key={key}>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-gray-500">$</span>
-                      <input type="number" value={settingsForm[key]} onChange={(e) => setSettingsForm({ ...settingsForm, [key]: e.target.value })}
-                        className="w-full pl-7 pr-3 py-2 border rounded-lg" />
-                    </div>
-                  </div>
-                ))}
+          <Card className="p-5 flex flex-col gap-2.5">
+            <span className="text-sm font-bold text-navy">Team · {team.length}</span>
+            {team.slice(0, 5).map((m) => (
+              <div key={m.id} className="flex justify-between text-[13px]">
+                <span className="text-ink truncate">{m.firstName} {m.lastName}</span>
+                <span className="text-muted capitalize">{(m.role || '').toLowerCase()}</span>
               </div>
-            </div>
-
-            {/* Notification Settings */}
-            <div className="bg-white rounded-xl border p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-4">Notification Settings</h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reminder Days Before Expiration</label>
-                  <input value={settingsForm.reminderDaysBefore} onChange={(e) => setSettingsForm({ ...settingsForm, reminderDaysBefore: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" placeholder="30, 14, 7, 0" />
-                  <p className="text-xs text-gray-500 mt-1">Comma-separated list of days. Use 0 for expiration day.</p>
-                </div>
-                <label className="flex items-center gap-3">
-                  <input type="checkbox" checked={settingsForm.notifyOnUpload} onChange={(e) => setSettingsForm({ ...settingsForm, notifyOnUpload: e.target.checked })}
-                    className="rounded" />
-                  <span className="text-sm">Notify admins when a vendor uploads a new COI</span>
-                </label>
-                <label className="flex items-center gap-3">
-                  <input type="checkbox" checked={settingsForm.notifyOnExpiration} onChange={(e) => setSettingsForm({ ...settingsForm, notifyOnExpiration: e.target.checked })}
-                    className="rounded" />
-                  <span className="text-sm">Send expiration reminders to vendors</span>
-                </label>
-              </div>
-            </div>
-
-            <button type="submit" disabled={savingSettings}
-              className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-              {savingSettings ? 'Saving...' : 'Save Coverage & Notification Settings'}
-            </button>
-          </form>
-        </>
-      )}
+            ))}
+            {isAdmin && (
+              <Link
+                to="/settings/users"
+                className="mt-1 py-2 text-center text-[13px] font-semibold text-navy border border-dashed border-line-strong
+                  rounded-control hover:border-navy transition-colors duration-150"
+              >
+                + Invite teammate
+              </Link>
+            )}
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

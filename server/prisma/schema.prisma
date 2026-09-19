@@ -33,9 +33,11 @@ enum CoiReviewStatus {
 enum NotificationType {
   EXPIRATION_REMINDER
   UPLOAD_REQUEST
+  UPLOAD_CHASE
   REVIEW_COMPLETE
   COI_REJECTED
   WEEKLY_SUMMARY
+  MANUAL_CONTACT
 }
 
 enum NotificationStatus {
@@ -57,6 +59,12 @@ enum CoverageType {
   OTHER
 }
 
+enum CoiRequestStatus {
+  REQUESTED
+  FULFILLED
+  CANCELLED
+}
+
 model Organization {
   id                    String   @id @default(uuid())
   name                  String
@@ -66,6 +74,9 @@ model Organization {
   plan                  Plan     @default(FREE)
   additionalInsuredNote String?
   slug                  String?  @unique
+  // The window a carrier audits: { mode, start, end, warnInPeriod, retainForPeriod }.
+  // Drives the Requirements coverage-period block and the Audit log presets.
+  coveragePeriod        Json?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -75,6 +86,9 @@ model Organization {
   cois          Coi[]
   notifications NotificationLog[]
   auditLogs     AuditLog[]
+  apiClients    ApiClient[]
+  coiRequests   CoiRequest[]
+  webhookEndpoints WebhookEndpoint[]
 }
 
 model OrganizationSettings {
@@ -86,9 +100,17 @@ model OrganizationSettings {
   minUmbrella         Int @default(100000000)
   minAutomobile       Int @default(100000000)
 
-  reminderDaysBefore  Json    @default("[30, 14, 7, 0]")
-  notifyOnUpload      Boolean @default(true)
-  notifyOnExpiration  Boolean @default(true)
+  reminderDaysBefore     Json    @default("[30, 14, 7, 0]")
+  chaseDaysAfterRequest  Json    @default("[3, 7, 14]")
+  notifyOnUpload         Boolean @default(true)
+  notifyOnExpiration     Boolean @default(true)
+  chaseNonResponders     Boolean @default(true)
+
+  // Requirement-template settings. These live alongside the coverage minimums
+  // because today every org has exactly one (default) template; per-trade
+  // templates need their own model.
+  requireHolderMatch     Boolean @default(true)
+  expiringWindowDays     Int     @default(30)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -100,7 +122,8 @@ model User {
   id           String   @id @default(uuid())
   orgId        String
   email        String   @unique
-  passwordHash String
+  passwordHash String?
+  googleId     String?  @unique
   firstName    String
   lastName     String
   role             UserRole @default(ADMIN)
@@ -142,6 +165,7 @@ model Vendor {
   organization  Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   cois          Coi[]
   notifications NotificationLog[]
+  coiRequests   CoiRequest[]
 
   @@index([orgId, deletedAt])
 }
@@ -214,6 +238,9 @@ model NotificationLog {
   recipientEmail String
   sentAt         DateTime           @default(now())
   status         NotificationStatus
+  // Free-form context for the send: which reminder window fired, which chase
+  // step, why a send was skipped. Read back to dedupe reminders/chases.
+  meta           Json?
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   vendor       Vendor?      @relation(fields: [vendorId], references: [id])
@@ -238,4 +265,73 @@ model AuditLog {
 
   @@index([orgId, createdAt])
   @@index([orgId, entity, action])
+}
+
+// A service-to-service API consumer (e.g. Quill, Core, or a future integration).
+// The raw bearer token is never stored — only its SHA-256 hash. Scope an
+// individual token to one org (orgId) or grant it platform access to every org
+// (allOrgs) for a multi-tenant consumer.
+model ApiClient {
+  id          String    @id @default(uuid())
+  name        String
+  tokenHash   String    @unique
+  tokenPrefix String
+  scopes      String[]  @default([])
+  orgId       String?
+  allOrgs     Boolean   @default(false)
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  coiRequests  CoiRequest[]
+
+  @@index([orgId])
+}
+
+// The canonical record of a COI request for a vendor. Created by both the app UI
+// and the public API so "is a request open?" has a single source of truth.
+// Auto-resolved to FULFILLED when the vendor next becomes compliant.
+model CoiRequest {
+  id               String           @id @default(uuid())
+  orgId            String
+  vendorId         String
+  status           CoiRequestStatus @default(REQUESTED)
+  coverageTypes    String[]         @default([])
+  note             String?
+  requestedByEmail String?
+  source           String           @default("app")
+  apiClientId      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  fulfilledAt      DateTime?
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  vendor       Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  apiClient    ApiClient?   @relation(fields: [apiClientId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId, status])
+  @@index([orgId, createdAt])
+}
+
+// A subscription for an external consumer to receive signed event callbacks
+// (e.g. coi.updated). Scoped to one org or all orgs, mirroring ApiClient.
+model WebhookEndpoint {
+  id                 String    @id @default(uuid())
+  name               String
+  url                String
+  secret             String
+  events             String[]  @default([])
+  orgId              String?
+  allOrgs            Boolean   @default(false)
+  active             Boolean   @default(true)
+  lastDeliveryAt     DateTime?
+  lastDeliveryStatus String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }

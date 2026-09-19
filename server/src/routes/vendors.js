@@ -8,9 +8,11 @@ const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
+const { coverageFor, coverageReason } = require('../services/coverage');
 const { uploadFile, deleteFile, getSignedUrl } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
+const { isPlaceholderEmail, placeholderReason } = require('../utils/email');
 const { logAudit } = require('../services/audit');
 const core = require('../lib/core');
 const { isValidTrade, CANONICAL_TRADES } = require('../constants/trades');
@@ -56,19 +58,45 @@ router.get('/', authenticate, async (req, res) => {
       ];
     }
 
-    const vendors = await prisma.vendor.findMany({
-      where,
-      orderBy: { name: 'asc' },
-      include: {
-        cois: {
-          orderBy: { submittedAt: 'desc' },
-          take: 1,
-          select: { id: true, status: true, submittedAt: true, coverageType: true, glExpirationDate: true },
+    // Newest-first COIs per vendor: the first row drives the "latest COI"
+    // column, the first APPROVED one drives the coverage chips. One include
+    // serves both, so the list stays a single query.
+    const [vendors, settings] = await Promise.all([
+      prisma.vendor.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        include: {
+          cois: {
+            orderBy: { submittedAt: 'desc' },
+            select: {
+              id: true, status: true, submittedAt: true, coverageType: true,
+              glCoverageAmount: true, glExpirationDate: true, glPolicyNumber: true,
+              autoCoverageAmount: true, autoExpirationDate: true, autoPolicyNumber: true,
+              wcCoverageAmount: true, wcExpirationDate: true, wcPolicyNumber: true,
+              umbCoverageAmount: true, umbExpirationDate: true, umbPolicyNumber: true,
+            },
+          },
         },
-      },
-    });
+      }),
+      prisma.organizationSettings.findUnique({ where: { orgId: req.user.orgId } }),
+    ]);
 
-    res.json(vendors);
+    const now = new Date();
+    res.json(vendors.map((vendor) => {
+      const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
+      const coverages = coverageFor(latestApproved, settings, { now });
+      return {
+        ...vendor,
+        // The list only ever renders the newest certificate.
+        cois: vendor.cois.slice(0, 1),
+        coverages,
+        statusReason: coverageReason(coverages),
+        nextExpiration: coverages
+          .filter((c) => c.expiresAt && c.verdict !== 'skipped')
+          .map((c) => c.expiresAt)
+          .sort()[0] || null,
+      };
+    }));
   } catch (err) {
     res.status(500).json({ error: 'Failed to list vendors' });
   }
@@ -185,11 +213,24 @@ router.get('/:id', authenticate, async (req, res) => {
       }),
     ]);
 
+    const settings = await prisma.organizationSettings.findUnique({
+      where: { orgId: req.user.orgId },
+    });
+    const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
+    const coverages = coverageFor(latestApproved, settings, {});
+
     res.json({
       ...vendor,
       w9Url,
       masterAgreementUrl,
       lastCoiRequestAt: lastCoiRequest?.sentAt || null,
+      coverages,
+      statusReason: coverageReason(coverages),
+      // The certificate list marks anything older than the newest approved one
+      // for the same coverage as superseded rather than just "approved".
+      supersededCoiIds: latestApproved
+        ? vendor.cois.filter((c) => c.status === 'APPROVED' && c.id !== latestApproved.id).map((c) => c.id)
+        : [],
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get vendor' });
@@ -341,9 +382,11 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
 
     // Extract data with Claude AI
     let extractedData = null;
+    let extractionError = null;
     try {
       extractedData = await extractCoiData(req.file.buffer);
     } catch (extractErr) {
+      extractionError = extractErr.message;
       console.error('AI extraction failed:', extractErr);
     }
 
@@ -401,6 +444,7 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
       message: 'COI uploaded successfully',
       coiId: coi.id,
       complianceFlags,
+      extractionError,
     });
   } catch (err) {
     console.error('COI upload error:', err);
@@ -418,6 +462,26 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
 
     if (!vendor) {
       return res.status(404).json({ error: 'Vendor not found' });
+    }
+
+    // Vendors imported without a contact address carry a synthesized one that
+    // will never deliver. Record the attempt as FAILED so the cockpit can flag
+    // the vendor, and tell the caller to fix the address instead.
+    if (isPlaceholderEmail(vendor.email)) {
+      await prisma.notificationLog.create({
+        data: {
+          orgId: req.user.orgId,
+          vendorId: vendor.id,
+          type: 'UPLOAD_REQUEST',
+          recipientEmail: vendor.email,
+          status: 'FAILED',
+          meta: { reason: placeholderReason(vendor.email) },
+        },
+      });
+      return res.status(400).json({
+        error: 'This vendor has no deliverable email address on file',
+        code: 'BAD_EMAIL',
+      });
     }
 
     // Default 24-hour cooldown so a stray click (or a tab left open) can't

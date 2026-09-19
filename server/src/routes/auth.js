@@ -7,8 +7,14 @@ const { generateAccessToken, generateRefreshToken } = require('../utils/tokens')
 const { authenticate } = require('../middleware/auth');
 const { validate, passwordSchema } = require('../utils/validation');
 const { sendPasswordResetEmail, sendEmailVerificationEmail } = require('../services/email');
+const { verifyGoogleIdToken, isGoogleConfigured } = require('../lib/google');
 
 const router = express.Router();
+
+// GET /api/auth/config — public client config (which providers are enabled)
+router.get('/config', (req, res) => {
+  res.json({ googleEnabled: isGoogleConfigured() });
+});
 
 // POST /api/auth/signup
 router.post('/signup', validate('signup'), async (req, res) => {
@@ -91,6 +97,15 @@ router.post('/login', validate('login'), async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Accounts with no password can't log in this way. Point Google users at the
+    // Google button; everything else (e.g. a pending invite) stays generic.
+    if (!user.passwordHash) {
+      if (user.googleId) {
+        return res.status(401).json({ error: 'This account uses Google sign-in. Please continue with Google.' });
+      }
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -116,6 +131,97 @@ router.post('/login', validate('login'), async (req, res) => {
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/auth/google — sign in / sign up with a Google ID token
+router.post('/google', async (req, res) => {
+  try {
+    const { credential, orgName } = req.body;
+    if (!credential) {
+      return res.status(400).json({ error: 'Google credential is required' });
+    }
+
+    let profile;
+    try {
+      profile = await verifyGoogleIdToken(credential);
+    } catch (err) {
+      console.error('Google token verification failed:', err.message);
+      return res.status(401).json({ error: 'Invalid Google credential' });
+    }
+
+    // Match an existing account by Google id first, then fall back to email so
+    // users who originally signed up with a password can link Google.
+    let user = await prisma.user.findFirst({
+      where: { OR: [{ googleId: profile.googleId }, { email: profile.email }] },
+      include: { organization: true },
+    });
+
+    if (user) {
+      // Link the Google id (and mark verified) on first Google login for an
+      // account that was created another way.
+      if (!user.googleId || !user.emailVerified) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            googleId: user.googleId || profile.googleId,
+            emailVerified: true,
+            emailVerifyToken: null,
+          },
+          include: { organization: true },
+        });
+      }
+    } else {
+      // New user — provision an organization, mirroring the signup flow.
+      const created = await prisma.$transaction(async (tx) => {
+        const org = await tx.organization.create({
+          data: {
+            name: (orgName && orgName.trim())
+              || `${profile.firstName} ${profile.lastName}`.trim()
+              || profile.email,
+            email: profile.email,
+            settings: { create: {} },
+          },
+        });
+
+        const newUser = await tx.user.create({
+          data: {
+            orgId: org.id,
+            email: profile.email,
+            googleId: profile.googleId,
+            firstName: profile.firstName || 'User',
+            lastName: profile.lastName || '',
+            role: 'ADMIN',
+            emailVerified: true,
+          },
+          include: { organization: true },
+        });
+
+        return newUser;
+      });
+      user = created;
+    }
+
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        orgId: user.orgId,
+        orgName: user.organization.name,
+        emailVerified: user.emailVerified,
+      },
+    });
+  } catch (err) {
+    console.error('Google auth error:', err);
+    res.status(500).json({ error: 'Google sign-in failed' });
   }
 });
 
@@ -265,17 +371,21 @@ router.put('/me', authenticate, async (req, res) => {
     }
 
     if (newPassword) {
-      if (!currentPassword) {
-        return res.status(400).json({ error: 'Current password required to set new password' });
-      }
       const pwResult = passwordSchema.safeParse(newPassword);
       if (!pwResult.success) {
         const message = pwResult.error.issues.map(e => e.message).join(', ');
         return res.status(400).json({ error: message });
       }
-      const valid = await bcrypt.compare(currentPassword, user.passwordHash);
-      if (!valid) {
-        return res.status(401).json({ error: 'Current password is incorrect' });
+      // Users who signed up with Google have no password yet, so they can set
+      // one without providing a current password. Everyone else must confirm it.
+      if (user.passwordHash) {
+        if (!currentPassword) {
+          return res.status(400).json({ error: 'Current password required to set new password' });
+        }
+        const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+        if (!valid) {
+          return res.status(401).json({ error: 'Current password is incorrect' });
+        }
       }
       data.passwordHash = await bcrypt.hash(newPassword, 12);
     }

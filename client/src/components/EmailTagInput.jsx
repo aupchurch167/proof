@@ -63,16 +63,16 @@ export default function EmailTagInput({ value = [], onChange, placeholder = 'Add
   return (
     <div>
       <div
-        className="flex flex-wrap gap-1.5 px-3 py-2 border rounded-lg min-h-[42px] cursor-text bg-white"
+        className="flex flex-wrap gap-1.5 px-3 py-2 border rounded-control min-h-[42px] cursor-text bg-white"
         onClick={() => inputRef.current?.focus()}
       >
         {value.map((email, i) => (
-          <span key={i} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-sm">
+          <span key={i} className="inline-flex items-center gap-1 bg-info-bg text-info-text px-2 py-0.5 rounded text-sm">
             {email}
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); removeEmail(i); }}
-              className="text-blue-400 hover:text-blue-600 text-xs leading-none"
+              className="text-faint hover:text-navy text-xs leading-none"
             >
               &times;
             </button>
@@ -90,7 +90,7 @@ export default function EmailTagInput({ value = [], onChange, placeholder = 'Add
           className="flex-1 min-w-[120px] outline-none text-sm py-0.5 bg-transparent"
         />
       </div>
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {error && <p className="text-xs text-bad-text mt-1">{error}</p>}
     </div>
   );
 }

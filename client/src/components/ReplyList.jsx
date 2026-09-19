@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 
 function AttachmentChip({ att }) {
   const tone = att.classified === 'coi'
-    ? 'bg-green-100 text-green-700 border-green-300'
+    ? 'bg-ok-bg text-ok-text border-green-300'
     : att.error
-      ? 'bg-red-50 text-red-700 border-red-200'
-      : 'bg-gray-100 text-gray-700 border-gray-300';
+      ? 'bg-bad-bg text-bad-text border-bad-line'
+      : 'bg-warm text-ink-2 border-line-strong';
 
   const label = att.classified === 'coi'
     ? `${att.filename} — saved as COI`
@@ -44,11 +44,11 @@ function ReplyRow({ reply, showVendor }) {
   const shortPreview = truncated ? preview.slice(0, 160) + '…' : preview;
 
   return (
-    <div className="bg-white rounded-xl border">
+    <div className="bg-white rounded-card border">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
+        className="w-full text-left p-4 hover:bg-card-alt transition-colors"
       >
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-1">
           <div className="flex-1 min-w-0">
@@ -56,21 +56,21 @@ function ReplyRow({ reply, showVendor }) {
               <Link
                 to={`/vendors/${reply.vendor.id}`}
                 onClick={(e) => e.stopPropagation()}
-                className="text-sm font-medium text-blue-600 hover:underline"
+                className="text-sm font-medium text-navy hover:underline"
               >
                 {reply.vendor.name}
               </Link>
             )}
             {showVendor && !reply.vendor && (
-              <span className="text-sm font-medium text-gray-400">Unknown vendor</span>
+              <span className="text-sm font-medium text-faint">Unknown vendor</span>
             )}
             <p className="text-sm font-medium truncate">{subject}</p>
-            <p className="text-xs text-gray-500 truncate">{reply.from}</p>
+            <p className="text-xs text-muted truncate">{reply.from}</p>
           </div>
-          <p className="text-xs text-gray-500 whitespace-nowrap">{received}</p>
+          <p className="text-xs text-muted whitespace-nowrap">{received}</p>
         </div>
         {!open && shortPreview && (
-          <p className="text-sm text-gray-600 mt-2 line-clamp-2 whitespace-pre-wrap">{shortPreview}</p>
+          <p className="text-sm text-muted mt-2 line-clamp-2 whitespace-pre-wrap">{shortPreview}</p>
         )}
         {reply.attachments && reply.attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2">
@@ -82,9 +82,9 @@ function ReplyRow({ reply, showVendor }) {
       </button>
       {open && (
         <div className="px-4 pb-4 border-t pt-3">
-          <p className="text-sm whitespace-pre-wrap text-gray-800">{preview}</p>
+          <p className="text-sm whitespace-pre-wrap text-ink">{preview}</p>
           {truncated && (
-            <p className="text-xs text-gray-400 mt-2">
+            <p className="text-xs text-faint mt-2">
               (preview truncated to 1000 characters; full email is in your forwarding inbox)
             </p>
           )}
@@ -96,7 +96,7 @@ function ReplyRow({ reply, showVendor }) {
 
 export default function ReplyList({ replies, showVendor = true, emptyText = 'No replies yet.' }) {
   if (!replies || replies.length === 0) {
-    return <p className="text-sm text-gray-500">{emptyText}</p>;
+    return <p className="text-sm text-muted">{emptyText}</p>;
   }
   return (
     <div className="space-y-2">

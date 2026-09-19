@@ -1,15 +1,47 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticate, authorize } = require('../middleware/auth');
-const { updateVendorStatus } = require('../services/compliance');
-const { getSignedUrl, deleteFile } = require('../services/storage');
+const { updateVendorStatus, checkCompliance } = require('../services/compliance');
+const { getSignedUrl, deleteFile, downloadFile } = require('../services/storage');
+const { extractCoiData } = require('../services/coiExtractor');
 const { z } = require('zod');
 const { logAudit } = require('../services/audit');
 
+// Map an AI extraction result onto the COI's editable columns. Shared by the
+// re-analyze route and mirrors the mapping used on first upload.
+function extractedToCoiData(extractedData) {
+  return {
+    aiExtractedData: extractedData,
+    coverageType: extractedData.coverageType || null,
+    glPolicyNumber: extractedData.glPolicyNumber || null,
+    glCoverageAmount: extractedData.glCoverageAmount || null,
+    glExpirationDate: extractedData.glExpirationDate ? new Date(extractedData.glExpirationDate) : null,
+    wcPolicyNumber: extractedData.wcPolicyNumber || null,
+    wcCoverageAmount: extractedData.wcCoverageAmount || null,
+    wcExpirationDate: extractedData.wcExpirationDate ? new Date(extractedData.wcExpirationDate) : null,
+    umbPolicyNumber: extractedData.umbPolicyNumber || null,
+    umbCoverageAmount: extractedData.umbCoverageAmount || null,
+    umbExpirationDate: extractedData.umbExpirationDate ? new Date(extractedData.umbExpirationDate) : null,
+    autoPolicyNumber: extractedData.autoPolicyNumber || null,
+    autoCoverageAmount: extractedData.autoCoverageAmount || null,
+    autoExpirationDate: extractedData.autoExpirationDate ? new Date(extractedData.autoExpirationDate) : null,
+    agentName: extractedData.agentName || null,
+    agentEmail: extractedData.agentEmail || null,
+    agentPhone: extractedData.agentPhone || null,
+    insuranceCompany: extractedData.insuranceCompany || null,
+    certificateHolderName: extractedData.certificateHolderName || null,
+    certificateHolderAddress: extractedData.certificateHolderAddress || null,
+  };
+}
+
 const router = express.Router();
 
+// Not `.strict()`: the client sends the whole COI object back (including id,
+// vendor, etc.), so unknown keys are stripped rather than rejected. Only the
+// whitelisted `allowedFields` below are ever written. `coverageType` and the
+// amounts must accept null so a reviewer can clear a field.
 const coiUpdateSchema = z.object({
-  coverageType: z.string().optional(),
+  coverageType: z.string().nullable().optional(),
   glPolicyNumber: z.string().nullable().optional(),
   glCoverageAmount: z.number().nullable().optional(),
   glExpirationDate: z.string().nullable().optional(),
@@ -23,12 +55,13 @@ const coiUpdateSchema = z.object({
   autoCoverageAmount: z.number().nullable().optional(),
   autoExpirationDate: z.string().nullable().optional(),
   agentName: z.string().nullable().optional(),
-  agentEmail: z.string().email('Invalid agent email').nullable().optional(),
+  // Tolerate an empty string (a cleared field) in addition to a valid email/null.
+  agentEmail: z.union([z.string().email('Invalid agent email'), z.literal('')]).nullable().optional(),
   agentPhone: z.string().nullable().optional(),
   insuranceCompany: z.string().nullable().optional(),
   certificateHolderName: z.string().nullable().optional(),
   certificateHolderAddress: z.string().nullable().optional(),
-}).strict();
+});
 
 // GET /api/cois
 router.get('/', authenticate, async (req, res) => {
@@ -75,7 +108,17 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'COI not found' });
     }
 
-    res.json(coi);
+    // Whether the reviewer is looking at this vendor's first certificate or a
+    // renewal — the review screen says so in its title.
+    const earlier = await prisma.coi.count({
+      where: {
+        vendorId: coi.vendorId,
+        status: 'APPROVED',
+        submittedAt: { lt: coi.submittedAt },
+      },
+    });
+
+    res.json({ ...coi, isRenewal: earlier > 0 });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get COI' });
   }
@@ -149,6 +192,72 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
   } catch (err) {
     console.error('Update COI error:', err);
     res.status(500).json({ error: 'Failed to update COI' });
+  }
+});
+
+// POST /api/cois/:id/reanalyze — re-run AI extraction on the stored PDF and
+// overwrite the COI's extracted data + compliance flags. Useful mid-review when
+// the first extraction failed (e.g. the API key was missing) or was poor.
+router.post('/:id/reanalyze', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
+  try {
+    const coi = await prisma.coi.findFirst({
+      where: { id: req.params.id, orgId: req.user.orgId },
+      include: { organization: { include: { settings: true } } },
+    });
+
+    if (!coi) {
+      return res.status(404).json({ error: 'COI not found' });
+    }
+    if (!coi.pdfPath) {
+      return res.status(400).json({ error: 'This COI has no PDF to analyze' });
+    }
+
+    let buffer;
+    try {
+      buffer = await downloadFile(coi.pdfPath);
+    } catch (err) {
+      console.error('Reanalyze download failed:', err);
+      return res.status(502).json({ error: 'Could not retrieve the COI PDF' });
+    }
+
+    let extractedData = null;
+    let extractionError = null;
+    try {
+      extractedData = await extractCoiData(buffer);
+    } catch (err) {
+      extractionError = err.message;
+      console.error('Reanalyze extraction failed:', err);
+    }
+
+    if (!extractedData) {
+      // Surface the real reason (e.g. missing API key) so an admin can act on it.
+      return res.status(422).json({ error: extractionError || 'AI extraction returned no data' });
+    }
+
+    const settings = coi.organization.settings;
+    const complianceFlags = settings
+      ? checkCompliance(extractedData, settings, coi.organization.name)
+      : null;
+
+    const updated = await prisma.coi.update({
+      where: { id: coi.id },
+      data: { ...extractedToCoiData(extractedData), complianceFlags },
+      include: {
+        vendor: true,
+        organization: { select: { name: true } },
+        reviewedBy: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    // Recompute vendor status in case this COI is already approved and the
+    // coverage figures changed.
+    await updateVendorStatus(prisma, coi.vendorId, coi.orgId);
+    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'reanalyze', entity: 'coi', entityId: coi.id, ipAddress: req.ip });
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Reanalyze COI error:', err);
+    res.status(500).json({ error: 'Failed to re-analyze COI' });
   }
 });
 

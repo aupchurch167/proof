@@ -1,3 +1,27 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Manrope', system-ui, sans-serif;
+  }
+  body {
+    @apply bg-canvas text-ink;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* The brand has no italic voice — Manrope ships no italic face either. */
+  i, em {
+    font-style: normal;
+  }
+  a {
+    @apply text-navy no-underline;
+  }
+  a:hover {
+    @apply text-amber;
+  }
+  /* Dates and counts line up in tables. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

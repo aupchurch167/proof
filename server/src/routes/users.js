@@ -45,7 +45,7 @@ router.post('/invite', authenticate, authorize('ADMIN'), async (req, res) => {
       data: {
         orgId: req.user.orgId,
         email,
-        passwordHash: '',
+        passwordHash: null,
         firstName: '',
         lastName: '',
         role: assignRole,

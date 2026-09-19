@@ -4,72 +4,54 @@ import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
-import { CANONICAL_TRADES } from '../constants/trades';
 import EmailTagInput from '../components/EmailTagInput';
+import { CANONICAL_TRADES } from '../constants/trades';
+import { VENDOR_FILTERS, vendorStatus } from '../constants/status';
+import {
+  Button, Card, Chip, CoverageChip, Input, Select, StatusPill, PageTitle, Th, EmptyState,
+} from '../components/ui';
 
-const statusColors = {
-  COMPLIANT: 'bg-green-100 text-green-800',
-  NON_COMPLIANT: 'bg-red-100 text-red-800',
-  EXPIRING_SOON: 'bg-yellow-100 text-yellow-800',
-  EXPIRED: 'bg-red-100 text-red-800',
-  PENDING: 'bg-blue-100 text-blue-800',
-  NO_COI: 'bg-gray-100 text-gray-800',
-};
+function CoverageChips({ coverages }) {
+  if (!coverages?.length) return <span className="text-xs text-faint">—</span>;
+  return (
+    <div className="flex gap-1 flex-wrap">
+      {coverages.map((c) => (
+        <CoverageChip
+          key={c.key}
+          tone={c.tone}
+          title={
+            c.verdict === 'skipped'
+              ? `${c.label}: not required`
+              : `${c.label}: ${c.verdict}${c.limit ? ` · $${c.limit.toLocaleString()}` : ''}${c.expiresAt ? ` · expires ${c.expiresAt}` : ''}`
+          }
+        >
+          {c.chip}
+        </CoverageChip>
+      ))}
+    </div>
+  );
+}
 
-const statusLabels = {
-  COMPLIANT: 'Compliant',
-  NON_COMPLIANT: 'Non-Compliant',
-  EXPIRING_SOON: 'Expiring Soon',
-  EXPIRED: 'Expired',
-  PENDING: 'Pending',
-  NO_COI: 'No COI',
-};
-
-export default function Vendors() {
-  const { user } = useAuth();
+// Right-side drawer holding the same fields the inline form used to.
+function AddVendorDrawer({ open, onClose, onCreated }) {
   const toast = useToast();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [vendors, setVendors] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [orgSlug, setOrgSlug] = useState(null);
-  const applyUrl = orgSlug ? `${window.location.origin}/apply/${orgSlug}` : null;
-
-  useEffect(() => {
-    api.get('/organization').then((org) => setOrgSlug(org.slug || org.id)).catch(() => {});
-  }, []);
-  const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '', trade: '', additionalEmails: [] });
+  const empty = { name: '', contactName: '', email: '', phone: '', address: '', trade: '', additionalEmails: [] };
+  const [form, setForm] = useState(empty);
   const [w9File, setW9File] = useState(null);
   const [maFile, setMaFile] = useState(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
-  const [tradeFilter, setTradeFilter] = useState(searchParams.get('trade') || '');
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState(new Set());
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [requestingBulk, setRequestingBulk] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const fetchVendors = async () => {
-    try {
-      let url = '/vendors?';
-      if (search) url += `search=${encodeURIComponent(search)}&`;
-      if (statusFilter) url += `status=${statusFilter}&`;
-      if (tradeFilter) url += `trade=${encodeURIComponent(tradeFilter)}&`;
-      const data = await api.get(url);
-      setVendors(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (open) { setForm(empty); setW9File(null); setMaFile(null); setError(''); }
+  }, [open]);
 
-  useEffect(() => { fetchVendors(); }, [search, statusFilter, tradeFilter]);
+  if (!open) return null;
 
-  const handleAdd = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     setError('');
+    setSaving(true);
     try {
       const payload = { ...form };
       if (!payload.trade) delete payload.trade;
@@ -81,76 +63,202 @@ export default function Vendors() {
         if (maFile) fd.append('masterAgreement', maFile);
         await api.upload(`/vendors/${created.id}/documents`, fd);
       }
-      setForm({ name: '', contactName: '', email: '', phone: '', address: '', trade: '', additionalEmails: [] });
-      setW9File(null);
-      setMaFile(null);
-      setShowAdd(false);
-      fetchVendors();
+      toast.success(`${created.name} added`);
+      onCreated();
+      onClose();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSaving(false);
     }
   };
+
+  const field = 'w-full px-3 py-2.5 rounded-control border border-line-strong bg-white text-[13px] focus:outline-none focus:border-navy';
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-navy-deep/40 z-40" onClick={onClose} />
+      <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white border-l border-line flex flex-col shadow-2xl">
+        <div className="px-6 py-5 border-b border-line flex items-center justify-between">
+          <h2 className="text-base font-bold text-navy">Add vendor</h2>
+          <button onClick={onClose} className="text-muted hover:text-navy p-1" aria-label="Close">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
+          {error && <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control text-[13px]">{error}</div>}
+
+          {[
+            { key: 'name', label: 'Name', required: true },
+            { key: 'contactName', label: 'Contact name' },
+            { key: 'email', label: 'Email', required: true, type: 'email' },
+            { key: 'phone', label: 'Phone' },
+            { key: 'address', label: 'Address' },
+          ].map((f) => (
+            <div key={f.key}>
+              <label className="block text-[13px] font-semibold text-ink-2 mb-1">
+                {f.label} {f.required && <span className="text-amber-text">*</span>}
+              </label>
+              <input
+                type={f.type || 'text'}
+                required={f.required}
+                value={form[f.key]}
+                onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                className={field}
+              />
+            </div>
+          ))}
+
+          <div>
+            <label className="block text-[13px] font-semibold text-ink-2 mb-1">Trade</label>
+            <select value={form.trade} onChange={(e) => setForm({ ...form, trade: e.target.value })} className={field}>
+              <option value="">Select a trade…</option>
+              {CANONICAL_TRADES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[13px] font-semibold text-ink-2 mb-1">
+              Additional emails <span className="text-faint font-normal">(CC on requests)</span>
+            </label>
+            <EmailTagInput
+              value={form.additionalEmails}
+              onChange={(emails) => setForm({ ...form, additionalEmails: emails })}
+              placeholder="Add email addresses…"
+            />
+          </div>
+
+          {[['w9', 'W-9', setW9File], ['ma', 'Master agreement', setMaFile]].map(([key, label, setter]) => (
+            <div key={key}>
+              <label className="block text-[13px] font-semibold text-ink-2 mb-1">
+                {label} <span className="text-faint font-normal">(PDF or image)</span>
+              </label>
+              <input
+                type="file"
+                accept="application/pdf,image/*"
+                onChange={(e) => setter(e.target.files?.[0] || null)}
+                className="w-full text-[13px] file:mr-3 file:py-2 file:px-3 file:rounded-control file:border file:border-line-strong file:bg-white file:text-[13px] file:cursor-pointer hover:file:bg-card-alt"
+              />
+            </div>
+          ))}
+        </form>
+
+        <div className="px-6 py-4 border-t border-line bg-card-alt flex gap-2">
+          <Button variant="amber" onClick={submit} disabled={saving} className="flex-1">
+            {saving ? 'Saving…' : 'Add vendor'}
+          </Button>
+          <Button onClick={onClose}>Cancel</Button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+export default function Vendors() {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [vendors, setVendors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [applyUrl, setApplyUrl] = useState(null);
+  const [search, setSearch] = useState('');
+  const [tradeFilter, setTradeFilter] = useState(searchParams.get('trade') || '');
+  const [selected, setSelected] = useState(new Set());
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [requestingBulk, setRequestingBulk] = useState(false);
+
+  // The chip label is what lives in the URL; several DB statuses map to one chip.
+  const statusParam = searchParams.get('status') || '';
+  const activeFilter =
+    VENDOR_FILTERS.find((f) => f.statuses?.includes(statusParam))?.label || 'All';
+
+  useEffect(() => {
+    api.get('/organization').then((org) => setApplyUrl(`${window.location.origin}/apply/${org.slug || org.id}`)).catch(() => {});
+  }, []);
+
+  const fetchVendors = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (tradeFilter) params.set('trade', tradeFilter);
+      setVendors(await api.get(`/vendors?${params}`));
+    } catch (err) {
+      toast.error("Couldn't load vendors");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchVendors(); }, [search, tradeFilter]);
+
+  // Status is filtered client-side so switching chips is instant and the
+  // coverage chips never flicker.
+  const filter = VENDOR_FILTERS.find((f) => f.label === activeFilter);
+  const visible = filter?.statuses ? vendors.filter((v) => filter.statuses.includes(v.coiStatus)) : vendors;
+
+  const setStatusFilter = (label) => {
+    const f = VENDOR_FILTERS.find((x) => x.label === label);
+    const next = new URLSearchParams(searchParams);
+    if (f?.statuses) next.set('status', f.statuses[0]);
+    else next.delete('status');
+    setSearchParams(next);
+  };
+
+  const canManage = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
+  const canDelete = ['ADMIN', 'MEMBER'].includes(user?.role);
+  const allSelected = visible.length > 0 && visible.every((v) => selected.has(v.id));
+
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(visible.map((v) => v.id)));
+  const toggleOne = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const handleRequestCoi = async (vendorId, force = false) => {
     try {
       await api.post(`/vendors/${vendorId}/request-coi`, force ? { force: true } : undefined);
-      toast.success('COI request sent!');
+      toast.success('COI request sent');
     } catch (err) {
-      const msg = err.message || '';
-      if (msg.toLowerCase().includes('recently')) {
-        if (window.confirm('A COI request was already sent to this vendor in the last 24 hours. Send another anyway?')) {
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('recently')) {
+        if (window.confirm('A request went out in the last 24 hours. Send another anyway?')) {
           return handleRequestCoi(vendorId, true);
         }
+      } else if (msg.includes('deliverable')) {
+        toast.error('No deliverable email on file — fix the address first');
       } else {
-        toast.error('Failed to send request: ' + msg);
+        toast.error(`Couldn't send: ${err.message}`);
       }
     }
   };
 
-  const allSelected = vendors.length > 0 && vendors.every((v) => selected.has(v.id));
-  const someSelected = selected.size > 0;
-
-  const toggleAll = () => {
-    if (allSelected) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(vendors.map((v) => v.id)));
-    }
-  };
-
-  const toggleOne = (id) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const handleBulkRequestCoi = async () => {
+  const handleBulkRequest = async () => {
     setRequestingBulk(true);
-    let sent = 0;
-    let failed = 0;
-    let skipped = 0;
-    for (const vendorId of selected) {
+    const tally = { sent: 0, skipped: 0, badEmail: 0, failed: 0 };
+    for (const id of selected) {
       try {
-        await api.post(`/vendors/${vendorId}/request-coi`);
-        sent++;
+        await api.post(`/vendors/${id}/request-coi`);
+        tally.sent++;
       } catch (err) {
-        // Cooldown: vendor was already emailed in the last 24 hours.
-        if ((err.message || '').toLowerCase().includes('recently')) {
-          skipped++;
-        } else {
-          failed++;
-        }
+        const reason = (err.message || '').toLowerCase();
+        if (reason.includes('recently')) tally.skipped++;
+        else if (reason.includes('deliverable')) tally.badEmail++;
+        else tally.failed++;
       }
     }
     setRequestingBulk(false);
-    const parts = [`${sent} sent`];
-    if (skipped > 0) parts.push(`${skipped} skipped (already requested in last 24h)`);
-    if (failed > 0) parts.push(`${failed} failed`);
-    const msg = `COI requests: ${parts.join(', ')}`;
-    if (failed > 0) toast.warning(msg);
-    else if (skipped > 0) toast.info ? toast.info(msg) : toast.success(msg);
+    const parts = [`${tally.sent} sent`];
+    if (tally.skipped) parts.push(`${tally.skipped} already requested today`);
+    if (tally.badEmail) parts.push(`${tally.badEmail} with no usable email`);
+    if (tally.failed) parts.push(`${tally.failed} failed`);
+    const msg = parts.join(' · ');
+    if (tally.failed || tally.badEmail) toast.warning(msg);
     else toast.success(msg);
   };
 
@@ -166,265 +274,145 @@ export default function Vendors() {
     }
   };
 
-  const canManage = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
-  const canDelete = ['ADMIN', 'MEMBER'].includes(user?.role);
+  const GRID = 'grid grid-cols-[28px_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)_auto] gap-3.5 items-center';
 
   return (
-    <div>
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold">Vendors</h1>
-        <div className="flex flex-wrap gap-2">
-          {canManage && someSelected && (
-            <button onClick={handleBulkRequestCoi} disabled={requestingBulk}
-              className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium disabled:opacity-50">
-              {requestingBulk ? 'Sending...' : `Request COI (${selected.size})`}
-            </button>
+    <div className="px-9 py-8 max-w-content w-full flex flex-col gap-5">
+      <div className="flex justify-between items-center gap-4 flex-wrap">
+        <PageTitle count={vendors.length}>Vendors</PageTitle>
+        <div className="flex gap-2 flex-wrap">
+          {canManage && selected.size > 0 && (
+            <Button onClick={handleBulkRequest} disabled={requestingBulk}>
+              {requestingBulk ? 'Sending…' : `Request COI (${selected.size})`}
+            </Button>
           )}
-          {canDelete && someSelected && (
-            <button onClick={() => setShowDeleteModal(true)}
-              className="text-red-600 underline text-sm font-medium hover:text-red-800 px-2 py-2">
-              Delete Selected ({selected.size})
-            </button>
+          {canDelete && selected.size > 0 && (
+            <Button variant="danger" onClick={() => setShowDeleteModal(true)}>Delete ({selected.size})</Button>
           )}
           {canManage && (
             <>
               {applyUrl && (
-                <button
+                <Button
+                  title={applyUrl}
                   onClick={() => {
                     navigator.clipboard.writeText(applyUrl);
-                    toast.success('Application link copied to clipboard');
+                    toast.success('Application link copied');
                   }}
-                  className="border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium"
-                  title={applyUrl}
                 >
-                  Copy Application Link
-                </button>
+                  Copy application link
+                </Button>
               )}
-              <button onClick={() => setShowAdd(!showAdd)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
-                Add Vendor
-              </button>
+              <Button as={Link} to="/import">Import</Button>
+              <Button variant="amber" onClick={() => setShowAdd(true)}>Add vendor</Button>
             </>
           )}
         </div>
       </div>
 
-      {/* Add vendor form */}
-      {showAdd && (
-        <form onSubmit={handleAdd} className="bg-white p-4 sm:p-6 rounded-xl border mb-6">
-          {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
-          <div className="grid sm:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required
-                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
-              <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required
-                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Trade</label>
-              <select value={form.trade} onChange={(e) => setForm({ ...form, trade: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm">
-                <option value="">Select a trade...</option>
-                {CANONICAL_TRADES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Additional Emails <span className="text-gray-400 font-normal">(CC on COI requests)</span></label>
-              <EmailTagInput
-                value={form.additionalEmails}
-                onChange={(emails) => setForm({ ...form, additionalEmails: emails })}
-                placeholder="Add email addresses..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">W9 <span className="text-gray-400 font-normal">(PDF or image)</span></label>
-              <input type="file" accept="application/pdf,image/*"
-                onChange={(e) => setW9File(e.target.files?.[0] || null)}
-                className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm file:cursor-pointer hover:file:bg-gray-50" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Master Agreement <span className="text-gray-400 font-normal">(PDF or image)</span></label>
-              <input type="file" accept="application/pdf,image/*"
-                onChange={(e) => setMaFile(e.target.files?.[0] || null)}
-                className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm file:cursor-pointer hover:file:bg-gray-50" />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button type="submit" className="bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm">Save</button>
-            <button type="button" onClick={() => { setShowAdd(false); setW9File(null); setMaFile(null); }} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
-          </div>
-        </form>
-      )}
-
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <input placeholder="Search vendors..." value={search} onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-64" />
-        <select value={statusFilter} onChange={(e) => {
-            setStatusFilter(e.target.value);
-            const params = {};
-            if (e.target.value) params.status = e.target.value;
-            if (tradeFilter) params.trade = tradeFilter;
-            setSearchParams(params);
-          }}
-          className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
-          <option value="">All Statuses</option>
-          {Object.entries(statusLabels).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-        <select value={tradeFilter} onChange={(e) => {
+      <div className="flex gap-2 flex-wrap items-center">
+        <Input
+          placeholder="Search vendors…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-60"
+        />
+        {VENDOR_FILTERS.map((f) => (
+          <Chip key={f.label} active={activeFilter === f.label} onClick={() => setStatusFilter(f.label)}>
+            {f.label}
+          </Chip>
+        ))}
+        <Select
+          value={tradeFilter}
+          onChange={(e) => {
             setTradeFilter(e.target.value);
-            const params = {};
-            if (statusFilter) params.status = statusFilter;
-            if (e.target.value) params.trade = e.target.value;
-            setSearchParams(params);
+            const next = new URLSearchParams(searchParams);
+            e.target.value ? next.set('trade', e.target.value) : next.delete('trade');
+            setSearchParams(next);
           }}
-          className="px-3 py-2.5 border rounded-lg text-base sm:text-sm w-full sm:w-auto">
-          <option value="">All Trades</option>
-          {CANONICAL_TRADES.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
+          className="ml-auto"
+        >
+          <option value="">All trades</option>
+          {CANONICAL_TRADES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </Select>
       </div>
 
-      {/* Vendor list */}
-      {loading ? (
-        <p className="text-gray-500">Loading...</p>
-      ) : vendors.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          <p>No vendors found</p>
-          {canManage && <p className="text-sm mt-1">Add your first vendor to get started</p>}
-        </div>
-      ) : (
-        <>
-          {/* Desktop table */}
-          <div className="hidden md:block bg-white rounded-xl border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b">
-                  {canDelete && (
-                    <th className="px-4 py-3 w-10">
-                      <input type="checkbox" checked={allSelected} onChange={toggleAll}
-                        className="rounded border-gray-300 cursor-pointer" />
-                    </th>
-                  )}
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Name</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Trade</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Email</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-600">Latest COI</th>
-                  <th className="text-right px-6 py-3 font-medium text-gray-600">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vendors.map((vendor) => (
-                  <tr key={vendor.id} className={`border-b last:border-0 hover:bg-gray-50 ${selected.has(vendor.id) ? 'bg-blue-50' : ''}`}>
-                    {canDelete && (
-                      <td className="px-4 py-4">
-                        <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
-                          className="rounded border-gray-300 cursor-pointer" />
-                      </td>
-                    )}
-                    <td className="px-6 py-4">
-                      <Link to={`/vendors/${vendor.id}`} className="text-blue-600 hover:underline font-medium">
-                        {vendor.name}
-                      </Link>
-                    </td>
-                    <td className="px-6 py-4 text-gray-500 text-xs">{vendor.trade || ''}</td>
-                    <td className="px-6 py-4 text-gray-600">{vendor.email}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[vendor.coiStatus]}`}>
-                        {statusLabels[vendor.coiStatus]}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {vendor.cois?.[0]
-                        ? new Date(vendor.cois[0].submittedAt).toLocaleDateString()
-                        : 'None'}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      {canManage && (
-                        <button onClick={() => handleRequestCoi(vendor.id)}
-                          className="text-blue-600 hover:underline text-sm">
-                          Request COI
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile card list */}
-          <div className="md:hidden space-y-3">
+      <Card className="overflow-hidden">
+        <div className={`${GRID} px-5 py-2.5 bg-card-alt border-b border-line-divider text-[11px] font-bold uppercase tracking-[0.06em] text-muted`}>
+          <span>
             {canDelete && (
-              <div className="flex items-center gap-2 px-1">
-                <input type="checkbox" checked={allSelected} onChange={toggleAll}
-                  className="rounded border-gray-300 cursor-pointer w-5 h-5" />
-                <span className="text-sm text-gray-500">Select all</span>
-              </div>
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-3.5 h-3.5 rounded-chip border-line-strong cursor-pointer" />
             )}
-            {vendors.map((vendor) => (
-              <div key={vendor.id} className={`bg-white rounded-xl border p-4 ${selected.has(vendor.id) ? 'border-blue-300 bg-blue-50' : ''}`}>
-                <div className="flex items-start gap-3">
+          </span>
+          <span>Vendor</span>
+          <span>Trade</span>
+          <span>Coverage</span>
+          <span>Next expiry</span>
+          <span>Status</span>
+        </div>
+
+        {loading ? (
+          <EmptyState>Loading…</EmptyState>
+        ) : visible.length === 0 ? (
+          <EmptyState action={canManage && <Button variant="amber" onClick={() => setShowAdd(true)}>Add vendor</Button>}>
+            {vendors.length === 0 ? 'No vendors yet.' : 'No vendors match these filters.'}
+          </EmptyState>
+        ) : (
+          visible.map((v) => {
+            const status = vendorStatus(v.coiStatus);
+            return (
+              <div
+                key={v.id}
+                className={`${GRID} px-5 py-[13px] border-b border-line-divider last:border-0 text-[13px]
+                  hover:bg-card-alt transition-colors duration-150 ${selected.has(v.id) ? 'bg-card-alt' : ''}`}
+              >
+                <span>
                   {canDelete && (
-                    <input type="checkbox" checked={selected.has(vendor.id)} onChange={() => toggleOne(vendor.id)}
-                      className="rounded border-gray-300 cursor-pointer w-5 h-5 mt-0.5 flex-shrink-0" />
+                    <input
+                      type="checkbox"
+                      checked={selected.has(v.id)}
+                      onChange={() => toggleOne(v.id)}
+                      className="w-3.5 h-3.5 rounded-chip border-line-strong cursor-pointer"
+                    />
                   )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <Link to={`/vendors/${vendor.id}`} className="text-blue-600 hover:underline font-medium truncate">
-                        {vendor.name}
-                      </Link>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[vendor.coiStatus]}`}>
-                        {statusLabels[vendor.coiStatus]}
-                      </span>
-                    </div>
-                    {vendor.trade && <p className="text-xs text-gray-400 mt-0.5">{vendor.trade}</p>}
-                    <p className="text-sm text-gray-500 truncate mt-1">{vendor.email}</p>
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="text-xs text-gray-400">
-                        {vendor.cois?.[0]
-                          ? `COI: ${new Date(vendor.cois[0].submittedAt).toLocaleDateString()}`
-                          : 'No COI'}
-                      </span>
-                      {canManage && (
-                        <button onClick={() => handleRequestCoi(vendor.id)}
-                          className="text-blue-600 text-sm py-1">
-                          Request COI
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                </span>
+                <div className="flex flex-col gap-px min-w-0">
+                  <Link to={`/vendors/${v.id}`} className="text-sm font-semibold text-navy hover:text-amber truncate">
+                    {v.name}
+                  </Link>
+                  <span className="text-xs text-muted truncate" title={v.email}>{v.email}</span>
+                </div>
+                <span className="text-ink-2 truncate">{v.trade || '—'}</span>
+                <CoverageChips coverages={v.coverages} />
+                <span className="text-ink-2 tabular">
+                  {v.nextExpiration
+                    ? new Date(`${v.nextExpiration}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : '—'}
+                </span>
+                <div className="flex items-center gap-2 justify-end">
+                  <StatusPill tone={status.tone}>{status.label}</StatusPill>
+                  {canManage && (
+                    <button
+                      onClick={() => handleRequestCoi(v.id)}
+                      className="text-xs font-semibold text-navy hover:text-amber whitespace-nowrap"
+                    >
+                      Request
+                    </button>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
-        </>
-      )}
+            );
+          })
+        )}
+
+        <div className="px-5 py-3 text-xs text-muted flex justify-between gap-4 flex-wrap">
+          <span>Showing {visible.length} of {vendors.length}</span>
+          <span>
+            Coverage chips: green = meets requirement · amber = expiring · red = missing or under limit · gray = not required
+          </span>
+        </div>
+      </Card>
+
+      <AddVendorDrawer open={showAdd} onClose={() => setShowAdd(false)} onCreated={fetchVendors} />
 
       <DeleteConfirmationModal
         isOpen={showDeleteModal}

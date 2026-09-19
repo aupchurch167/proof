@@ -1,12 +1,18 @@
 const prisma = require('./lib/prisma');
 const app = require('./app');
-const { startExpirationCron, startTokenRefreshCron, startWeeklySummaryCron } = require('./services/cron');
+const {
+  startExpirationCron,
+  startChaseCron,
+  startTokenRefreshCron,
+  startWeeklySummaryCron,
+} = require('./services/cron');
 
 const PORT = process.env.PORT || 4000;
 
 const server = app.listen(PORT, () => {
   console.log(`Proof server running on port ${PORT}`);
   startExpirationCron(prisma);
+  startChaseCron(prisma);
   startTokenRefreshCron(prisma);
   startWeeklySummaryCron(prisma);
 });

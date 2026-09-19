@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const morgan = require('morgan');
 const path = require('path');
 
@@ -13,17 +13,45 @@ const vendorsRoutes = require('./routes/vendors');
 const coisRoutes = require('./routes/cois');
 const portalRoutes = require('./routes/portal');
 const reportsRoutes = require('./routes/reports');
+const auditRoutes = require('./routes/audit');
+const remindersRoutes = require('./routes/reminders');
+const requirementsRoutes = require('./routes/requirements');
+const complianceRoutes = require('./routes/compliance');
 const notificationsRoutes = require('./routes/notifications');
 const organizationRoutes = require('./routes/organization');
 const importRoutes = require('./routes/import');
 const applyRoutes = require('./routes/apply');
 const webhookRoutes = require('./routes/webhooks');
 const repliesRoutes = require('./routes/replies');
+const integrationsRoutes = require('./routes/integrations');
+const v1Routes = require('./routes/v1');
+const { hashToken } = require('./lib/apiTokens');
 
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(helmet());
+// Allow Google Identity Services (the "Sign in with Google" button) to load when
+// the SPA is served through this API. Extends helmet's defaults rather than
+// replacing them so the rest of the CSP hardening stays intact.
+const gsi = 'https://accounts.google.com/gsi/';
+const GOOGLE_FONTS_CSS = 'https://fonts.googleapis.com';
+const GOOGLE_FONTS_FILES = 'https://fonts.gstatic.com';
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        'script-src': ["'self'", `${gsi}client`],
+        'connect-src': ["'self'", gsi],
+        'frame-src': ["'self'", gsi],
+        // Manrope is the brand typeface; without these two the UI silently
+        // falls back to system-ui in production.
+        'style-src': ["'self'", "'unsafe-inline'", `${gsi}style`, GOOGLE_FONTS_CSS],
+        'font-src': ["'self'", 'data:', GOOGLE_FONTS_FILES],
+      },
+    },
+  })
+);
 const allowedOrigins = [
   'https://app.proofcoi.com',
   'https://proof.up.railway.app',
@@ -64,13 +92,33 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
+  // The versioned service API has its own, higher, per-token limiter below.
+  skip: (req) => req.path === '/v1' || req.path.startsWith('/v1/'),
+});
+
+// Service-to-service traffic (one consumer, one IP, many orgs) needs a higher
+// ceiling than the browser-facing API, keyed by token rather than IP so one
+// noisy client can't starve another.
+const apiV1Limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const header = req.headers.authorization;
+    if (header && header.startsWith('Bearer ')) return `tok:${hashToken(header.slice(7).trim())}`;
+    return `ip:${ipKeyGenerator(req.ip)}`;
+  },
+  message: { error: { code: 'rate_limited', message: 'Too many requests, please try again later', details: {} } },
 });
 
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
+app.use('/api/auth/google', authLimiter);
 app.use('/api/auth/accept-invite', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);
+app.use('/api/v1', apiV1Limiter);
 app.use('/api', generalLimiter);
 
 // Serve client build in production
@@ -86,11 +134,19 @@ app.use('/api/vendors', vendorsRoutes);
 app.use('/api/cois', coisRoutes);
 app.use('/api/portal', portalRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/audit', auditRoutes);
+app.use('/api/reminders', remindersRoutes);
+app.use('/api/requirements', requirementsRoutes);
+app.use('/api/compliance', complianceRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/apply', applyRoutes);
 app.use('/api/replies', repliesRoutes);
+app.use('/api/integrations', integrationsRoutes);
+
+// Versioned, org-scoped public API for service-to-service integrations.
+app.use('/api/v1/orgs/:orgSlug', v1Routes);
 
 // Health check
 app.get('/api/health', async (req, res) => {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -8,7 +9,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const resetSuccess = searchParams.get('reset') === 'success';
 
@@ -26,36 +27,47 @@ export default function Login() {
     }
   };
 
+  const handleGoogle = async (credential) => {
+    setError('');
+    try {
+      await loginWithGoogle(credential);
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-card-alt">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold">Proof</h1>
-          <p className="text-gray-500 mt-2">COI Management</p>
+          <p className="text-muted mt-2">COI Management</p>
         </div>
-        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow-sm border">
+        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-card shadow-sm border">
           <h2 className="text-xl font-semibold mb-6">Sign in</h2>
-          {resetSuccess && <div className="bg-green-50 text-green-600 px-4 py-3 rounded-lg mb-4 text-sm">Password reset successfully. Please sign in.</div>}
-          {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
+          {resetSuccess && <div className="bg-ok-bg text-ok-text px-4 py-3 rounded-control mb-4 text-sm">Password reset successfully. Please sign in.</div>}
+          {error && <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control mb-4 text-sm">{error}</div>}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-ink-2 mb-1">Email</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+              className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
           </div>
           <div className="mb-6">
             <div className="flex justify-between items-center mb-1">
-              <label className="block text-sm font-medium text-gray-700">Password</label>
-              <Link to="/forgot-password" className="text-sm text-blue-600 hover:underline">Forgot password?</Link>
+              <label className="block text-sm font-medium text-ink-2">Password</label>
+              <Link to="/forgot-password" className="text-sm text-navy hover:underline">Forgot password?</Link>
             </div>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+              className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
           </div>
           <button type="submit" disabled={loading}
-            className="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+            className="w-full bg-amber text-white py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 font-medium">
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
-          <p className="text-center mt-4 text-sm text-gray-500">
-            Don't have an account? <Link to="/signup" className="text-blue-600 hover:underline">Sign up</Link>
+          <GoogleSignInButton onCredential={handleGoogle} onError={(err) => setError(err.message)} text="signin_with" />
+          <p className="text-center mt-4 text-sm text-muted">
+            Don't have an account? <Link to="/signup" className="text-navy hover:underline">Sign up</Link>
           </p>
         </form>
       </div>

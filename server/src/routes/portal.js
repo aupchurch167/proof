@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('../lib/prisma');
+const { coverageFor } = require('../services/coverage');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
@@ -30,8 +31,14 @@ router.get('/:uploadToken', async (req, res) => {
       where: { uploadToken: req.params.uploadToken, deletedAt: null },
       select: {
         id: true, name: true, contactName: true, email: true, phone: true, address: true,
+        orgId: true,
         organization: {
-          select: { name: true, address: true, additionalInsuredNote: true },
+          select: { id: true, name: true, email: true, address: true, additionalInsuredNote: true },
+        },
+        cois: {
+          where: { status: 'APPROVED' },
+          orderBy: { submittedAt: 'desc' },
+          take: 1,
         },
       },
     });
@@ -40,7 +47,23 @@ router.get('/:uploadToken', async (req, res) => {
       return res.status(404).json({ error: 'Upload link has expired or is invalid', orgName: null });
     }
 
-    res.json(vendor);
+    // The portal has to tell a vendor exactly what to send, so it carries the
+    // org's requirements and what is currently on file for them.
+    const settings = await prisma.organizationSettings.findUnique({
+      where: { orgId: vendor.orgId },
+    });
+    const coverages = coverageFor(vendor.cois[0] || null, settings, {});
+
+    const { cois, orgId, ...rest } = vendor;
+    res.json({
+      ...rest,
+      coverages,
+      // What prompted this request, so the page can open with the right line.
+      expiringSoonest: coverages
+        .filter((c) => c.expiresAt && c.verdict !== 'skipped')
+        .sort((a, b) => a.expiresAt.localeCompare(b.expiresAt))[0] || null,
+      hasCoiOnFile: cois.length > 0,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load portal' });
   }

@@ -28,6 +28,7 @@ const {
   getAuthToken,
   cleanupTestData,
 } = require('./setup');
+const { sendUploadRequestEmail } = require('../src/services/email');
 
 let org, user, token;
 
@@ -170,6 +171,47 @@ describe('DELETE /api/vendors/bulk', () => {
       .send({ ids: [] });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/vendors/:id/request-coi', () => {
+  it('sends the request and logs it', async () => {
+    const vendor = await createTestVendor(org.id, { email: `reachable-${Date.now()}@acme.com` });
+
+    const res = await request(app)
+      .post(`/api/vendors/${vendor.id}/request-coi`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(sendUploadRequestEmail).toHaveBeenCalled();
+
+    const logs = await prisma.notificationLog.findMany({
+      where: { vendorId: vendor.id, type: 'UPLOAD_REQUEST' },
+    });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].status).toBe('SENT');
+  });
+
+  it('refuses a vendor whose address can never deliver, and logs the attempt', async () => {
+    sendUploadRequestEmail.mockClear();
+    const vendor = await createTestVendor(org.id, {
+      email: `imported-${Date.now()}@no-email.proofcoi.local`,
+    });
+
+    const res = await request(app)
+      .post(`/api/vendors/${vendor.id}/request-coi`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('BAD_EMAIL');
+    expect(sendUploadRequestEmail).not.toHaveBeenCalled();
+
+    const logs = await prisma.notificationLog.findMany({
+      where: { vendorId: vendor.id, type: 'UPLOAD_REQUEST' },
+    });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].status).toBe('FAILED');
+    expect(logs[0].meta.reason).toBe('PLACEHOLDER_EMAIL');
   });
 });
 

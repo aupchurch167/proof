@@ -7,9 +7,13 @@ import Dashboard from './pages/Dashboard';
 import Vendors from './pages/Vendors';
 import VendorDetail from './pages/VendorDetail';
 import Cois from './pages/Cois';
+import Requirements from './pages/Requirements';
+import Reminders from './pages/Reminders';
+import Audit from './pages/Audit';
 import CoiDetail from './pages/CoiDetail';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
+import Integrations from './pages/Integrations';
 
 import Portal from './pages/Portal';
 import Apply from './pages/Apply';
@@ -56,9 +60,13 @@ export default function App() {
                 <Route path="/vendors/:id" element={<VendorDetail />} />
                 <Route path="/cois" element={<Cois />} />
                 <Route path="/cois/:id" element={<CoiDetail />} />
+                <Route path="/requirements" element={<Requirements />} />
+                <Route path="/reminders" element={<Reminders />} />
+                <Route path="/audit" element={<Audit />} />
                 <Route path="/replies" element={<Replies />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/users" element={<AdminRoute><Users /></AdminRoute>} />
+                <Route path="/settings/integrations" element={<AdminRoute><Integrations /></AdminRoute>} />
 
                 <Route path="/import" element={<Import />} />
               </Routes>

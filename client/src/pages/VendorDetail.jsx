@@ -1,162 +1,80 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import PdfUploadZone from '../components/PdfUploadZone';
+import EmailTagInput from '../components/EmailTagInput';
 import ReplyList from '../components/ReplyList';
 import { CANONICAL_TRADES } from '../constants/trades';
-import EmailTagInput from '../components/EmailTagInput';
+import { vendorStatus, coiStatus, VERDICT } from '../constants/status';
+import { Button, Card, Dot, StatusPill, Eyebrow, EmptyState } from '../components/ui';
 
-const reviewStatusColors = {
-  PENDING_REVIEW: 'bg-blue-100 text-blue-800',
-  APPROVED: 'bg-green-100 text-green-800',
-  REJECTED: 'bg-red-100 text-red-800',
-  EXPIRED: 'bg-gray-100 text-gray-800',
+const money = (dollars) => (dollars == null ? null : `$${dollars.toLocaleString()}`);
+const shortMoney = (dollars) => {
+  if (dollars == null) return null;
+  if (dollars >= 1000000) return `$${(dollars / 1000000).toString().replace(/\.0$/, '')}M`;
+  if (dollars >= 1000) return `$${Math.round(dollars / 1000)}K`;
+  return `$${dollars}`;
 };
+const day = (d) => (d ? new Date(d.length === 10 ? `${d}T00:00:00` : d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null);
 
-const COVERAGE_TYPES = [
-  { key: 'GENERAL_LIABILITY', label: 'General Liability', policyField: 'glPolicyNumber', amountField: 'glCoverageAmount', dateField: 'glExpirationDate' },
-  { key: 'WORKERS_COMP', label: 'Workers Comp', policyField: 'wcPolicyNumber', amountField: 'wcCoverageAmount', dateField: 'wcExpirationDate' },
-  { key: 'UMBRELLA', label: 'Umbrella', policyField: 'umbPolicyNumber', amountField: 'umbCoverageAmount', dateField: 'umbExpirationDate' },
-  { key: 'AUTO', label: 'Automobile', policyField: 'autoPolicyNumber', amountField: 'autoCoverageAmount', dateField: 'autoExpirationDate' },
-];
+// One card per coverage line. The top border and the value carry the verdict,
+// so the state reads at a glance without parsing the footnote.
+function CoverageCard({ coverage, lastRequestAt }) {
+  const verdict = VERDICT[coverage.verdict] || VERDICT.skipped;
+  const isMissing = coverage.verdict === 'missing';
+  const isBad = verdict.tone === 'bad';
 
-function getExpirationStatus(dateStr) {
-  if (!dateStr) return 'none';
-  const exp = new Date(dateStr);
-  const now = new Date();
-  const diffDays = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) return 'expired';
-  if (diffDays <= 30) return 'expiring';
-  return 'valid';
-}
+  const topBorder = {
+    ok: '#1a8a5a', warn: '#e8890c', bad: '#c0392b', none: '#c9c3b8',
+  }[verdict.tone];
 
-function ExpirationBadge({ dateStr }) {
-  if (!dateStr) return <span className="text-xs text-gray-400">No date</span>;
-  const status = getExpirationStatus(dateStr);
-  const dateLabel = new Date(dateStr).toLocaleDateString();
-  const colors = {
-    valid: 'bg-green-100 text-green-700',
-    expiring: 'bg-yellow-100 text-yellow-700',
-    expired: 'bg-red-100 text-red-700',
-  };
-  const labels = { valid: dateLabel, expiring: `${dateLabel} (expiring)`, expired: `${dateLabel} (expired)` };
-  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status]}`}>{labels[status]}</span>;
-}
+  const value = isMissing
+    ? 'Not on file'
+    : coverage.verdict === 'skipped'
+      ? '—'
+      : money(coverage.limit) || 'Not on file';
 
-function DocSlot({ label, url, canManage, onUpload }) {
-  const inputId = `doc-${label.replace(/\s+/g, '-')}`;
-  return (
-    <div className="flex items-center gap-2">
-      {url ? (
-        <a href={url} target="_blank" rel="noopener noreferrer"
-          className="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
-          {label}
-        </a>
-      ) : (
-        <span className="text-sm text-gray-400 px-3 py-1.5">No {label}</span>
-      )}
-      {canManage && (
-        <>
-          <label htmlFor={inputId}
-            className="text-xs text-blue-600 hover:underline cursor-pointer">
-            {url ? 'Replace' : 'Upload'}
-          </label>
-          <input id={inputId} type="file" accept="application/pdf,image/*" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ''; }} />
-        </>
-      )}
-    </div>
-  );
-}
-
-function CoverageBreakdown({ coi }) {
-  return (
-    <div className="grid grid-cols-2 gap-2 mt-3">
-      {COVERAGE_TYPES.map(ct => {
-        const amount = coi[ct.amountField];
-        const date = coi[ct.dateField];
-        const hasData = amount || date;
-        if (!hasData) return null;
-        return (
-          <div key={ct.key} className="text-xs">
-            <p className="font-medium text-gray-600">{ct.label}</p>
-            {amount && <p className="text-gray-500">${(amount / 100).toLocaleString()}</p>}
-            {date && <ExpirationBadge dateStr={date} />}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function CoverageSummary({ cois }) {
-  const coverageMap = {};
-  for (const ct of COVERAGE_TYPES) {
-    const matching = cois
-      .filter(c => c.status === 'APPROVED' && (c[ct.amountField] || c[ct.dateField]))
-      .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-    coverageMap[ct.key] = matching[0] || null;
-  }
+  const footer = coverage.verdict === 'skipped'
+    ? "Your template doesn't require it"
+    : [
+        coverage.required ? `Required ${shortMoney(coverage.required)}` : null,
+        coverage.expiresAt ? `Exp ${day(coverage.expiresAt)}` : (isMissing && lastRequestAt ? `Requested ${day(lastRequestAt)}` : null),
+      ].filter(Boolean).join(' · ');
 
   return (
-    <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
-      <h2 className="text-lg font-semibold mb-4">Coverage Summary</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {COVERAGE_TYPES.map(ct => {
-          const coi = coverageMap[ct.key];
-          const status = coi ? getExpirationStatus(coi[ct.dateField]) : 'none';
-          const borderColor = {
-            valid: 'border-green-200 bg-green-50',
-            expiring: 'border-yellow-200 bg-yellow-50',
-            expired: 'border-red-200 bg-red-50',
-            none: 'border-gray-200 bg-gray-50',
-          }[status];
-          const dotColor = {
-            valid: 'bg-green-500',
-            expiring: 'bg-yellow-500',
-            expired: 'bg-red-500',
-            none: 'bg-gray-300',
-          }[status];
-
-          return (
-            <div key={ct.key} className={`border rounded-lg p-3 ${borderColor}`}>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${dotColor}`} />
-                <span className="text-sm font-medium">{ct.label}</span>
-              </div>
-              {coi ? (
-                <div className="mt-2 text-xs space-y-1">
-                  {coi[ct.amountField] && (
-                    <p className="text-gray-600">${(coi[ct.amountField] / 100).toLocaleString()}</p>
-                  )}
-                  {coi[ct.dateField] && (
-                    <ExpirationBadge dateStr={coi[ct.dateField]} />
-                  )}
-                  {coi[ct.policyField] && (
-                    <p className="text-gray-400">Policy: {coi[ct.policyField]}</p>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-400 mt-2">No active coverage</p>
-              )}
-            </div>
-          );
-        })}
+    <div
+      className={`rounded-stat px-[18px] py-4 flex flex-col gap-2 border
+        ${isMissing ? 'bg-bad-bg border-bad-line' : 'bg-white border-line'}`}
+      style={{ borderTopWidth: '3px', borderTopColor: topBorder }}
+    >
+      {/* Wraps rather than truncating: a long verdict like "Under limit" must
+          never cost the reader the name of the coverage it applies to. */}
+      <div className={`flex justify-between items-baseline gap-2 flex-wrap text-xs font-bold uppercase tracking-[0.05em] ${isMissing ? 'text-bad-text' : 'text-muted'}`}>
+        <span>{coverage.short || coverage.label}</span>
+        <span className={`whitespace-nowrap flex-none ${isMissing ? '' : { ok: 'text-ok-text', warn: 'text-warn-text', bad: 'text-bad-text', none: 'text-muted' }[verdict.tone]}`}>
+          {verdict.label}
+        </span>
       </div>
+      <span className={`text-[22px] font-extrabold tracking-[-0.02em] ${isBad ? 'text-bad-text' : coverage.verdict === 'skipped' ? 'text-faint' : 'text-navy'}`}>
+        {value}
+      </span>
+      <span className={`text-xs ${isBad ? 'text-bad-text' : 'text-muted'}`}>{footer}</span>
     </div>
   );
 }
 
 export default function VendorDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const toast = useToast();
-  const navigate = useNavigate();
+
   const [vendor, setVendor] = useState(null);
   const [replies, setReplies] = useState([]);
+  const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
@@ -164,352 +82,289 @@ export default function VendorDetail() {
   const [deleting, setDeleting] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
   const [requesting, setRequesting] = useState(false);
 
-  useEffect(() => {
-    api.get(`/vendors/${id}`)
-      .then((v) => { setVendor(v); setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '', trade: v.trade || '', additionalEmails: v.additionalEmails || [] }); })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-    api.get(`/replies/vendor/${id}`)
-      .then(setReplies)
-      .catch(() => {}); // non-fatal if replies endpoint hiccups
-  }, [id]);
-
-  const handleSave = async () => {
+  const load = async () => {
     try {
-      const updated = await api.put(`/vendors/${id}`, form);
-      setVendor({ ...vendor, ...updated });
+      const v = await api.get(`/vendors/${id}`);
+      setVendor(v);
+      setForm({
+        name: v.name, contactName: v.contactName || '', email: v.email,
+        phone: v.phone || '', address: v.address || '', trade: v.trade || '',
+        additionalEmails: v.additionalEmails || [], notes: v.notes || '',
+      });
+    } catch (err) {
+      toast.error("Couldn't load this vendor");
+    } finally {
+      setLoading(false);
+    }
+    api.get(`/replies/vendor/${id}`).then(setReplies).catch(() => {});
+    api.get(`/audit?range=all&vendorId=${id}`).then((d) => setActivity(d.events || [])).catch(() => {});
+  };
+
+  useEffect(() => { load(); }, [id]);
+
+  const save = async () => {
+    try {
+      await api.put(`/vendors/${id}`, form);
       setEditing(false);
-      toast.success('Vendor updated');
+      toast.success('Saved');
+      load();
     } catch (err) {
       toast.error(err.message);
     }
   };
 
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      await api.delete(`/vendors/${id}`);
-      navigate('/vendors');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const handleUploadDoc = async (field, file) => {
-    if (!file) return;
+  const handleUpload = async (file) => {
+    setUploading(true);
     try {
       const fd = new FormData();
-      fd.append(field, file);
-      const updated = await api.upload(`/vendors/${id}/documents`, fd);
-      setVendor((v) => ({ ...v, ...updated }));
-      toast.success(`${field === 'w9' ? 'W9' : 'Master Agreement'} uploaded`);
-    } catch (err) {
-      toast.error('Upload failed: ' + (err.message || 'unknown error'));
-    }
-  };
-
-  const handleUploadCoi = async (file) => {
-    setUploading(true);
-    setUploadError('');
-    try {
-      const formData = new FormData();
-      formData.append('pdf', file);
-      await api.upload(`/vendors/${id}/coi/upload`, formData);
+      fd.append('pdf', file);
+      await api.upload(`/vendors/${id}/coi/upload`, fd);
+      toast.success('Certificate uploaded — Proof is reading it');
       setShowUpload(false);
-      const updated = await api.get(`/vendors/${id}`);
-      setVendor(updated);
+      load();
     } catch (err) {
-      setUploadError(err.message || 'Failed to upload COI');
+      toast.error(err.message);
     } finally {
       setUploading(false);
     }
   };
 
-  const handleRequestCoi = async (force = false) => {
+  const requestCoi = async (force = false) => {
     setRequesting(true);
     try {
-      const result = await api.post(`/vendors/${id}/request-coi`, force ? { force: true } : undefined);
-      toast.success('COI request email sent!');
-      setVendor((v) => ({ ...v, lastCoiRequestAt: result.lastSentAt }));
+      await api.post(`/vendors/${id}/request-coi`, force ? { force: true } : undefined);
+      toast.success('Request sent');
+      load();
     } catch (err) {
-      const msg = err.message || '';
-      if (msg.toLowerCase().includes('recently')) {
-        const last = vendor?.lastCoiRequestAt
-          ? new Date(vendor.lastCoiRequestAt).toLocaleString()
-          : 'recently';
-        if (window.confirm(`A COI request was already sent ${last}. Send another anyway?`)) {
-          return handleRequestCoi(true);
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('recently')) {
+        if (window.confirm('A request went out in the last 24 hours. Send another anyway?')) {
+          setRequesting(false);
+          return requestCoi(true);
         }
+      } else if (msg.includes('deliverable')) {
+        toast.error('No deliverable email on file — fix the address first');
       } else {
-        toast.error('Failed to send request: ' + msg);
+        toast.error(err.message);
       }
     } finally {
       setRequesting(false);
     }
   };
 
+  if (loading) return <div className="p-9 text-[13px] text-muted">Loading…</div>;
+  if (!vendor) return <div className="p-9 text-[13px] text-muted">Vendor not found.</div>;
+
+  const status = vendorStatus(vendor.coiStatus);
   const canManage = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
-  const isAdmin = ['ADMIN', 'MEMBER'].includes(user?.role);
+  const canDelete = ['ADMIN', 'MEMBER'].includes(user?.role);
 
-  if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
-  if (!vendor) return <div className="text-center py-12 text-gray-500">Vendor not found</div>;
+  // The primary action names the specific gap when there is one — "Request
+  // workers' comp" beats a generic "Request COI" when that's what's missing.
+  const missing = (vendor.coverages || []).find((c) => c.verdict === 'missing');
+  const ctaLabel = missing ? `Request ${missing.label.toLowerCase()}` : 'Request COI';
 
-  const portalUrl = `${window.location.origin}/portal/${vendor.uploadToken}`;
-
-  const coverageTypeLabels = {
-    GENERAL_LIABILITY: 'General Liability',
-    WORKERS_COMP: 'Workers Comp',
-    UMBRELLA: 'Umbrella',
-    AUTO: 'Automobile',
-    OTHER: 'Multi-Coverage',
-  };
-  const groupedCois = {};
-  const ungroupedCois = [];
-  for (const coi of (vendor.cois || [])) {
-    if (coi.coverageType && coi.coverageType !== 'OTHER') {
-      if (!groupedCois[coi.coverageType]) groupedCois[coi.coverageType] = [];
-      groupedCois[coi.coverageType].push(coi);
-    } else {
-      ungroupedCois.push(coi);
-    }
-  }
+  const superseded = new Set(vendor.supersededCoiIds || []);
+  const certificates = vendor.cois || [];
 
   return (
-    <div>
-      <Link to="/vendors" className="text-sm text-blue-600 hover:underline mb-4 inline-block">Back to Vendors</Link>
+    <div className="px-9 py-8 max-w-content w-full flex flex-col gap-[22px]">
+      <Link to="/vendors" className="self-start text-[13px] text-muted hover:text-navy">← Vendors</Link>
 
-      <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-          <div className="flex-1 min-w-0">
-            {editing ? (
-              <div className="space-y-3">
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="px-3 py-2.5 border rounded-lg text-lg font-bold w-full text-base" />
-                <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Contact Name" />
-                <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Email" />
-                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Phone" />
-                <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  className="px-3 py-2.5 border rounded-lg w-full text-base" placeholder="Address" />
-                <select value={form.trade} onChange={(e) => setForm({ ...form, trade: e.target.value })}
-                  className="px-3 py-2.5 border rounded-lg w-full text-base">
-                  <option value="">No trade selected</option>
-                  {CANONICAL_TRADES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-                <div>
-                  <label className="block text-sm text-gray-500 mb-1">Additional Emails (CC on COI requests)</label>
-                  <EmailTagInput
-                    value={form.additionalEmails}
-                    onChange={(emails) => setForm({ ...form, additionalEmails: emails })}
-                    placeholder="Add email addresses..."
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm">Save</button>
-                  <button onClick={() => setEditing(false)} className="px-4 py-2.5 rounded-lg border text-sm">Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <h1 className="text-xl sm:text-2xl font-bold">{vendor.name}</h1>
-                {vendor.contactName && <p className="text-gray-600 mt-1">{vendor.contactName}</p>}
-                <p className="text-gray-600 mt-1 break-all">{vendor.email}</p>
-                {vendor.additionalEmails?.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {vendor.additionalEmails.map((e, i) => (
-                      <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">CC: {e}</span>
-                    ))}
-                  </div>
-                )}
-                {vendor.phone && <p className="text-gray-600">{vendor.phone}</p>}
-                {vendor.address && <p className="text-gray-600">{vendor.address}</p>}
-              </>
-            )}
+      <div className="flex justify-between items-start gap-4 flex-wrap">
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-[28px] font-extrabold tracking-[-0.03em] text-navy">{vendor.name}</h1>
+            <StatusPill tone={status.tone} className="!text-xs !px-2.5 !py-1">
+              {status.label}{vendor.statusReason ? ` · ${vendor.statusReason}` : ''}
+            </StatusPill>
           </div>
-          {canManage && !editing && (
-            <div className="flex gap-3 sm:gap-2">
-              <button onClick={() => setEditing(true)} className="text-sm text-blue-600 hover:underline py-1">Edit</button>
-              {isAdmin && (
-                <button onClick={() => setShowDeleteModal(true)} className="text-sm text-red-600 hover:underline py-1">Delete</button>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 pt-4 border-t">
-          <p className="text-sm text-gray-500">Portal Link</p>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-1">
-            <code className="text-xs sm:text-sm bg-gray-100 px-3 py-1.5 rounded-lg flex-1 overflow-x-auto break-all">{portalUrl}</code>
-            <button onClick={() => { navigator.clipboard.writeText(portalUrl); }}
-              className="text-sm text-blue-600 hover:underline whitespace-nowrap py-1">Copy</button>
+          <div className="flex gap-4 flex-wrap text-[13px] text-ink-2">
+            {[vendor.trade, vendor.contactName, vendor.email, vendor.phone].filter(Boolean).map((bit, i) => (
+              <span key={i}>{bit}</span>
+            ))}
           </div>
-        </div>
-
-        <div className="mt-4 pt-4 border-t space-y-3">
-          {vendor.trade && (
-            <div>
-              <p className="text-sm text-gray-500">Trade</p>
-              <p className="text-sm">{vendor.trade}</p>
-            </div>
-          )}
-          {vendor.notes && (
-            <div>
-              <p className="text-sm text-gray-500">Notes</p>
-              <p className="text-sm whitespace-pre-wrap">{vendor.notes}</p>
-            </div>
-          )}
-          <div>
-            <p className="text-sm text-gray-500 mb-1">Documents</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <DocSlot
-                label="W9"
-                url={vendor.w9Url}
-                canManage={canManage}
-                onUpload={(file) => handleUploadDoc('w9', file)}
-              />
-              <DocSlot
-                label="Master Agreement"
-                url={vendor.masterAgreementUrl}
-                canManage={canManage}
-                onUpload={(file) => handleUploadDoc('masterAgreement', file)}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Coverage Summary */}
-      {vendor.cois?.length > 0 && <CoverageSummary cois={vendor.cois} />}
-
-      {/* COI History */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
-        <div>
-          <h2 className="text-lg font-semibold">COI History</h2>
-          {vendor.lastCoiRequestAt && (
-            <p className="text-xs text-gray-500 mt-0.5">
-              Last requested {new Date(vendor.lastCoiRequestAt).toLocaleString()}
-            </p>
-          )}
         </div>
         {canManage && (
-          <div className="flex flex-col sm:flex-row gap-2">
-            <button
-              onClick={() => handleRequestCoi()}
-              disabled={requesting}
-              className="text-sm border border-blue-600 text-blue-600 px-3 py-2 sm:py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-center"
-            >
-              {requesting ? 'Sending...' : 'Request COI'}
-            </button>
-            <button
-              onClick={() => setShowUpload(!showUpload)}
-              className="text-sm bg-blue-600 text-white px-3 py-2 sm:py-1.5 rounded-lg hover:bg-blue-700 text-center"
-            >
-              {showUpload ? 'Cancel' : 'Upload COI'}
-            </button>
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={() => setEditing(!editing)}>{editing ? 'Cancel' : 'Edit'}</Button>
+            <Button onClick={() => setShowUpload(!showUpload)}>Upload COI</Button>
+            <Button variant="amber" onClick={() => requestCoi()} disabled={requesting}>
+              {requesting ? 'Sending…' : ctaLabel}
+            </Button>
           </div>
         )}
       </div>
 
-      {/* Upload zone */}
-      {showUpload && (
-        <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
-          <PdfUploadZone
-            onUpload={handleUploadCoi}
-            loading={uploading}
-            error={uploadError}
-          />
-        </div>
+      {editing && (
+        <Card className="p-5 flex flex-col gap-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            {[
+              ['name', 'Name'], ['contactName', 'Contact name'], ['email', 'Email'],
+              ['phone', 'Phone'], ['address', 'Address'],
+            ].map(([key, label]) => (
+              <div key={key}>
+                <label className="block text-[13px] font-semibold text-ink-2 mb-1">{label}</label>
+                <input
+                  value={form[key] || ''}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-control border border-line-strong text-[13px] focus:outline-none focus:border-navy"
+                />
+              </div>
+            ))}
+            <div>
+              <label className="block text-[13px] font-semibold text-ink-2 mb-1">Trade</label>
+              <select
+                value={form.trade || ''}
+                onChange={(e) => setForm({ ...form, trade: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-control border border-line-strong text-[13px] focus:outline-none focus:border-navy"
+              >
+                <option value="">Select a trade…</option>
+                {CANONICAL_TRADES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-[13px] font-semibold text-ink-2 mb-1">
+                Additional emails <span className="text-faint font-normal">(CC on requests)</span>
+              </label>
+              <EmailTagInput
+                value={form.additionalEmails || []}
+                onChange={(emails) => setForm({ ...form, additionalEmails: emails })}
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="navy" onClick={save}>Save changes</Button>
+            {canDelete && (
+              <Button variant="danger" onClick={() => setShowDeleteModal(true)} className="ml-auto">
+                Delete vendor
+              </Button>
+            )}
+          </div>
+        </Card>
       )}
 
-      {vendor.cois?.length === 0 ? (
-        <p className="text-gray-500 text-sm">No COIs on file</p>
-      ) : (
-        <div className="space-y-6">
-          {Object.entries(groupedCois).map(([type, cois]) => (
-            <div key={type}>
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                {coverageTypeLabels[type] || type}
-              </h3>
-              <div className="space-y-2">
-                {cois.map((coi) => (
-                  <Link key={coi.id} to={`/cois/${coi.id}`}
-                    className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
-                      <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium text-sm">
-                            Submitted {new Date(coi.submittedAt).toLocaleDateString()}
-                          </p>
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${reviewStatusColors[coi.status]}`}>
-                            {coi.status.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <CoverageBreakdown coi={coi} />
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          ))}
+      {showUpload && (
+        <Card className="p-5">
+          <PdfUploadZone onUpload={handleUpload} loading={uploading} />
+        </Card>
+      )}
 
-          {ungroupedCois.length > 0 && (
-            <div>
-              {Object.keys(groupedCois).length > 0 && (
-                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                  Multi-Coverage / Untyped
-                </h3>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+        {(vendor.coverages || []).map((c) => (
+          <CoverageCard key={c.key} coverage={c} lastRequestAt={vendor.lastCoiRequestAt} />
+        ))}
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <Card className="overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-line-divider flex justify-between items-center">
+            <span className="text-[15px] font-bold text-navy">Certificates</span>
+            <span className="text-xs text-muted">{certificates.length} on file</span>
+          </div>
+
+          {certificates.length === 0 ? (
+            <EmptyState>No certificates on file yet.</EmptyState>
+          ) : (
+            certificates.map((coi) => {
+              const s = coiStatus(coi.status, { superseded: superseded.has(coi.id) });
+              const covers = ['gl', 'auto', 'wc', 'umb']
+                .filter((k) => coi[`${k === 'auto' ? 'auto' : k}CoverageAmount`] != null)
+                .map((k) => ({ gl: 'GL', auto: 'Auto', wc: 'WC', umb: 'Umb' }[k]))
+                .join(' · ');
+              return (
+                <Link
+                  key={coi.id}
+                  to={`/cois/${coi.id}`}
+                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3.5 items-center px-5 py-3.5
+                    border-b border-line-divider last:border-0 hover:bg-card-alt transition-colors duration-150"
+                >
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="text-sm font-semibold text-navy truncate">
+                      {(coi.pdfPath || '').split('/').pop() || 'Certificate'}
+                    </span>
+                    <span className="text-xs text-muted">
+                      Uploaded {day(coi.submittedAt)}
+                      {coi.reviewedAt ? ' · reviewed' : ''}
+                    </span>
+                  </div>
+                  <span className="text-xs text-ink-2 whitespace-nowrap">{covers || '—'}</span>
+                  <StatusPill tone={s.tone}>{s.label}</StatusPill>
+                </Link>
+              );
+            })
+          )}
+
+          <div className="px-5 py-4 flex flex-col gap-2 border-t border-line-divider">
+            <Eyebrow>Other documents</Eyebrow>
+            <div className="flex gap-2 flex-wrap">
+              {vendor.w9Url ? (
+                <a href={vendor.w9Url} target="_blank" rel="noreferrer"
+                  className="text-[13px] px-3 py-1.5 border border-line-strong rounded-[7px] text-navy hover:border-navy">
+                  W-9
+                </a>
+              ) : (
+                <span className="text-[13px] px-3 py-1.5 border border-dashed border-line-strong rounded-[7px] text-muted">
+                  + W-9
+                </span>
               )}
-              <div className="space-y-2">
-                {ungroupedCois.map((coi) => (
-                  <Link key={coi.id} to={`/cois/${coi.id}`}
-                    className="block bg-white rounded-xl border p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
-                      <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium text-sm">
-                            Submitted {new Date(coi.submittedAt).toLocaleDateString()}
-                          </p>
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${reviewStatusColors[coi.status]}`}>
-                            {coi.status.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <CoverageBreakdown coi={coi} />
-                      </div>
-                    </div>
-                  </Link>
-                ))}
+              {vendor.masterAgreementUrl ? (
+                <a href={vendor.masterAgreementUrl} target="_blank" rel="noreferrer"
+                  className="text-[13px] px-3 py-1.5 border border-line-strong rounded-[7px] text-navy hover:border-navy">
+                  Master agreement
+                </a>
+              ) : (
+                <span className="text-[13px] px-3 py-1.5 border border-dashed border-line-strong rounded-[7px] text-muted">
+                  + Master agreement
+                </span>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-line-divider text-[15px] font-bold text-navy">Activity</div>
+          {activity.length === 0 ? (
+            <EmptyState>Nothing has happened here yet.</EmptyState>
+          ) : (
+            activity.slice(0, 12).map((a) => (
+              <div key={a.id} className="grid grid-cols-[8px_minmax(0,1fr)] gap-3 px-5 py-3 border-b border-line-divider last:border-0">
+                <Dot tone={a.tone} className="mt-1" />
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-[13px] text-ink leading-[1.4]">{a.detail}</span>
+                  <span className="text-[11px] text-faint">
+                    {new Date(a.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {a.by}
+                  </span>
+                </div>
               </div>
+            ))
+          )}
+          {replies.length > 0 && (
+            <div className="px-5 py-4 border-t border-line-divider">
+              <Eyebrow className="mb-2">Email replies</Eyebrow>
+              <ReplyList replies={replies} />
             </div>
           )}
-        </div>
-      )}
-
-      <div className="flex justify-between items-center mt-8 mb-4">
-        <h2 className="text-lg font-semibold">Replies</h2>
-        {replies.length > 0 && (
-          <span className="text-xs text-gray-500">{replies.length}</span>
-        )}
+        </Card>
       </div>
-      <ReplyList
-        replies={replies}
-        showVendor={false}
-        emptyText="No replies yet. When this vendor replies to a Proof email, it'll show here."
-      />
 
       <DeleteConfirmationModal
         isOpen={showDeleteModal}
         itemCount={1}
         itemLabel="vendor"
         loading={deleting}
-        onConfirm={handleDelete}
+        onConfirm={async () => {
+          setDeleting(true);
+          try {
+            await api.delete(`/vendors/${id}`);
+            toast.success('Vendor deleted');
+            navigate('/vendors');
+          } finally {
+            setDeleting(false);
+          }
+        }}
         onCancel={() => setShowDeleteModal(false)}
       />
     </div>

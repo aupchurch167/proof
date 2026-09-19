@@ -1,80 +1,72 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { useToast } from '../contexts/ToastContext';
 import { API_BASE } from '../utils/api';
+
+const money = (dollars) => (dollars == null ? null : `$${dollars.toLocaleString()}`);
+const day = (s) => (s ? new Date(`${s}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null);
+
+function initials(name = '') {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || 'CO';
+}
+
+// Plain-language fix for each failed check, so a vendor knows what to ask their
+// agent for without having to interpret compliance jargon.
+function fixFor(flag) {
+  if (flag.type === 'INSUFFICIENT') {
+    return `Ask your agent to raise ${flag.label.toLowerCase()} to ${money(Math.round(flag.required / 100))}.`;
+  }
+  if (flag.type === 'MISSING') {
+    return `Your certificate doesn't show ${flag.label.toLowerCase()}. Ask your agent to include it.`;
+  }
+  if (flag.type === 'EXPIRED') {
+    return `${flag.label} has expired. Send the renewed certificate.`;
+  }
+  if (flag.type === 'ADDITIONALLY_INSURED_MISMATCH') {
+    return `Ask your agent to list ${flag.expected} as certificate holder and additional insured.`;
+  }
+  return flag.message;
+}
 
 export default function Portal() {
   const { token } = useParams();
-  const toast = useToast();
+  const inputRef = useRef(null);
+
   const [vendor, setVendor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [file, setFile] = useState(null);
+  const [errorOrgName, setErrorOrgName] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [uploaded, setUploaded] = useState(false);
-  const [complianceFlags, setComplianceFlags] = useState(null);
+  const [result, setResult] = useState(null);
+  const [dragging, setDragging] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
   const [form, setForm] = useState({});
-  const [errorOrgName, setErrorOrgName] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/portal/${token}`)
       .then(async (res) => {
+        const data = await res.json();
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setErrorOrgName(data.orgName || null);
-          throw new Error('Invalid link');
+          setErrorOrgName(data.orgName);
+          throw new Error(data.error || 'This link is no longer valid');
         }
-        return res.json();
-      })
-      .then((v) => {
-        setVendor(v);
-        setForm({ name: v.name, contactName: v.contactName || '', email: v.email, phone: v.phone || '', address: v.address || '' });
+        setVendor(data);
+        setForm({ name: data.name, contactName: data.contactName || '', email: data.email, phone: data.phone || '', address: data.address || '' });
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [token]);
 
-  const handleUpdateInfo = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await fetch(`${API_BASE}/portal/${token}/info`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-      if (!res.ok) throw new Error('Failed to update');
-      const updated = await res.json();
-      setVendor(updated);
-      setEditingInfo(false);
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
-
-  const handleUpload = async (e) => {
-    e.preventDefault();
+  const upload = async (file) => {
     if (!file) return;
     setUploading(true);
     setError('');
-
     try {
-      const formData = new FormData();
-      formData.append('pdf', file);
-
-      const res = await fetch(`${API_BASE}/portal/${token}/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Upload failed');
-      }
-
+      const fd = new FormData();
+      fd.append('pdf', file);
+      const res = await fetch(`${API_BASE}/portal/${token}/upload`, { method: 'POST', body: fd });
       const data = await res.json();
-      setUploaded(true);
-      setComplianceFlags(data.complianceFlags);
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      setResult(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -82,193 +74,221 @@ export default function Portal() {
     }
   };
 
+  const saveInfo = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_BASE}/portal/${token}/info`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Could not save');
+      setVendor({ ...vendor, ...form });
+      setEditingInfo(false);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
-      </div>
-    );
+    return <div className="min-h-screen bg-canvas flex items-center justify-center text-[13px] text-muted">Loading…</div>;
   }
 
-  if (error && !vendor) {
+  if (!vendor) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center max-w-md mx-4">
-          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.05 6.05m3.828 3.828L6.05 6.05m0 0L3 3m3.05 3.05l12.9 12.9" />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Link Expired</h1>
-          <p className="text-gray-500">
+      <div className="min-h-screen bg-canvas flex items-center justify-center px-6">
+        <div className="max-w-portal text-center flex flex-col gap-3">
+          <h1 className="text-[22px] font-extrabold text-navy tracking-[-0.02em]">This link has expired</h1>
+          <p className="text-sm text-ink-2 leading-[1.55]">
             {errorOrgName
-              ? `This link is no longer valid. Please reach out to ${errorOrgName} to request a new one.`
-              : 'This link is no longer valid. Please reach out to the requesting company to get a new upload link.'}
+              ? `Please contact ${errorOrgName} for a new upload link.`
+              : 'Please contact the company that requested your certificate for a new upload link.'}
           </p>
-          <div className="mt-8">
-            <p className="text-xs text-gray-400">
-              Powered by{' '}
-              <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
-                className="font-medium text-gray-500 hover:text-gray-700">Proof</a>
-              {' '}&mdash;{' '}
-              <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
-                className="text-blue-500 hover:underline">proofcoi.com</a>
-            </p>
-          </div>
         </div>
       </div>
     );
   }
 
-  if (uploaded) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="max-w-md w-full mx-4">
-          <div className="bg-white p-8 rounded-xl shadow-sm border text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold mb-2">COI Uploaded!</h1>
-            <p className="text-gray-500 mb-4">Your certificate of insurance has been submitted for review.</p>
-            {complianceFlags && complianceFlags.length > 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4 text-left">
-                <p className="font-medium text-yellow-800 mb-2">Potential issues detected:</p>
-                <ul className="text-sm text-yellow-700 space-y-1">
-                  {complianceFlags.map((flag, i) => (
-                    <li key={i}>{flag.message}</li>
-                  ))}
-                </ul>
-                <p className="text-xs text-yellow-600 mt-2">The reviewing team will follow up if any changes are needed.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const org = vendor.organization || {};
+  const required = (vendor.coverages || []).filter((c) => c.verdict !== 'skipped');
+  const expiring = vendor.expiringSoonest;
+
+  // The lead line changes with why they're here: a renewal names the date, a
+  // first request doesn't pretend there's something on file.
+  const lead = expiring && expiring.expiresAt
+    ? <>Hi {vendor.name} — your {expiring.label.toLowerCase()} on file expires <b className="text-ink">{day(expiring.expiresAt)}</b>. Upload the new certificate below. Takes about a minute.</>
+    : <>Hi {vendor.name} — {org.name} needs a current certificate of insurance on file for you. Upload it below. Takes about a minute.</>;
+
+  const agentBody = encodeURIComponent(
+    `Hi,\n\nPlease issue a certificate of insurance for ${vendor.name} showing:\n\n` +
+    required.map((c) => `• ${c.label}: ${money(c.required)} minimum`).join('\n') +
+    `\n\nCertificate holder / additional insured:\n${org.name}${org.address ? `\n${org.address}` : ''}\n\n` +
+    (org.additionalInsuredNote ? `${org.additionalInsuredNote}\n\n` : '') +
+    `Thank you.`
+  );
 
   return (
-    <div className="min-h-screen bg-gray-50 py-6 sm:py-12">
-      <div className="max-w-lg mx-auto px-4">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold">Proof</h1>
-          <p className="text-gray-500 mt-2">COI Upload Portal</p>
+    <div className="min-h-screen bg-canvas px-6 pt-10 pb-16 flex flex-col items-center gap-7">
+      <div className="w-full max-w-portal flex flex-col gap-5">
+        <div className="flex flex-col gap-3.5 text-center items-center">
+          <span className="w-[52px] h-[52px] rounded-[14px] bg-navy text-white flex items-center justify-center font-extrabold text-[22px]">
+            {initials(org.name)}
+          </span>
+          <h1 className="text-[26px] font-extrabold tracking-[-0.03em] text-navy text-balance">
+            {org.name} needs your {vendor.hasCoiOnFile ? 'updated ' : ''}certificate of insurance
+          </h1>
+          <p className="text-[15px] text-ink-2 leading-[1.55] max-w-[440px]">{lead}</p>
         </div>
 
-        {/* Vendor info */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border mb-6">
-          <div className="flex justify-between items-start">
-            <h2 className="text-lg font-semibold mb-3">Your Information</h2>
-            {!editingInfo && (
-              <button onClick={() => setEditingInfo(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+        {result ? (
+          <div className="bg-white border border-line rounded-card p-[22px] flex flex-col gap-3.5">
+            <span className="text-xs font-bold uppercase tracking-[0.08em] text-amber-text">
+              {result.complianceFlags?.length ? "What still needs fixing" : 'Certificate received'}
+            </span>
+            {result.complianceFlags?.length ? (
+              <>
+                <p className="text-sm text-ink-2 leading-[1.55]">
+                  Thanks — we read your certificate. A few things don't meet {org.name}'s requirements yet:
+                </p>
+                <div className="flex flex-col gap-2">
+                  {result.complianceFlags.map((f, i) => (
+                    <div key={i} className="flex gap-2.5 items-start px-3 py-2.5 bg-bad-bg rounded-control text-[13px] text-bad-text leading-[1.45]">
+                      <span className="font-extrabold">!</span>
+                      <span>{fixFor(f)}</span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setResult(null); inputRef.current?.click(); }}
+                  className="self-start text-[13px] font-semibold text-navy hover:text-amber"
+                >
+                  Upload a corrected certificate →
+                </button>
+              </>
+            ) : (
+              <p className="text-sm text-ink-2 leading-[1.55]">
+                Thanks — we read your certificate and everything {org.name} requires is there.
+                Nothing else is needed from you.
+              </p>
             )}
           </div>
-          {editingInfo ? (
-            <form onSubmit={handleUpdateInfo} className="space-y-3">
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Company Name" />
-              <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Contact Name" />
-              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Email" />
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Phone" />
-              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                className="w-full px-3 py-2.5 border rounded-lg text-base" placeholder="Address" />
-              <div className="flex gap-2">
-                <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">Save</button>
-                <button type="button" onClick={() => setEditingInfo(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              </div>
-            </form>
-          ) : (
-            <div className="text-sm space-y-1">
-              <p><span className="text-gray-500">Company:</span> {vendor.name}</p>
-              {vendor.contactName && <p><span className="text-gray-500">Contact:</span> {vendor.contactName}</p>}
-              <p><span className="text-gray-500">Email:</span> {vendor.email}</p>
-              {vendor.phone && <p><span className="text-gray-500">Phone:</span> {vendor.phone}</p>}
-              {vendor.address && <p><span className="text-gray-500">Address:</span> {vendor.address}</p>}
-            </div>
-          )}
-        </div>
-
-        {/* Certificate Requirements */}
-        {vendor.organization && (
-          <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6">
-            <h2 className="text-lg font-semibold text-blue-900 mb-3">Certificate Requirements</h2>
-            <div className="text-sm space-y-2 text-blue-800">
-              <p><span className="font-medium">Additionally Insured:</span></p>
-              <div className="bg-white rounded-lg p-4 border border-blue-200">
-                <p className="font-medium text-gray-900">{vendor.organization.name}</p>
-                {vendor.organization.address && (
-                  <p className="text-gray-600 mt-1">{vendor.organization.address}</p>
+        ) : (
+          <>
+            {required.length > 0 && (
+              <div className="bg-white border border-line rounded-card p-[22px] flex flex-col gap-3.5">
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-amber-text">
+                  What the certificate needs to show
+                </span>
+                <div className="flex flex-col gap-2 text-sm">
+                  {required.map((c) => (
+                    <div key={c.key} className="flex justify-between gap-3 py-2 border-b border-line-divider">
+                      <span className="text-ink">{c.label}</span>
+                      <span className="font-semibold text-navy text-right">
+                        {money(c.required)}
+                        {c.key === 'gl' ? ' per occurrence' : ''}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between gap-3 py-2">
+                    <span className="text-ink">Certificate holder / additional insured</span>
+                    <span className="font-semibold text-navy text-right">
+                      {org.name}
+                      {org.address && <><br /><span className="font-normal text-muted text-xs">{org.address}</span></>}
+                    </span>
+                  </div>
+                </div>
+                {org.additionalInsuredNote && (
+                  <p className="text-[13px] text-ink-2 leading-[1.5] bg-card-alt rounded-control px-3 py-2.5">
+                    {org.additionalInsuredNote}
+                  </p>
                 )}
+                <a
+                  href={`mailto:?subject=${encodeURIComponent(`Certificate of insurance for ${vendor.name}`)}&body=${agentBody}`}
+                  className="self-start text-[13px] font-semibold text-navy hover:text-amber"
+                >
+                  Forward these requirements to my agent →
+                </a>
               </div>
-              <p className="text-blue-700 text-xs mt-3">
-                {vendor.organization.additionalInsuredNote
-                  || 'Please list the above company as Additionally Insured on your Certificate of Insurance.'}
-              </p>
+            )}
+
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                upload(e.dataTransfer.files?.[0]);
+              }}
+              className={`bg-white border-2 border-dashed rounded-card px-[22px] py-9 flex flex-col items-center gap-2.5 text-center
+                transition-colors duration-150 ${dragging ? 'border-amber' : 'border-line-strong hover:border-amber'}`}
+            >
+              <span className="w-11 h-11 rounded-xl bg-amber-bg text-amber-text flex items-center justify-center text-xl font-extrabold">
+                ↑
+              </span>
+              <span className="text-[15px] font-bold text-navy">
+                {uploading ? 'Reading your certificate…' : 'Drop your certificate here'}
+              </span>
+              <span className="text-[13px] text-muted">
+                PDF · we read it instantly and tell you if anything's missing
+              </span>
+              <input
+                ref={inputRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={(e) => upload(e.target.files?.[0])}
+              />
+              <button
+                onClick={() => inputRef.current?.click()}
+                disabled={uploading}
+                className="mt-1.5 px-[18px] py-2.5 rounded-control bg-amber text-white text-sm font-semibold
+                  hover:bg-amber-hover disabled:opacity-50 transition-colors duration-150"
+              >
+                {uploading ? 'Uploading…' : 'Choose file'}
+              </button>
             </div>
-          </div>
+          </>
         )}
 
-        {/* Upload form */}
-        <form onSubmit={handleUpload} className="bg-white p-6 rounded-xl shadow-sm border">
-          <h2 className="text-lg font-semibold mb-4">Upload Certificate of Insurance</h2>
-          <p className="text-sm text-gray-500 mb-4">Please upload your current COI as a PDF file.</p>
+        {error && (
+          <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control text-[13px] text-center">{error}</div>
+        )}
 
-          {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
-
-          <div className="border-2 border-dashed rounded-xl p-6 sm:p-8 text-center mb-4">
-            <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files[0])}
-              className="hidden" id="pdf-upload" />
-            <label htmlFor="pdf-upload" className="cursor-pointer">
-              {file ? (
-                <div>
-                  <p className="font-medium">{file.name}</p>
-                  <p className="text-sm text-gray-500 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                </div>
-              ) : (
-                <div>
-                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <p className="text-gray-600">Click to select PDF file</p>
-                  <p className="text-xs text-gray-400 mt-1">Max 10MB</p>
-                </div>
-              )}
-            </label>
+        {editingInfo ? (
+          <form onSubmit={saveInfo} className="bg-white border border-line rounded-card p-[22px] flex flex-col gap-3">
+            <span className="text-sm font-bold text-navy">Update your contact details</span>
+            {[['name', 'Company name'], ['contactName', 'Contact name'], ['email', 'Email'], ['phone', 'Phone'], ['address', 'Address']].map(([key, label]) => (
+              <div key={key} className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-ink-2">{label}</label>
+                <input
+                  value={form[key] || ''}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  className="px-3 py-2 rounded-control border border-line-strong text-[13px] focus:outline-none focus:border-navy"
+                />
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <button type="submit" className="px-3.5 py-2 rounded-control bg-navy text-white text-[13px] font-semibold hover:bg-navy-hover">
+                Save
+              </button>
+              <button type="button" onClick={() => setEditingInfo(false)} className="px-3.5 py-2 rounded-control border border-line-strong text-[13px] font-semibold text-navy">
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="flex flex-col gap-1.5 text-[13px] text-muted text-center">
+            <span>
+              Uploading as <b className="text-ink">{vendor.email}</b> ·{' '}
+              <button onClick={() => setEditingInfo(true)} className="text-navy font-semibold hover:text-amber">
+                Not you?
+              </button>
+            </span>
+            <span>
+              Secured by <a href="https://proofcoi.com" className="text-navy font-semibold">Proof</a> · proofcoi.com
+            </span>
           </div>
-
-          <button type="submit" disabled={!file || uploading}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-            {uploading ? 'Uploading & Analyzing...' : 'Upload COI'}
-          </button>
-
-          {uploading && (
-            <p className="text-sm text-gray-500 text-center mt-3">
-              We're extracting data from your COI. This may take a moment...
-            </p>
-          )}
-        </form>
-
-        {/* CTA */}
-        <div className="mt-8 text-center">
-          <p className="text-sm text-gray-400">
-            Powered by{' '}
-            <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
-              className="font-medium text-gray-500 hover:text-gray-700">Proof</a>
-            {' '}&mdash; COI management built for general contractors.
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            Want to manage your vendors' insurance automatically?{' '}
-            <a href="https://proofcoi.com" target="_blank" rel="noopener noreferrer"
-              className="text-blue-500 hover:underline">Get started free.</a>
-          </p>
-        </div>
+        )}
       </div>
     </div>
   );

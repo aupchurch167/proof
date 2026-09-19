@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticate, authorize } = require('../middleware/auth');
+const { getPlanLimits, getPlanLabel } = require('../config/plans');
 
 const router = express.Router();
 
@@ -42,6 +43,48 @@ router.put('/', authenticate, authorize('ADMIN'), async (req, res) => {
   } catch (err) {
     console.error('Update org error:', err);
     res.status(500).json({ error: 'Failed to update organization' });
+  }
+});
+
+// GET /api/organization/usage — plan meter for the sidebar, plus a token the
+// "Vendor portal" nav link can preview. One call so the shell doesn't fan out.
+router.get('/usage', authenticate, async (req, res) => {
+  try {
+    const org = await prisma.organization.findUnique({
+      where: { id: req.user.orgId },
+      select: { plan: true },
+    });
+    const plan = org?.plan || 'FREE';
+    const limits = getPlanLimits(plan);
+
+    const [vendorCount, coiCount, sampleVendor] = await Promise.all([
+      prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } }),
+      prisma.coi.count({ where: { orgId: req.user.orgId } }),
+      prisma.vendor.findFirst({
+        where: { orgId: req.user.orgId, deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: { uploadToken: true },
+      }),
+    ]);
+
+    // Infinity doesn't survive JSON, so an unlimited plan reports a null limit
+    // and a 0% meter.
+    const meter = (used, limit) => ({
+      used,
+      limit: limit === Infinity ? null : limit,
+      percent: limit === Infinity ? 0 : Math.min(100, Math.round((used / limit) * 100)),
+    });
+
+    res.json({
+      plan,
+      planLabel: getPlanLabel(plan),
+      vendors: meter(vendorCount, limits.maxVendors),
+      cois: meter(coiCount, limits.maxCois),
+      portalPreviewToken: sampleVendor?.uploadToken || null,
+    });
+  } catch (err) {
+    console.error('Usage error:', err);
+    res.status(500).json({ error: 'Failed to load plan usage' });
   }
 });
 
