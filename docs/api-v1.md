@@ -30,7 +30,7 @@ new endpoints drop in without bespoke plumbing.
 | `400` / `422` | validation error (bad body/params) |
 | `401` | missing/invalid token (`unauthorized`) |
 | `403` | token valid but not authorized for this org, or missing scope (`forbidden`) |
-| `404` | org / vendor not found (`organization_not_found`, `vendor_not_found`) |
+| `404` | org / vendor / COI document not found (`organization_not_found`, `vendor_not_found`, `coi_document_not_found`) |
 | `409` | conflict, e.g. a COI request is already open (`coi_request_conflict`) |
 | `5xx` | Proof-side failure (`internal_error`) |
 
@@ -131,6 +131,34 @@ List/search vendors. Optional query params: `search` (name/email), `trade`,
 
 One vendor with full `coi.coverages`. `404` if not in this org. Scope:
 `vendors:read`.
+
+### `GET /vendors/:vendorId/coi/document`
+
+Temporary signed URL for the vendor's latest **APPROVED** COI PDF — the same
+COI the detail endpoint uses for `coi.coverages` / `coi.expiresAt` (newest
+`APPROVED` row by `submittedAt`). Scope: `vendors:read`.
+
+```json
+{
+  "data": {
+    "url": "https://…signed…",
+    "expiresInSeconds": 900,
+    "contentType": "application/pdf",
+    "filename": "abc123.pdf",
+    "coiId": "7a1c...-uuid",
+    "expiresAt": "2026-09-20T00:00:00.000Z"
+  }
+}
+```
+
+- `url` — short-lived download URL from `getSignedUrl(coi.pdfPath)` (15-minute
+  TTL). Fetch it promptly; do not persist it.
+- `expiresInSeconds` / `expiresAt` — how long that URL remains valid (not the
+  policy expiration on the vendor's `coi.expiresAt`).
+- `filename` — basename of the stored object key.
+- `404 vendor_not_found` if the vendor is missing from this org.
+- `404 coi_document_not_found` if there is no approved COI, or the latest
+  approved COI has no `pdfPath`.
 
 ### `POST /vendors/:vendorId/coi-requests`
 

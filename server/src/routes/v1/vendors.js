@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const prisma = require('../../lib/prisma');
 const { requireScope, SCOPES } = require('../../middleware/apiAuth');
@@ -10,7 +11,12 @@ const {
 } = require('../../http/serializers');
 const { generateUploadToken } = require('../../utils/tokens');
 const { sendUploadRequestEmail } = require('../../services/email');
+const { getSignedUrl } = require('../../services/storage');
 const { isValidTrade } = require('../../constants/trades');
+
+// Matches getSignedUrl()'s default TTL so the envelope's expiresInSeconds /
+// expiresAt describe the URL we actually issued.
+const SIGNED_URL_EXPIRES_IN = 900;
 
 const router = express.Router({ mergeParams: true });
 
@@ -118,6 +124,38 @@ router.get('/:vendorId', requireScope(SCOPES.VENDORS_READ), async (req, res) => 
     return data(res, serializeVendor(vendor, toSerializerOpts(vendor, true)));
   } catch (err) {
     console.error('[API v1] get vendor error:', err);
+    return errors.server(res);
+  }
+});
+
+// GET /api/v1/orgs/:orgSlug/vendors/:vendorId/coi/document — signed URL for the
+// latest APPROVED COI PDF (same COI the detail serializer uses as latestApprovedCoi).
+router.get('/:vendorId/coi/document', requireScope(SCOPES.VENDORS_READ), async (req, res) => {
+  try {
+    const vendor = await prisma.vendor.findFirst({
+      where: { id: req.params.vendorId, orgId: req.org.id, deletedAt: null },
+      include: VENDOR_INCLUDE,
+    });
+    if (!vendor) return errors.notFound(res, 'vendor_not_found', 'Vendor not found');
+
+    const coi = vendor.cois?.[0] || null;
+    if (!coi || !coi.pdfPath) {
+      return errors.notFound(res, 'coi_document_not_found', 'No approved COI document for this vendor');
+    }
+
+    const url = await getSignedUrl(coi.pdfPath);
+    const expiresAt = new Date(Date.now() + SIGNED_URL_EXPIRES_IN * 1000).toISOString();
+
+    return data(res, {
+      url,
+      expiresInSeconds: SIGNED_URL_EXPIRES_IN,
+      contentType: 'application/pdf',
+      filename: path.posix.basename(coi.pdfPath) || 'coi.pdf',
+      coiId: coi.id,
+      expiresAt,
+    });
+  } catch (err) {
+    console.error('[API v1] get vendor COI document error:', err);
     return errors.server(res);
   }
 });
