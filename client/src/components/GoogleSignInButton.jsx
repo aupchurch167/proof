@@ -73,9 +73,9 @@ export default function GoogleSignInButton({ onCredential, onError, text = 'cont
   return (
     <div className="my-4">
       <div className="flex items-center gap-3 mb-4">
-        <div className="h-px bg-gray-200 flex-1" />
-        <span className="text-xs uppercase tracking-wide text-gray-400">or</span>
-        <div className="h-px bg-gray-200 flex-1" />
+        <div className="h-px bg-line flex-1" />
+        <span className="text-xs uppercase tracking-wide text-faint">or</span>
+        <div className="h-px bg-line flex-1" />
       </div>
       <div ref={containerRef} className="flex justify-center" />
     </div>

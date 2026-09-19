@@ -31,14 +31,20 @@ export function ToastProvider({ children }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto px-4 py-3 rounded-lg shadow-lg border text-sm font-medium animate-slide-in ${
-              t.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
-              t.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
-              t.type === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' :
-              'bg-blue-50 border-blue-200 text-blue-800'
-            }`}
+            className="pointer-events-auto flex items-start gap-2.5 px-4 py-3 rounded-control shadow-lg
+              bg-navy text-white text-[13px] font-medium animate-slide-in"
           >
-            {t.message}
+            {/* A single amber accent carries the kind; the surface stays navy so
+                toasts read as the app speaking, not as four different alerts. */}
+            <span
+              className={`w-1 self-stretch rounded-full flex-none ${
+                t.type === 'success' ? 'bg-ok'
+                  : t.type === 'error' ? 'bg-bad'
+                  : t.type === 'warning' ? 'bg-amber'
+                  : 'bg-amber-light'
+              }`}
+            />
+            <span className="leading-[1.45]">{t.message}</span>
           </div>
         ))}
       </div>

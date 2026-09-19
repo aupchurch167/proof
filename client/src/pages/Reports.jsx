@@ -3,26 +3,26 @@ import { api, API_BASE } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 
 const statusColors = {
-  PENDING_REVIEW: 'bg-blue-100 text-blue-800',
-  APPROVED: 'bg-green-100 text-green-800',
-  REJECTED: 'bg-red-100 text-red-800',
-  EXPIRED: 'bg-gray-100 text-gray-800',
+  PENDING_REVIEW: 'bg-info-bg text-info-text',
+  APPROVED: 'bg-ok-bg text-ok-text',
+  REJECTED: 'bg-bad-bg text-bad-text',
+  EXPIRED: 'bg-warm text-ink',
 };
 
 function ExpirationCell({ dateStr }) {
-  if (!dateStr) return <span className="text-gray-300">-</span>;
+  if (!dateStr) return <span className="text-faint">-</span>;
   const d = new Date(dateStr);
   const now = new Date();
   const diffDays = Math.ceil((d - now) / (1000 * 60 * 60 * 24));
-  let color = 'text-gray-600';
-  if (diffDays < 0) color = 'text-red-600 font-medium';
+  let color = 'text-muted';
+  if (diffDays < 0) color = 'text-bad-text font-medium';
   else if (diffDays <= 30) color = 'text-yellow-600 font-medium';
   return <span className={color}>{d.toLocaleDateString()}</span>;
 }
 
 function MobileCoiCard({ coi, hasExpiringColumn }) {
   return (
-    <div className="bg-white rounded-xl border p-4">
+    <div className="bg-white rounded-card border p-4">
       <div className="flex items-center justify-between gap-2 mb-2">
         <span className="font-medium truncate">{coi.vendor?.name}</span>
         <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${statusColors[coi.status]}`}>
@@ -32,7 +32,7 @@ function MobileCoiCard({ coi, hasExpiringColumn }) {
       {hasExpiringColumn && coi.expiringCoverages?.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {coi.expiringCoverages.map(c => (
-            <span key={c} className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+            <span key={c} className="px-1.5 py-0.5 bg-warn-bg text-warn-text rounded text-xs font-medium">
               {c}
             </span>
           ))}
@@ -41,30 +41,30 @@ function MobileCoiCard({ coi, hasExpiringColumn }) {
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         {coi.glExpirationDate && (
           <>
-            <span className="text-gray-500">GL</span>
+            <span className="text-muted">GL</span>
             <span><ExpirationCell dateStr={coi.glExpirationDate} /></span>
           </>
         )}
         {coi.wcExpirationDate && (
           <>
-            <span className="text-gray-500">WC</span>
+            <span className="text-muted">WC</span>
             <span><ExpirationCell dateStr={coi.wcExpirationDate} /></span>
           </>
         )}
         {coi.umbExpirationDate && (
           <>
-            <span className="text-gray-500">Umbrella</span>
+            <span className="text-muted">Umbrella</span>
             <span><ExpirationCell dateStr={coi.umbExpirationDate} /></span>
           </>
         )}
         {coi.autoExpirationDate && (
           <>
-            <span className="text-gray-500">Auto</span>
+            <span className="text-muted">Auto</span>
             <span><ExpirationCell dateStr={coi.autoExpirationDate} /></span>
           </>
         )}
-        <span className="text-gray-500">Submitted</span>
-        <span className="text-gray-600">{new Date(coi.submittedAt).toLocaleDateString()}</span>
+        <span className="text-muted">Submitted</span>
+        <span className="text-muted">{new Date(coi.submittedAt).toLocaleDateString()}</span>
       </div>
     </div>
   );
@@ -170,45 +170,45 @@ export default function Reports() {
         <h1 className="text-2xl font-bold">Audit Reports</h1>
         <div className="flex flex-col sm:flex-row gap-2">
           <button onClick={exportPdfs} disabled={cois.length === 0 || exportingPdfs}
-            className="border border-blue-600 text-blue-600 px-4 py-2.5 sm:py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium text-center">
+            className="border border-amber text-navy px-4 py-2.5 sm:py-2 rounded-control hover:bg-amber-bg disabled:opacity-50 text-sm font-medium text-center">
             {exportingPdfs ? 'Merging...' : 'Export PDFs'}
           </button>
           <button onClick={exportCsv} disabled={cois.length === 0}
-            className="bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium text-center">
+            className="bg-amber text-white px-4 py-2.5 sm:py-2 rounded-control hover:bg-amber-hover disabled:opacity-50 text-sm font-medium text-center">
             Export CSV
           </button>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border p-4 mb-6">
+      <div className="bg-white rounded-card border p-4 mb-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-3 lg:gap-4 lg:items-end">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Filter Dates By</label>
+            <label className="block text-sm font-medium text-ink-2 mb-1">Filter Dates By</label>
             <select value={filterBy} onChange={(e) => setFilterBy(e.target.value)}
-              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm">
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-control text-base sm:text-sm">
               <option value="submission">Submission Date</option>
               <option value="expiration">Expiration Date</option>
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-ink-2 mb-1">
               {filterBy === 'expiration' ? 'Expires After' : 'Start Date'}
             </label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm" />
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-control text-base sm:text-sm" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-ink-2 mb-1">
               {filterBy === 'expiration' ? 'Expires Before' : 'End Date'}
             </label>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm" />
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-control text-base sm:text-sm" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <label className="block text-sm font-medium text-ink-2 mb-1">Status</label>
             <select value={status} onChange={(e) => setStatus(e.target.value)}
-              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm">
+              className="w-full lg:w-auto px-3 py-2.5 sm:py-2 border rounded-control text-base sm:text-sm">
               <option value="">All</option>
               <option value="APPROVED">Approved</option>
               <option value="PENDING_REVIEW">Pending</option>
@@ -217,7 +217,7 @@ export default function Reports() {
             </select>
           </div>
           <button onClick={fetchReport}
-            className="sm:col-span-2 lg:col-span-1 bg-gray-900 text-white px-4 py-2.5 sm:py-2 rounded-lg text-sm hover:bg-gray-800">
+            className="sm:col-span-2 lg:col-span-1 bg-navy text-white px-4 py-2.5 sm:py-2 rounded-control text-sm hover:bg-navy-hover">
             Run Report
           </button>
         </div>
@@ -225,36 +225,36 @@ export default function Reports() {
 
       {/* Results */}
       {loading ? (
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-muted">Loading...</p>
       ) : (
         <>
-          <p className="text-sm text-gray-500 mb-4">{cois.length} COI(s) found</p>
+          <p className="text-sm text-muted mb-4">{cois.length} COI(s) found</p>
           {cois.length > 0 && (
             <>
               {/* Desktop table */}
-              <div className="hidden lg:block bg-white rounded-xl border overflow-x-auto">
+              <div className="hidden lg:block bg-white rounded-card border overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-gray-50 border-b">
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Vendor</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                    <tr className="bg-card-alt border-b">
+                      <th className="text-left px-4 py-3 font-medium text-muted">Vendor</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">Status</th>
                       {hasExpiringColumn && (
-                        <th className="text-left px-4 py-3 font-medium text-gray-600">Expiring Coverage</th>
+                        <th className="text-left px-4 py-3 font-medium text-muted">Expiring Coverage</th>
                       )}
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">GL</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">GL Exp</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">WC</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">WC Exp</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Umb</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Umb Exp</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Auto</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Auto Exp</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Submitted</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">GL</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">GL Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">WC</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">WC Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">Umb</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">Umb Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">Auto</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">Auto Exp</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted">Submitted</th>
                     </tr>
                   </thead>
                   <tbody>
                     {cois.map((coi) => (
-                      <tr key={coi.id} className="border-b last:border-0 hover:bg-gray-50">
+                      <tr key={coi.id} className="border-b last:border-0 hover:bg-card-alt">
                         <td className="px-4 py-3 font-medium">{coi.vendor?.name}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[coi.status]}`}>
@@ -266,25 +266,25 @@ export default function Reports() {
                             {coi.expiringCoverages?.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
                                 {coi.expiringCoverages.map(c => (
-                                  <span key={c} className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+                                  <span key={c} className="px-1.5 py-0.5 bg-warn-bg text-warn-text rounded text-xs font-medium">
                                     {c}
                                   </span>
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-gray-300">-</span>
+                              <span className="text-faint">-</span>
                             )}
                           </td>
                         )}
-                        <td className="px-4 py-3 text-gray-600">{coi.glCoverageAmount ? `$${(coi.glCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3 text-muted">{coi.glCoverageAmount ? `$${(coi.glCoverageAmount/100).toLocaleString()}` : '-'}</td>
                         <td className="px-4 py-3"><ExpirationCell dateStr={coi.glExpirationDate} /></td>
-                        <td className="px-4 py-3 text-gray-600">{coi.wcCoverageAmount ? `$${(coi.wcCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3 text-muted">{coi.wcCoverageAmount ? `$${(coi.wcCoverageAmount/100).toLocaleString()}` : '-'}</td>
                         <td className="px-4 py-3"><ExpirationCell dateStr={coi.wcExpirationDate} /></td>
-                        <td className="px-4 py-3 text-gray-600">{coi.umbCoverageAmount ? `$${(coi.umbCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3 text-muted">{coi.umbCoverageAmount ? `$${(coi.umbCoverageAmount/100).toLocaleString()}` : '-'}</td>
                         <td className="px-4 py-3"><ExpirationCell dateStr={coi.umbExpirationDate} /></td>
-                        <td className="px-4 py-3 text-gray-600">{coi.autoCoverageAmount ? `$${(coi.autoCoverageAmount/100).toLocaleString()}` : '-'}</td>
+                        <td className="px-4 py-3 text-muted">{coi.autoCoverageAmount ? `$${(coi.autoCoverageAmount/100).toLocaleString()}` : '-'}</td>
                         <td className="px-4 py-3"><ExpirationCell dateStr={coi.autoExpirationDate} /></td>
-                        <td className="px-4 py-3 text-gray-600">{new Date(coi.submittedAt).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-muted">{new Date(coi.submittedAt).toLocaleDateString()}</td>
                       </tr>
                     ))}
                   </tbody>

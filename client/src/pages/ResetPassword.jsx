@@ -13,12 +13,12 @@ export default function ResetPassword() {
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-card-alt">
         <div className="max-w-md w-full">
-          <div className="bg-white p-8 rounded-xl shadow-sm border text-center">
+          <div className="bg-white p-8 rounded-card shadow-sm border text-center">
             <h2 className="text-xl font-semibold mb-4">Invalid Reset Link</h2>
-            <p className="text-gray-500 text-sm mb-4">This password reset link is invalid or missing a token.</p>
-            <Link to="/forgot-password" className="text-blue-600 hover:underline text-sm">Request a new reset link</Link>
+            <p className="text-muted text-sm mb-4">This password reset link is invalid or missing a token.</p>
+            <Link to="/forgot-password" className="text-navy hover:underline text-sm">Request a new reset link</Link>
           </div>
         </div>
       </div>
@@ -65,32 +65,32 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-card-alt">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold">Proof</h1>
-          <p className="text-gray-500 mt-2">COI Management</p>
+          <p className="text-muted mt-2">COI Management</p>
         </div>
-        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow-sm border">
+        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-card shadow-sm border">
           <h2 className="text-xl font-semibold mb-2">Set new password</h2>
-          <p className="text-sm text-gray-500 mb-6">Must be at least 8 characters with one uppercase letter and one number.</p>
-          {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
+          <p className="text-sm text-muted mb-6">Must be at least 8 characters with one uppercase letter and one number.</p>
+          {error && <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control mb-4 text-sm">{error}</div>}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">New password</label>
+            <label className="block text-sm font-medium text-ink-2 mb-1">New password</label>
             <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+              className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
           </div>
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm password</label>
+            <label className="block text-sm font-medium text-ink-2 mb-1">Confirm password</label>
             <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+              className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
           </div>
           <button type="submit" disabled={loading}
-            className="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+            className="w-full bg-amber text-white py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 font-medium">
             {loading ? 'Resetting...' : 'Reset password'}
           </button>
-          <p className="text-center mt-4 text-sm text-gray-500">
-            <Link to="/login" className="text-blue-600 hover:underline">Back to sign in</Link>
+          <p className="text-center mt-4 text-sm text-muted">
+            <Link to="/login" className="text-navy hover:underline">Back to sign in</Link>
           </p>
         </form>
       </div>

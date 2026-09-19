@@ -34,34 +34,34 @@ export default function DeleteConfirmationModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-      <div className="bg-white rounded-t-xl sm:rounded-xl shadow-xl p-6 w-full sm:max-w-md sm:mx-4">
-        <h2 className="text-lg font-semibold text-gray-900 mb-2">
+      <div className="bg-white rounded-t-xl sm:rounded-card shadow-xl p-6 w-full sm:max-w-md sm:mx-4">
+        <h2 className="text-lg font-semibold text-ink mb-2">
           Delete {countText}?
         </h2>
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-muted mb-4">
           This will permanently remove {itemCount > 1 ? 'these' : 'this'} {pluralLabel} and all associated data. This action cannot be undone.
         </p>
-        <p className="text-sm font-medium text-gray-700 mb-2">
-          Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm:
+        <p className="text-sm font-medium text-ink-2 mb-2">
+          Type <span className="font-mono font-bold text-bad-text">DELETE</span> to confirm:
         </p>
         <input
           type="text"
           value={confirmText}
           onChange={(e) => setConfirmText(e.target.value)}
           placeholder="DELETE"
-          className="w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm mb-4 font-mono"
+          className="w-full px-3 py-2.5 border rounded-control text-base sm:text-sm mb-4 font-mono"
           autoFocus
           disabled={loading}
         />
         {error && (
-          <div className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm mb-4">
+          <div className="bg-bad-bg text-bad-text px-3 py-2 rounded-control text-sm mb-4">
             {error}
           </div>
         )}
         <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3">
           <button
             onClick={handleCancel}
-            className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50"
+            className="px-4 py-2.5 border rounded-control text-sm hover:bg-card-alt"
             disabled={loading}
           >
             Cancel
@@ -69,7 +69,7 @@ export default function DeleteConfirmationModal({
           <button
             onClick={handleConfirm}
             disabled={confirmText !== 'DELETE' || loading}
-            className="px-4 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2.5 bg-red-600 text-white rounded-control text-sm font-medium hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {loading ? 'Deleting...' : `Delete ${countText}`}
           </button>

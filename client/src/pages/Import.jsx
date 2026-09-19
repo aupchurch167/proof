@@ -53,29 +53,34 @@ function autoMatch(csvHeaders, templateFields) {
 
 function StepIndicator({ step, labels }) {
   return (
-    <div className="flex items-center gap-1 sm:gap-2 mb-6 sm:mb-8 overflow-x-auto">
-      {labels.map((label, i) => (
-        <div key={label} className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-          <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium ${
-            i < step ? 'bg-green-100 text-green-700' :
-            i === step ? 'bg-blue-600 text-white' :
-            'bg-gray-100 text-gray-400'
-          }`}>
-            {i < step ? '\u2713' : i + 1}
+    <div className="flex items-center mb-7 overflow-x-auto">
+      {labels.map((label, i) => {
+        const done = i < step;
+        const active = i === step;
+        return (
+          <div key={label} className="flex items-center gap-2.5 flex-1 min-w-fit">
+            <span
+              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-none border
+                ${done || active ? 'bg-navy text-white border-navy' : 'bg-white text-muted border-line-strong'}`}
+            >
+              {done ? '\u2713' : i + 1}
+            </span>
+            <span className={`text-[13px] whitespace-nowrap ${active ? 'font-bold text-navy' : 'font-medium text-muted'}`}>
+              {label}
+            </span>
+            {i < labels.length - 1 && <span className="flex-1 h-px bg-line mx-2.5 min-w-[20px]" />}
           </div>
-          <span className={`text-xs sm:text-sm hidden sm:inline ${i === step ? 'font-medium text-gray-900' : 'text-gray-400'}`}>{label}</span>
-          {i < labels.length - 1 && <div className="w-4 sm:w-8 h-px bg-gray-200" />}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 function PdfStatusBadge({ status, error: errorMsg }) {
-  if (status === 'pending') return <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">Pending</span>;
-  if (status === 'processing') return <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded animate-pulse">Processing...</span>;
-  if (status === 'success') return <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded">Success</span>;
-  if (status === 'error') return <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded" title={errorMsg}>Failed</span>;
+  if (status === 'pending') return <span className="text-xs text-faint bg-warm px-2 py-1 rounded">Pending</span>;
+  if (status === 'processing') return <span className="text-xs text-navy bg-info-bg px-2 py-1 rounded animate-pulse">Processing...</span>;
+  if (status === 'success') return <span className="text-xs text-ok-text bg-ok-bg px-2 py-1 rounded">Success</span>;
+  if (status === 'error') return <span className="text-xs text-bad-text bg-bad-bg px-2 py-1 rounded" title={errorMsg}>Failed</span>;
   return null;
 }
 
@@ -83,6 +88,9 @@ export default function Import() {
   const { user } = useAuth();
   const [importType, setImportType] = useState('vendors');
   const [step, setStep] = useState(0);
+  const [requestAfterImport, setRequestAfterImport] = useState(true);
+  const [requesting, setRequesting] = useState(false);
+  const [requestSummary, setRequestSummary] = useState(null);
   const [file, setFile] = useState(null);
   const [csvHeaders, setCsvHeaders] = useState([]);
   const [previewRows, setPreviewRows] = useState([]);
@@ -172,6 +180,34 @@ export default function Import() {
     }
     setError('');
     setStep(2);
+  };
+
+  const requestCertificates = async () => {
+    setRequesting(true);
+    const tally = { sent: 0, skipped: 0, badEmail: 0, failed: 0 };
+    try {
+      const vendors = await api.get('/vendors?status=NO_COI');
+      for (const v of vendors) {
+        try {
+          await api.post(`/vendors/${v.id}/request-coi`);
+          tally.sent++;
+        } catch (err) {
+          const reason = (err.message || '').toLowerCase();
+          if (reason.includes('recently')) tally.skipped++;
+          else if (reason.includes('deliverable')) tally.badEmail++;
+          else tally.failed++;
+        }
+      }
+      const parts = [`${tally.sent} request${tally.sent === 1 ? '' : 's'} sent`];
+      if (tally.skipped) parts.push(`${tally.skipped} already asked today`);
+      if (tally.badEmail) parts.push(`${tally.badEmail} had no usable email`);
+      if (tally.failed) parts.push(`${tally.failed} failed`);
+      setRequestSummary(parts.join(' · '));
+    } catch (err) {
+      setRequestSummary(`Couldn't send requests: ${err.message}`);
+    } finally {
+      setRequesting(false);
+    }
   };
 
   const handleImport = async () => {
@@ -266,32 +302,32 @@ export default function Import() {
   };
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'REVIEWER';
-  if (!canManage) return <div className="text-center py-12 text-gray-500">Admin or Reviewer access required</div>;
+  if (!canManage) return <div className="text-center py-12 text-muted">Admin or Reviewer access required</div>;
 
   const isCsvImport = importType === 'vendors' || importType === 'cois';
 
   return (
     <div>
       <h1 className="text-2xl font-bold mb-2">Bulk Import</h1>
-      <p className="text-gray-500 text-sm mb-6">Import vendors and COIs from CSV or PDF files</p>
+      <p className="text-muted text-sm mb-6">Import vendors and COIs from CSV or PDF files</p>
 
       {/* Import type toggle */}
       <div className="flex flex-col sm:flex-row gap-2 mb-6">
         <button onClick={() => handleTypeChange('vendors')}
-          className={`px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors ${
-            importType === 'vendors' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          className={`px-4 py-2.5 sm:py-2 rounded-control text-sm font-medium transition-colors ${
+            importType === 'vendors' ? 'bg-amber text-white' : 'bg-warm text-ink-2 hover:bg-line'
           }`}>
           Import Vendors
         </button>
         <button onClick={() => handleTypeChange('cois')}
-          className={`px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors ${
-            importType === 'cois' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          className={`px-4 py-2.5 sm:py-2 rounded-control text-sm font-medium transition-colors ${
+            importType === 'cois' ? 'bg-amber text-white' : 'bg-warm text-ink-2 hover:bg-line'
           }`}>
           Import COIs (CSV)
         </button>
         <button onClick={() => handleTypeChange('coi-pdfs')}
-          className={`px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors ${
-            importType === 'coi-pdfs' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          className={`px-4 py-2.5 sm:py-2 rounded-control text-sm font-medium transition-colors ${
+            importType === 'coi-pdfs' ? 'bg-amber text-white' : 'bg-warm text-ink-2 hover:bg-line'
           }`}>
           Import COI PDFs
         </button>
@@ -300,45 +336,45 @@ export default function Import() {
       {/* CSV Import Flow */}
       {isCsvImport && (
         <>
-          <StepIndicator step={step} labels={['Upload CSV', 'Map Headers', 'Preview & Import', 'Results']} />
+          <StepIndicator step={step} labels={['Upload', 'Match columns', 'Review', 'Request certificates']} />
 
           {error && (
-            <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-6 text-sm">{error}</div>
+            <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control mb-6 text-sm">{error}</div>
           )}
 
           {/* Step 0: Upload */}
           {step === 0 && (
-            <div className="bg-white rounded-xl border p-4 sm:p-6">
+            <div className="bg-white rounded-card border p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-6">
                 <div>
                   <h2 className="text-lg font-semibold">Upload {importType === 'vendors' ? 'Vendor' : 'COI'} CSV</h2>
-                  <p className="text-sm text-gray-500 mt-1">
+                  <p className="text-sm text-muted mt-1">
                     {importType === 'vendors'
                       ? 'Required columns: name, email. Optional: phone, address.'
                       : 'Required column: vendor_email (must match existing vendor). All other coverage fields optional.'}
                   </p>
                 </div>
                 <button onClick={() => handleDownloadTemplate(importType)}
-                  className="text-sm text-blue-600 hover:underline font-medium whitespace-nowrap py-1">
+                  className="text-sm text-navy hover:underline font-medium whitespace-nowrap py-1">
                   Download Template
                 </button>
               </div>
 
               {/* Template preview */}
-              <div className="bg-gray-50 rounded-lg p-4 mb-6 overflow-x-auto">
-                <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">Expected Template Format</p>
+              <div className="bg-card-alt rounded-control p-4 mb-6 overflow-x-auto">
+                <p className="text-xs font-medium text-muted mb-2 uppercase tracking-wide">Expected Template Format</p>
                 <table className="text-xs">
                   <thead>
                     <tr>
                       {templateFields.map(f => (
-                        <th key={f.key} className={`px-3 py-1.5 text-left whitespace-nowrap ${f.required ? 'text-gray-900 font-semibold' : 'text-gray-500 font-medium'}`}>
+                        <th key={f.key} className={`px-3 py-1.5 text-left whitespace-nowrap ${f.required ? 'text-ink font-semibold' : 'text-muted font-medium'}`}>
                           {f.key}{f.required ? ' *' : ''}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    <tr className="text-gray-400">
+                    <tr className="text-faint">
                       {templateFields.map(f => (
                         <td key={f.key} className="px-3 py-1.5 whitespace-nowrap italic">
                           {importType === 'vendors'
@@ -362,7 +398,7 @@ export default function Import() {
               />
 
               <button onClick={handleFileUpload} disabled={!file}
-                className="mt-4 w-full sm:w-auto bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                className="mt-4 w-full sm:w-auto bg-amber text-white px-6 py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 font-medium">
                 Parse &amp; Continue
               </button>
             </div>
@@ -370,12 +406,12 @@ export default function Import() {
 
           {/* Step 1: Map Headers */}
           {step === 1 && (
-            <div className="bg-white rounded-xl border p-4 sm:p-6">
+            <div className="bg-white rounded-card border p-4 sm:p-6">
               <h2 className="text-lg font-semibold mb-2">Verify Header Mapping</h2>
-              <p className="text-sm text-gray-500 mb-1">
+              <p className="text-sm text-muted mb-1">
                 We detected <strong>{csvHeaders.length}</strong> columns and <strong>{rowCount}</strong> data rows.
               </p>
-              <p className="text-sm text-gray-500 mb-6">
+              <p className="text-sm text-muted mb-6">
                 Match each required field to the correct column from your CSV.
               </p>
 
@@ -385,17 +421,17 @@ export default function Import() {
                   const isMatched = !!mapped;
                   return (
                     <div key={field.key}
-                      className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 p-3 rounded-lg border ${
-                        field.required && !isMatched ? 'border-red-300 bg-red-50' :
-                        isMatched ? 'border-green-200 bg-green-50' :
-                        'border-gray-200'
+                      className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 p-3 rounded-control border ${
+                        field.required && !isMatched ? 'border-bad-line bg-bad-bg' :
+                        isMatched ? 'border-ok bg-ok-bg' :
+                        'border-line'
                       }`}>
                       <div className="sm:w-48 flex-shrink-0">
                         <span className="text-sm font-medium">{field.label}</span>
-                        {field.required && <span className="text-red-500 ml-1">*</span>}
-                        <p className="text-xs text-gray-400">{field.key}</p>
+                        {field.required && <span className="text-bad-text ml-1">*</span>}
+                        <p className="text-xs text-faint">{field.key}</p>
                       </div>
-                      <svg className="w-5 h-5 text-gray-400 flex-shrink-0 hidden sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-5 h-5 text-faint flex-shrink-0 hidden sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                       </svg>
                       <select
@@ -412,8 +448,8 @@ export default function Import() {
                             return next;
                           });
                         }}
-                        className={`flex-1 px-3 py-2.5 sm:py-2 border rounded-lg text-base sm:text-sm ${
-                          isMatched ? 'border-green-300' : field.required ? 'border-red-300' : ''
+                        className={`flex-1 px-3 py-2.5 sm:py-2 border rounded-control text-base sm:text-sm ${
+                          isMatched ? 'border-green-300' : field.required ? 'border-bad-line' : ''
                         }`}
                       >
                         <option value="">-- Skip (don't import) --</option>
@@ -422,7 +458,7 @@ export default function Import() {
                         ))}
                       </select>
                       {isMatched && (
-                        <span className="text-green-600 text-sm flex-shrink-0">Matched</span>
+                        <span className="text-ok-text text-sm flex-shrink-0">Matched</span>
                       )}
                     </div>
                   );
@@ -430,14 +466,14 @@ export default function Import() {
               </div>
 
               {/* CSV headers reference */}
-              <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">Your CSV Headers</p>
+              <div className="bg-card-alt rounded-control p-4 mb-6">
+                <p className="text-xs font-medium text-muted mb-2 uppercase tracking-wide">Your CSV Headers</p>
                 <div className="flex flex-wrap gap-2">
                   {csvHeaders.map(h => {
                     const isUsed = Object.values(headerMap).includes(h);
                     return (
                       <span key={h} className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                        isUsed ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                        isUsed ? 'bg-ok-bg text-ok-text' : 'bg-line text-muted'
                       }`}>
                         {h} {isUsed ? '\u2713' : ''}
                       </span>
@@ -448,9 +484,9 @@ export default function Import() {
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <button onClick={() => { setStep(0); setError(''); }}
-                  className="px-4 py-2.5 border rounded-lg text-sm order-2 sm:order-1">Back</button>
+                  className="px-4 py-2.5 border rounded-control text-sm order-2 sm:order-1">Back</button>
                 <button onClick={handleConfirmHeaders}
-                  className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium order-1 sm:order-2">
+                  className="bg-amber text-white px-6 py-2.5 rounded-control hover:bg-amber-hover font-medium order-1 sm:order-2">
                   Confirm Mapping &amp; Preview
                 </button>
               </div>
@@ -459,19 +495,19 @@ export default function Import() {
 
           {/* Step 2: Preview & Import */}
           {step === 2 && (
-            <div className="bg-white rounded-xl border p-4 sm:p-6">
+            <div className="bg-white rounded-card border p-4 sm:p-6">
               <h2 className="text-lg font-semibold mb-2">Preview Import</h2>
-              <p className="text-sm text-gray-500 mb-4">
+              <p className="text-sm text-muted mb-4">
                 Showing first {Math.min(5, previewRows.length)} of {rowCount} rows with your header mapping applied.
               </p>
 
               <div className="overflow-x-auto mb-6">
                 <table className="text-sm w-full">
                   <thead>
-                    <tr className="bg-gray-50 border-b">
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">#</th>
+                    <tr className="bg-card-alt border-b">
+                      <th className="px-3 py-2 text-left text-xs font-medium text-muted">#</th>
                       {templateFields.filter(f => headerMap[f.key]).map(f => (
-                        <th key={f.key} className="px-3 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">
+                        <th key={f.key} className="px-3 py-2 text-left text-xs font-medium text-muted whitespace-nowrap">
                           {f.label}
                         </th>
                       ))}
@@ -480,10 +516,10 @@ export default function Import() {
                   <tbody>
                     {previewRows.map((row, i) => (
                       <tr key={i} className="border-b last:border-0">
-                        <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                        <td className="px-3 py-2 text-faint">{i + 1}</td>
                         {templateFields.filter(f => headerMap[f.key]).map(f => (
-                          <td key={f.key} className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                            {row[headerMap[f.key]] || <span className="text-gray-300">empty</span>}
+                          <td key={f.key} className="px-3 py-2 text-ink-2 whitespace-nowrap">
+                            {row[headerMap[f.key]] || <span className="text-faint">empty</span>}
                           </td>
                         ))}
                       </tr>
@@ -492,8 +528,8 @@ export default function Import() {
                 </table>
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                <p className="text-sm text-blue-800">
+              <div className="bg-info-bg border border-line rounded-control p-4 mb-6">
+                <p className="text-sm text-info-text">
                   Ready to import <strong>{rowCount}</strong> {importType === 'vendors' ? 'vendor(s)' : 'COI(s)'}.
                   {importType === 'vendors'
                     ? ' Duplicates (same email) will be skipped.'
@@ -502,14 +538,30 @@ export default function Import() {
               </div>
 
               {importType === 'cois' && (
-                <label className="flex items-start gap-3 mb-6 p-4 bg-white border rounded-lg cursor-pointer hover:bg-gray-50">
+                <label className="flex items-start gap-3 mb-6 p-4 bg-white border rounded-control cursor-pointer hover:bg-card-alt">
                   <input type="checkbox" checked={runComplianceCheck}
                     onChange={(e) => setRunComplianceCheck(e.target.checked)}
-                    className="rounded w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                    className="rounded w-5 h-5 text-navy mt-0.5 flex-shrink-0" />
                   <div>
-                    <span className="text-sm font-medium text-gray-900">Run compliance check during import</span>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <span className="text-sm font-medium text-ink">Run compliance check during import</span>
+                    <p className="text-xs text-muted mt-0.5">
                       Each COI will be checked against your organization's minimum coverage requirements.
+                    </p>
+                  </div>
+                </label>
+              )}
+
+              {importType === 'vendors' && (
+                <label className="flex items-start gap-3 mb-6 p-4 bg-card-alt border border-line rounded-control cursor-pointer">
+                  <input type="checkbox" checked={requestAfterImport}
+                    onChange={(e) => setRequestAfterImport(e.target.checked)}
+                    className="rounded-chip w-4 h-4 mt-0.5 flex-shrink-0 accent-navy" />
+                  <div>
+                    <span className="text-sm font-medium text-ink">
+                      After import, email all {rowCount} vendors a certificate request
+                    </span>
+                    <p className="text-xs text-muted mt-0.5">
+                      Vendors with no usable email address are skipped and flagged for you.
                     </p>
                   </div>
                 </label>
@@ -517,10 +569,10 @@ export default function Import() {
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <button onClick={() => { setStep(1); setError(''); }}
-                  className="px-4 py-2.5 border rounded-lg text-sm order-2 sm:order-1">Back</button>
+                  className="px-4 py-2.5 border border-line-strong rounded-control text-[13px] font-semibold text-navy order-2 sm:order-1">Back</button>
                 <button onClick={handleImport} disabled={importing}
-                  className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium order-1 sm:order-2">
-                  {importing ? 'Importing...' : `Import ${rowCount} ${importType === 'vendors' ? 'Vendor(s)' : 'COI(s)'}`}
+                  className="bg-amber text-white px-6 py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 text-[13px] font-semibold order-1 sm:order-2">
+                  {importing ? 'Importing...' : `Import ${rowCount} ${importType === 'vendors' ? 'vendors' : 'COIs'}`}
                 </button>
               </div>
             </div>
@@ -528,42 +580,71 @@ export default function Import() {
 
           {/* Step 3: Results */}
           {step === 3 && results && (
-            <div className="bg-white rounded-xl border p-4 sm:p-6">
-              <h2 className="text-lg font-semibold mb-4">Import Complete</h2>
+            <div className="bg-white rounded-card border border-line p-4 sm:p-6">
+              <h2 className="text-lg font-bold text-navy mb-4">Import complete</h2>
 
               <div className={`grid gap-4 mb-6 grid-cols-2 ${results.flagged > 0 ? 'sm:grid-cols-3' : ''}`}>
-                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                  <p className="text-2xl font-bold text-green-700">{results.created}</p>
-                  <p className="text-sm text-green-600">Imported</p>
+                <div className="bg-ok-bg p-4 rounded-control border border-ok">
+                  <p className="text-2xl font-bold text-ok-text">{results.created}</p>
+                  <p className="text-sm text-ok-text">Imported</p>
                 </div>
-                <div className={`p-4 rounded-lg border ${results.skipped > 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
-                  <p className={`text-2xl font-bold ${results.skipped > 0 ? 'text-yellow-700' : 'text-gray-400'}`}>{results.skipped}</p>
-                  <p className={`text-sm ${results.skipped > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>Skipped</p>
+                <div className={`p-4 rounded-control border ${results.skipped > 0 ? 'bg-warn-bg border-amber' : 'bg-card-alt border-line'}`}>
+                  <p className={`text-2xl font-bold ${results.skipped > 0 ? 'text-warn-text' : 'text-faint'}`}>{results.skipped}</p>
+                  <p className={`text-sm ${results.skipped > 0 ? 'text-yellow-600' : 'text-faint'}`}>Skipped</p>
                 </div>
                 {results.flagged > 0 && (
-                  <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 col-span-2 sm:col-span-1">
+                  <div className="bg-orange-50 p-4 rounded-control border border-orange-200 col-span-2 sm:col-span-1">
                     <p className="text-2xl font-bold text-orange-700">{results.flagged}</p>
                     <p className="text-sm text-orange-600">Flagged</p>
                   </div>
                 )}
               </div>
 
+              {importType === 'vendors' && requestAfterImport && results.created > 0 && (
+                <div className="mb-6 p-4 bg-card-alt border border-line rounded-control flex flex-col gap-2.5">
+                  {requestSummary ? (
+                    <span className="text-[13px] text-ink">{requestSummary}</span>
+                  ) : (
+                    <>
+                      <span className="text-[13px] text-ink">
+                        Ask the {results.created} imported vendors for a certificate now?
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={requestCertificates}
+                          disabled={requesting}
+                          className="bg-amber text-white px-4 py-2 rounded-control hover:bg-amber-hover disabled:opacity-50 text-[13px] font-semibold"
+                        >
+                          {requesting ? 'Sending…' : `Request from ${results.created} vendors`}
+                        </button>
+                        <button
+                          onClick={() => setRequestSummary('Skipped — you can request certificates any time from the Vendors page.')}
+                          className="px-4 py-2 border border-line-strong rounded-control text-[13px] font-semibold text-navy"
+                        >
+                          Not now
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               {results.errors.length > 0 && (
                 <div className="mb-6">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Skipped Rows</h3>
-                  <div className="bg-gray-50 rounded-lg border max-h-60 overflow-y-auto overflow-x-auto">
+                  <h3 className="text-sm font-medium text-ink-2 mb-2">Skipped Rows</h3>
+                  <div className="bg-card-alt rounded-control border max-h-60 overflow-y-auto overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Row</th>
-                          <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Reason</th>
+                          <th className="text-left px-4 py-2 text-xs font-medium text-muted">Row</th>
+                          <th className="text-left px-4 py-2 text-xs font-medium text-muted">Reason</th>
                         </tr>
                       </thead>
                       <tbody>
                         {results.errors.map((err, i) => (
                           <tr key={i} className="border-b last:border-0">
-                            <td className="px-4 py-2 text-gray-600">{err.row}</td>
-                            <td className="px-4 py-2 text-gray-600">{err.message}</td>
+                            <td className="px-4 py-2 text-muted">{err.row}</td>
+                            <td className="px-4 py-2 text-muted">{err.message}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -574,11 +655,11 @@ export default function Import() {
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <button onClick={reset}
-                  className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium">
+                  className="bg-amber text-white px-6 py-2.5 rounded-control hover:bg-amber-hover font-medium">
                   Import More
                 </button>
                 <a href={importType === 'vendors' ? '/vendors' : '/cois'}
-                  className="px-4 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-50 text-center">
+                  className="px-4 py-2.5 border rounded-control text-sm font-medium hover:bg-card-alt text-center">
                   View {importType === 'vendors' ? 'Vendors' : 'COIs'}
                 </a>
               </div>
@@ -589,24 +670,24 @@ export default function Import() {
 
       {/* COI PDF Bulk Import Flow */}
       {importType === 'coi-pdfs' && (
-        <div className="bg-white rounded-xl border p-4 sm:p-6">
+        <div className="bg-white rounded-card border p-4 sm:p-6">
           {error && (
-            <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-6 text-sm">{error}</div>
+            <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control mb-6 text-sm">{error}</div>
           )}
 
           <h2 className="text-lg font-semibold mb-2">Upload COI PDFs</h2>
-          <p className="text-sm text-gray-500 mb-6">
+          <p className="text-sm text-muted mb-6">
             Select a vendor, then drop one or more PDF files.
           </p>
 
           {/* Vendor selector */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Vendor</label>
+            <label className="block text-sm font-medium text-ink-2 mb-2">Vendor</label>
             <select
               value={selectedVendorId}
               onChange={(e) => setSelectedVendorId(e.target.value)}
-              className={`w-full px-3 py-2.5 border rounded-lg text-base sm:text-sm ${
-                !selectedVendorId ? 'border-gray-300' : 'border-green-300 bg-green-50'
+              className={`w-full px-3 py-2.5 border rounded-control text-base sm:text-sm ${
+                !selectedVendorId ? 'border-line-strong' : 'border-green-300 bg-ok-bg'
               }`}
               disabled={processingPdfs}
             >
@@ -630,47 +711,47 @@ export default function Import() {
             />
           </div>
           {!selectedVendorId && (
-            <p className="text-xs text-gray-400 mt-1">Select a vendor above to enable file upload.</p>
+            <p className="text-xs text-faint mt-1">Select a vendor above to enable file upload.</p>
           )}
 
           {/* File list */}
           {pdfFiles.length > 0 && (
             <div className="mt-6">
-              <h3 className="text-sm font-medium text-gray-700 mb-3">
+              <h3 className="text-sm font-medium text-ink-2 mb-3">
                 {pdfFiles.length} file(s) queued
               </h3>
               <div className="space-y-2">
                 {pdfFiles.map((pf, i) => (
-                  <div key={i} className={`flex items-center gap-3 sm:gap-4 px-3 sm:px-4 py-3 rounded-lg border ${
-                    pf.status === 'success' ? 'border-green-200 bg-green-50' :
-                    pf.status === 'error' ? 'border-red-200 bg-red-50' :
-                    pf.status === 'processing' ? 'border-blue-200 bg-blue-50' :
-                    'border-gray-200'
+                  <div key={i} className={`flex items-center gap-3 sm:gap-4 px-3 sm:px-4 py-3 rounded-control border ${
+                    pf.status === 'success' ? 'border-ok bg-ok-bg' :
+                    pf.status === 'error' ? 'border-bad-line bg-bad-bg' :
+                    pf.status === 'processing' ? 'border-line bg-info-bg' :
+                    'border-line'
                   }`}>
-                    <svg className="w-5 h-5 text-gray-400 flex-shrink-0 hidden sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-5 h-5 text-faint flex-shrink-0 hidden sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
 
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-700 truncate">{pf.file.name}</p>
-                      <p className="text-xs text-gray-400">{(pf.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <p className="text-sm font-medium text-ink-2 truncate">{pf.file.name}</p>
+                      <p className="text-xs text-faint">{(pf.file.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
 
                     <PdfStatusBadge status={pf.status} error={pf.error} />
 
                     {pf.status === 'error' && pf.error && (
-                      <span className="text-xs text-red-500 max-w-[120px] sm:max-w-[200px] truncate hidden sm:inline" title={pf.error}>{pf.error}</span>
+                      <span className="text-xs text-bad-text max-w-[120px] sm:max-w-[200px] truncate hidden sm:inline" title={pf.error}>{pf.error}</span>
                     )}
 
                     {pf.status === 'success' && pf.coiId && (
-                      <a href={`/cois/${pf.coiId}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">
+                      <a href={`/cois/${pf.coiId}`} className="text-xs text-navy hover:underline flex-shrink-0">
                         View COI
                       </a>
                     )}
 
                     {pf.status === 'pending' && (
-                      <button onClick={() => handleRemovePdf(i)} className="text-gray-400 hover:text-red-500 flex-shrink-0 p-1">
+                      <button onClick={() => handleRemovePdf(i)} className="text-faint hover:text-bad-text flex-shrink-0 p-1">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
@@ -683,13 +764,13 @@ export default function Import() {
               {/* Summary */}
               {pdfResults && (
                 <div className="mt-4 grid grid-cols-2 gap-4">
-                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                    <p className="text-2xl font-bold text-green-700">{pdfResults.success}</p>
-                    <p className="text-sm text-green-600">Processed</p>
+                  <div className="bg-ok-bg p-4 rounded-control border border-ok">
+                    <p className="text-2xl font-bold text-ok-text">{pdfResults.success}</p>
+                    <p className="text-sm text-ok-text">Processed</p>
                   </div>
-                  <div className={`p-4 rounded-lg border ${pdfResults.failed > 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
-                    <p className={`text-2xl font-bold ${pdfResults.failed > 0 ? 'text-red-700' : 'text-gray-400'}`}>{pdfResults.failed}</p>
-                    <p className={`text-sm ${pdfResults.failed > 0 ? 'text-red-600' : 'text-gray-400'}`}>Failed</p>
+                  <div className={`p-4 rounded-control border ${pdfResults.failed > 0 ? 'bg-bad-bg border-bad-line' : 'bg-card-alt border-line'}`}>
+                    <p className={`text-2xl font-bold ${pdfResults.failed > 0 ? 'text-bad-text' : 'text-faint'}`}>{pdfResults.failed}</p>
+                    <p className={`text-sm ${pdfResults.failed > 0 ? 'text-bad-text' : 'text-faint'}`}>Failed</p>
                   </div>
                 </div>
               )}
@@ -700,7 +781,7 @@ export default function Import() {
                   <button
                     onClick={handleProcessPdfs}
                     disabled={processingPdfs}
-                    className="bg-green-600 text-white px-6 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+                    className="bg-ok text-white px-6 py-2.5 rounded-control hover:bg-ok-text disabled:opacity-50 font-medium"
                   >
                     {processingPdfs ? 'Processing...' : `Process ${pdfFiles.filter(pf => pf.status === 'pending').length} PDF(s)`}
                   </button>
@@ -708,11 +789,11 @@ export default function Import() {
                 {pdfResults && (
                   <>
                     <button onClick={reset}
-                      className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-medium">
+                      className="bg-amber text-white px-6 py-2.5 rounded-control hover:bg-amber-hover font-medium">
                       Import More
                     </button>
                     <a href="/cois"
-                      className="px-4 py-2.5 border rounded-lg text-sm font-medium hover:bg-gray-50 text-center">
+                      className="px-4 py-2.5 border rounded-control text-sm font-medium hover:bg-card-alt text-center">
                       View COIs
                     </a>
                   </>
