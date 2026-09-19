@@ -101,6 +101,8 @@ export default function Vendors() {
         if (window.confirm('A COI request was already sent to this vendor in the last 24 hours. Send another anyway?')) {
           return handleRequestCoi(vendorId, true);
         }
+      } else if (msg.toLowerCase().includes('deliverable')) {
+        toast.error('No deliverable email on file — fix the vendor\'s address first');
       } else {
         toast.error('Failed to send request: ' + msg);
       }
@@ -131,14 +133,18 @@ export default function Vendors() {
     let sent = 0;
     let failed = 0;
     let skipped = 0;
+    let badEmail = 0;
     for (const vendorId of selected) {
       try {
         await api.post(`/vendors/${vendorId}/request-coi`);
         sent++;
       } catch (err) {
+        const reason = (err.message || '').toLowerCase();
         // Cooldown: vendor was already emailed in the last 24 hours.
-        if ((err.message || '').toLowerCase().includes('recently')) {
+        if (reason.includes('recently')) {
           skipped++;
+        } else if (reason.includes('deliverable')) {
+          badEmail++;
         } else {
           failed++;
         }
@@ -147,9 +153,10 @@ export default function Vendors() {
     setRequestingBulk(false);
     const parts = [`${sent} sent`];
     if (skipped > 0) parts.push(`${skipped} skipped (already requested in last 24h)`);
+    if (badEmail > 0) parts.push(`${badEmail} skipped (no deliverable email)`);
     if (failed > 0) parts.push(`${failed} failed`);
     const msg = `COI requests: ${parts.join(', ')}`;
-    if (failed > 0) toast.warning(msg);
+    if (failed > 0 || badEmail > 0) toast.warning(msg);
     else if (skipped > 0) toast.info ? toast.info(msg) : toast.success(msg);
     else toast.success(msg);
   };

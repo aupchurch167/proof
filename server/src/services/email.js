@@ -77,6 +77,56 @@ async function sendUploadRequestEmail(to, vendorName, portalUrl, org, cc) {
   );
 }
 
+// Follow-up for a vendor who never acted on the original upload request. The
+// copy escalates with each step so the third nudge doesn't read like the first.
+async function sendChaseEmail(to, vendorName, portalUrl, org, daysSinceRequest, cc) {
+  const orgName = org?.name || 'our company';
+  const orgEmail = org?.email || '';
+
+  const tone = daysSinceRequest >= 14
+    ? {
+        subject: `Final reminder: Certificate of Insurance still outstanding — ${orgName}`,
+        heading: 'Final Reminder: COI Still Outstanding',
+        lead: `We've reached out a few times about your Certificate of Insurance and haven't received it yet. Without a current COI on file, <strong>${orgName}</strong> cannot approve new work or release payment.`,
+      }
+    : daysSinceRequest >= 7
+      ? {
+          subject: `Second reminder: Certificate of Insurance needed — ${orgName}`,
+          heading: 'Second Reminder: COI Needed',
+          lead: `We still haven't received your Certificate of Insurance. Please upload it as soon as you can so your records with <strong>${orgName}</strong> stay current.`,
+        }
+      : {
+          subject: `Reminder: Certificate of Insurance needed — ${orgName}`,
+          heading: 'Reminder: COI Needed',
+          lead: `Just following up on our request for your Certificate of Insurance. It only takes a minute to upload.`,
+        };
+
+  await sendEmail(
+    to,
+    tone.subject,
+    `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;">
+       <h2 style="margin:0 0 16px;color:#111827;">${tone.heading}</h2>
+       <p style="color:#374151;font-size:14px;line-height:1.6;">Hello ${vendorName},</p>
+       <p style="color:#374151;font-size:14px;line-height:1.6;">${tone.lead}</p>
+       <p style="color:#6b7280;font-size:13px;">We first requested it ${daysSinceRequest} day(s) ago.</p>
+       <div style="text-align:center;margin:32px 0;">
+         <a href="${portalUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
+           Upload COI
+         </a>
+       </div>
+       <p style="color:#6b7280;font-size:13px;line-height:1.6;">
+         This link is unique to your company and requires no login. If you've already sent your COI another way, or if
+         this reached the wrong person, reply to this email${orgEmail ? ` or contact <a href="mailto:${orgEmail}">${orgName}</a>` : ''} and we'll get it sorted.
+       </p>
+       <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 16px;" />
+       <p style="font-size:12px;color:#9ca3af;text-align:center;">
+         Powered by <a href="https://proofcoi.com" style="color:#6b7280;text-decoration:none;font-weight:500;">Proof</a> &mdash; COI management for general contractors.
+       </p>
+     </div>`,
+    cc
+  );
+}
+
 async function sendUploadNotificationEmail(to, vendorName) {
   await sendEmail(
     to,
@@ -291,6 +341,7 @@ async function sendEmailVerificationEmail(to, verifyUrl) {
 module.exports = {
   sendEmail,
   sendUploadRequestEmail,
+  sendChaseEmail,
   sendUploadNotificationEmail,
   sendRejectionEmail,
   sendExpirationReminderEmail,

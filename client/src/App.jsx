@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Vendors from './pages/Vendors';
 import VendorDetail from './pages/VendorDetail';
 import Cois from './pages/Cois';
+import Compliance from './pages/Compliance';
 import CoiDetail from './pages/CoiDetail';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
@@ -55,6 +56,7 @@ export default function App() {
                 <Route path="/vendors" element={<Vendors />} />
                 <Route path="/vendors/:id" element={<VendorDetail />} />
                 <Route path="/cois" element={<Cois />} />
+                <Route path="/compliance" element={<Compliance />} />
                 <Route path="/cois/:id" element={<CoiDetail />} />
                 <Route path="/replies" element={<Replies />} />
                 <Route path="/settings" element={<Settings />} />

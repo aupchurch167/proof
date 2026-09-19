@@ -40,11 +40,28 @@
 - [ ] Export PDFs merges and downloads correctly
 - [ ] Export CSV downloads correctly
 
+## Compliance Cockpit
+
+- [ ] /compliance loads and opens on the first bucket with work in it
+- [ ] Bucket tiles switch the list and the counts match the rows shown
+- [ ] Each bucket is sorted most-urgent-first
+- [ ] Request COI from the cockpit sends and refreshes the list
+- [ ] Mark contacted removes the vendor from Ignored Requests
+- [ ] Vendors with a placeholder email show the "No valid email" badge and a disabled Request COI button
+- [ ] Escalated badge appears for requests ignored past the last follow-up day
+
 ## Notifications
 
 - [ ] Weekly compliance email sends on Monday
 - [ ] Invite user email sends correctly
 - [ ] Invited user can accept invite and set password
+- [ ] Expiration reminder fires for a COI already inside a window (e.g. 27 days out), not only on the exact day
+- [ ] Each reminder window sends at most once per COI
+- [ ] Non-responder follow-ups send at 3 / 7 / 14 days after a COI request
+- [ ] Uploading a COI stops the follow-ups
+- [ ] Sending a new COI request restarts the follow-up ladder
+- [ ] Reminder and follow-up emails carry a working portal link for vendors imported from Airtable
+- [ ] Follow-up days are editable in Settings and take effect
 
 ## Permissions
 

@@ -68,12 +68,37 @@ async function createTestCoi(vendorId, orgId, overrides = {}) {
   });
 }
 
+async function createTestNotification(orgId, vendorId, overrides = {}) {
+  return prisma.notificationLog.create({
+    data: {
+      orgId,
+      vendorId,
+      type: overrides.type || 'UPLOAD_REQUEST',
+      recipientEmail: overrides.recipientEmail || 'vendor@test.com',
+      status: overrides.status || 'SENT',
+      ...(overrides.sentAt && { sentAt: overrides.sentAt }),
+      ...(overrides.coiId && { coiId: overrides.coiId }),
+      ...(overrides.meta && { meta: overrides.meta }),
+    },
+  });
+}
+
+// Shift a date by whole days — tests express scenarios as "7 days ago".
+function daysAgo(n, from = new Date()) {
+  return new Date(from.getTime() - n * 24 * 60 * 60 * 1000);
+}
+
+function daysFromNow(n, from = new Date()) {
+  return new Date(from.getTime() + n * 24 * 60 * 60 * 1000);
+}
+
 function getAuthToken(user) {
   return generateAccessToken(user);
 }
 
 async function cleanupTestData() {
   // Delete in dependency order
+  await prisma.auditLog.deleteMany({});
   await prisma.notificationLog.deleteMany({});
   await prisma.coi.deleteMany({});
   await prisma.vendor.deleteMany({});
@@ -89,6 +114,9 @@ module.exports = {
   createTestUser,
   createTestVendor,
   createTestCoi,
+  createTestNotification,
+  daysAgo,
+  daysFromNow,
   getAuthToken,
   cleanupTestData,
 };
