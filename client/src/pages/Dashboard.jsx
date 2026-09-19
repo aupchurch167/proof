@@ -181,7 +181,9 @@ export default function Dashboard() {
               >
                 <Dot tone={q.tone} />
                 <div className="flex flex-col gap-0.5 min-w-0">
-                  <Link to={`/vendors/${q.id}`} className="text-sm font-semibold text-navy hover:text-amber truncate">
+                  {/* Wraps rather than truncating: at phone width the vendor's
+                      name is the one thing that must stay readable. */}
+                  <Link to={`/vendors/${q.id}`} className="text-sm font-semibold text-navy hover:text-amber">
                     {q.vendor}
                   </Link>
                   <span className="text-[13px] text-ink-2">{q.issue}</span>

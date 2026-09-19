@@ -5,13 +5,21 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { Button, Card, Eyebrow, EmptyState, PageTitle, StatusPill, Toggle } from '../components/ui';
 
+// Near dates read as days of the week; anything further out needs its month,
+// otherwise a list spanning months looks scrambled.
 const dayLabel = (iso) => {
   const d = new Date(`${iso}T00:00:00`);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  if (d.getTime() === today.getTime()) return 'Today';
-  return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' });
+  const days = Math.round((d - today) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  if (days < 7) return d.toLocaleDateString('en-US', { weekday: 'long' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
+
+const shortDate = (iso) =>
+  (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '');
 
 export default function Reminders() {
   const { user } = useAuth();
@@ -112,7 +120,9 @@ export default function Reminders() {
                     <Link to={`/vendors/${s.vendorId}`} className="font-semibold text-ink hover:text-amber truncate">
                       {s.vendorName}
                     </Link>
-                    <span className="text-xs text-muted truncate">{s.what}</span>
+                    <span className="text-xs text-muted truncate">
+                      {s.what}{s.expiresAt ? ` ${shortDate(s.expiresAt)}` : ''} · step {s.step} of {s.stepCount}
+                    </span>
                   </div>
                   <StatusPill tone={s.badEmail ? 'bad' : s.stage.tone}>
                     {s.badEmail ? 'No valid email' : s.stage.label}
@@ -192,9 +202,7 @@ export default function Reminders() {
                     <span className="font-semibold text-navy">
                       {d === 0 ? 'Day of expiry' : `${d} days before`}
                     </span>
-                    <span className="text-muted">
-                      {settings?.notifyOnUpload ? 'Vendor + agent' : 'Vendor'}
-                    </span>
+                    <span className="text-muted">Vendor · CC agent when known</span>
                   </div>
                 ))}
                 {data.chaseDays?.length > 0 && (

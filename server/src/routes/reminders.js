@@ -76,14 +76,22 @@ router.get('/upcoming', authenticate, async (req, res) => {
         );
         const pending = ordered.filter((w) => !sentWindows.has(w));
         if (pending.length > 0) {
+          // The next window whose day has already arrived, else the widest one
+          // still ahead of us.
           const target = pending.find((w) => days >= w) ?? pending[pending.length - 1];
           const sendsInDays = Math.max(0, days - target);
+          // Step number is this window's place in the ladder, so it can never
+          // disagree with the stage label beside it.
+          const step = ordered.indexOf(target) + 1;
           scheduled.push({
             vendorId: vendor.id,
             vendorName: vendor.name,
             badEmail,
             sendsAt: new Date(now.getTime() + sendsInDays * 86400000).toISOString().slice(0, 10),
-            what: `${latestApproved ? 'Coverage' : 'Certificate'} expires ${expiration.toISOString().slice(0, 10)} · step ${ordered.length - pending.length + 1} of ${ordered.length}`,
+            expiresAt: expiration.toISOString().slice(0, 10),
+            what: `${latestApproved ? 'Coverage' : 'Certificate'} expires`,
+            step,
+            stepCount: ordered.length,
             stage: stageFor(target, reminderDays),
             kind: 'expiration',
           });
@@ -106,15 +114,17 @@ router.get('/upcoming', authenticate, async (req, res) => {
           const nextStep = chaseDays.find((d) => !sentSteps.has(d));
           if (nextStep != null) {
             const sendsInDays = Math.max(0, nextStep - since);
+            const isLast = nextStep === chaseDays[chaseDays.length - 1];
             scheduled.push({
               vendorId: vendor.id,
               vendorName: vendor.name,
               badEmail,
               sendsAt: new Date(now.getTime() + sendsInDays * 86400000).toISOString().slice(0, 10),
-              what: `Certificate request · step ${chaseDays.indexOf(nextStep) + 1} of ${chaseDays.length}${nextStep === chaseDays[chaseDays.length - 1] ? ' — escalates to you' : ''}`,
-              stage: nextStep === chaseDays[chaseDays.length - 1]
-                ? { label: 'Final', tone: 'bad' }
-                : { label: `Day ${nextStep}`, tone: 'warn' },
+              expiresAt: null,
+              what: `Certificate requested ${since} day${since === 1 ? '' : 's'} ago${isLast ? ' — escalates to you' : ''}`,
+              step: chaseDays.indexOf(nextStep) + 1,
+              stepCount: chaseDays.length,
+              stage: isLast ? { label: 'Final', tone: 'bad' } : { label: `Day ${nextStep}`, tone: 'warn' },
               kind: 'chase',
             });
           } else if (shouldEscalateChase(since, chaseDays)) {

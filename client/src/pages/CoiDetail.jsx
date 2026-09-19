@@ -115,6 +115,7 @@ export default function CoiDetail() {
   const [org, setOrg] = useState(null);
   const [queue, setQueue] = useState([]);
   const [pdfUrl, setPdfUrl] = useState(null);
+  const [pdfError, setPdfError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -133,7 +134,9 @@ export default function CoiDetail() {
       setCoi(c);
       setSettings(s);
       setOrg(o);
-      api.get(`/cois/${id}/pdf`).then(({ url }) => setPdfUrl(url)).catch(() => {});
+      api.get(`/cois/${id}/pdf`)
+        .then(({ url }) => setPdfUrl(url))
+        .catch(() => setPdfError(true));
       if (inQueue) api.get('/cois?status=PENDING_REVIEW').then(setQueue).catch(() => {});
     } catch (err) {
       toast.error("Couldn't load this certificate");
@@ -244,7 +247,7 @@ export default function CoiDetail() {
           <span className="w-px h-[18px] bg-line" />
           <div className="flex flex-col min-w-0">
             <span className="text-base font-bold text-navy truncate">
-              {coi.vendor?.name} — {coi.vendor?.cois?.length > 1 ? 'renewal' : 'new'} certificate
+              {coi.vendor?.name} — {coi.isRenewal ? 'renewal' : 'new'} certificate
             </span>
             <span className="text-xs text-muted">
               Uploaded {day(coi.submittedAt)}
@@ -273,10 +276,12 @@ export default function CoiDetail() {
             />
           ) : (
             <div
-              className="w-full max-w-[620px] bg-white rounded flex items-center justify-center text-[13px] text-muted"
+              className="w-full max-w-[620px] bg-white rounded flex items-center justify-center px-8 text-center text-[13px] text-muted"
               style={{ aspectRatio: '8.5 / 11', boxShadow: '0 10px 40px rgba(15,32,66,.15)' }}
             >
-              Loading the certificate…
+              {pdfError
+                ? "The certificate file couldn't be loaded. What Proof read from it is still shown on the right."
+                : 'Loading the certificate…'}
             </div>
           )}
         </div>

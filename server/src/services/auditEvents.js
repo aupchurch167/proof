@@ -3,7 +3,7 @@
 // did) and NotificationLog rows (things Proof sent), because from an auditor's
 // point of view a reminder is as much an event as an approval.
 
-const EVENT_TYPES = ['Uploaded', 'Approved', 'Reminder', 'Rejected', 'Status', 'Edited', 'Template'];
+const EVENT_TYPES = ['Uploaded', 'Approved', 'Reminder', 'Rejected', 'Status', 'Edited'];
 
 const EVENT_TONE = {
   Uploaded: 'info',
@@ -12,7 +12,6 @@ const EVENT_TONE = {
   Rejected: 'bad',
   Status: 'bad',
   Edited: 'none',
-  Template: 'none',
 };
 
 // (entity, action) -> event type. Anything unmapped falls through as "Edited",
@@ -30,7 +29,7 @@ const ACTION_EVENT = {
   'vendor:delete': 'Status',
   'vendor:chase_escalated': 'Status',
   'vendor:mark_contacted': 'Reminder',
-  'settings:update': 'Template',
+  'settings:update': 'Edited',
   'user:change_role': 'Edited',
   'user:remove': 'Status',
 };
@@ -49,6 +48,41 @@ function eventTypeFor(entity, action) {
   return ACTION_EVENT[`${entity}:${action}`] || 'Edited';
 }
 
+// What a person would say happened. The audit log is read by people defending a
+// decision months later, so it has to read as English, not as a table row.
+const PHRASE = {
+  'coi:create': 'certificate uploaded',
+  'coi:upload': 'certificate uploaded',
+  'coi:approve': 'certificate approved',
+  'coi:reject': 'changes requested on certificate',
+  'coi:update': 'certificate values corrected',
+  'coi:reanalyze': 'certificate re-read by Proof',
+  'coi:delete': 'certificate deleted',
+  'vendor:create': 'vendor added',
+  'vendor:update': 'vendor details changed',
+  'vendor:delete': 'vendor removed',
+  'vendor:chase_escalated': 'escalated — no reply after every reminder',
+  'vendor:mark_contacted': 'marked as contacted',
+  'settings:update': 'requirement template changed',
+  'user:change_role': 'role changed',
+  'user:remove': 'removed from the team',
+};
+
+function phraseFor(entity, action) {
+  return PHRASE[`${entity}:${action}`] || `${action} ${entity}`;
+}
+
+// Notification types, said the way a person would.
+const NOTIFICATION_PHRASE = {
+  UPLOAD_REQUEST: 'certificate requested',
+  UPLOAD_CHASE: 'follow-up reminder sent',
+  EXPIRATION_REMINDER: 'expiry reminder sent',
+  COI_REJECTED: 'rejection emailed',
+  REVIEW_COMPLETE: 'approval emailed',
+  MANUAL_CONTACT: 'contacted outside Proof',
+  WEEKLY_SUMMARY: 'weekly summary sent',
+};
+
 // Which actor bucket the filter chips put an event in.
 function actorGroup(by) {
   if (by === 'Proof') return 'Proof (automatic)';
@@ -56,4 +90,12 @@ function actorGroup(by) {
   return 'Team';
 }
 
-module.exports = { EVENT_TYPES, EVENT_TONE, eventTypeFor, actorGroup, NOTIFICATION_EVENT };
+module.exports = {
+  EVENT_TYPES,
+  EVENT_TONE,
+  eventTypeFor,
+  phraseFor,
+  actorGroup,
+  NOTIFICATION_EVENT,
+  NOTIFICATION_PHRASE,
+};

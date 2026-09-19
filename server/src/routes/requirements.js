@@ -36,7 +36,19 @@ function toTemplate(settings, vendorCount) {
   };
 }
 
-const DEFAULT_PERIOD = { mode: 'Policy year', start: null, end: null, warnInPeriod: true, retainForPeriod: true };
+// An org that has never set a period still gets a sensible one: the current
+// policy year. Returning nulls here would show "Policy year" selected with
+// empty dates, which reads as broken.
+function defaultPeriod() {
+  const year = new Date().getFullYear();
+  return {
+    mode: 'Policy year',
+    start: `${year}-01-01`,
+    end: `${year}-12-31`,
+    warnInPeriod: true,
+    retainForPeriod: true,
+  };
+}
 
 // GET /api/requirements
 router.get('/', authenticate, async (req, res) => {
@@ -50,7 +62,7 @@ router.get('/', authenticate, async (req, res) => {
     res.json({
       orgName: org?.name || '',
       templates: [toTemplate(settings, vendorCount)],
-      coveragePeriod: { ...DEFAULT_PERIOD, ...(org?.coveragePeriod || {}) },
+      coveragePeriod: { ...defaultPeriod(), ...(org?.coveragePeriod || {}) },
       // Surfaced so the UI can say plainly why "New template" is unavailable
       // rather than offering a button that does nothing.
       multiTemplateSupported: false,
@@ -192,7 +204,7 @@ router.put('/coverage-period/set', authenticate, authorize('ADMIN'), async (req,
     }
 
     const coveragePeriod = {
-      ...DEFAULT_PERIOD,
+      ...defaultPeriod(),
       ...(mode !== undefined && { mode }),
       ...(start !== undefined && { start }),
       ...(end !== undefined && { end }),

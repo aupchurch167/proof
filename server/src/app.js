@@ -34,6 +34,8 @@ app.set('trust proxy', 1);
 // the SPA is served through this API. Extends helmet's defaults rather than
 // replacing them so the rest of the CSP hardening stays intact.
 const gsi = 'https://accounts.google.com/gsi/';
+const GOOGLE_FONTS_CSS = 'https://fonts.googleapis.com';
+const GOOGLE_FONTS_FILES = 'https://fonts.gstatic.com';
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -42,7 +44,10 @@ app.use(
         'script-src': ["'self'", `${gsi}client`],
         'connect-src': ["'self'", gsi],
         'frame-src': ["'self'", gsi],
-        'style-src': ["'self'", "'unsafe-inline'", `${gsi}style`],
+        // Manrope is the brand typeface; without these two the UI silently
+        // falls back to system-ui in production.
+        'style-src': ["'self'", "'unsafe-inline'", `${gsi}style`, GOOGLE_FONTS_CSS],
+        'font-src': ["'self'", 'data:', GOOGLE_FONTS_FILES],
       },
     },
   })

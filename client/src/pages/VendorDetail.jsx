@@ -50,9 +50,11 @@ function CoverageCard({ coverage, lastRequestAt }) {
         ${isMissing ? 'bg-bad-bg border-bad-line' : 'bg-white border-line'}`}
       style={{ borderTopWidth: '3px', borderTopColor: topBorder }}
     >
-      <div className={`flex justify-between gap-2 text-xs font-bold uppercase tracking-[0.05em] ${isMissing ? 'text-bad-text' : 'text-muted'}`}>
-        <span className="truncate">{coverage.label}</span>
-        <span className={isMissing ? '' : { ok: 'text-ok-text', warn: 'text-warn-text', bad: 'text-bad-text', none: 'text-muted' }[verdict.tone]}>
+      {/* Wraps rather than truncating: a long verdict like "Under limit" must
+          never cost the reader the name of the coverage it applies to. */}
+      <div className={`flex justify-between items-baseline gap-2 flex-wrap text-xs font-bold uppercase tracking-[0.05em] ${isMissing ? 'text-bad-text' : 'text-muted'}`}>
+        <span>{coverage.short || coverage.label}</span>
+        <span className={`whitespace-nowrap flex-none ${isMissing ? '' : { ok: 'text-ok-text', warn: 'text-warn-text', bad: 'text-bad-text', none: 'text-muted' }[verdict.tone]}`}>
           {verdict.label}
         </span>
       </div>

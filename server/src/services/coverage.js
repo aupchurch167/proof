@@ -10,10 +10,10 @@ const EXPIRING_SOON_DAYS = 30;
 // The four lines, with the COI column names and the settings key that carries
 // each one's required minimum.
 const COVERAGE_LINES = [
-  { key: 'gl', chip: 'GL', label: 'General liability', note: 'Per-occurrence limit', amount: 'glCoverageAmount', expiration: 'glExpirationDate', policy: 'glPolicyNumber', setting: 'minGeneralLiability' },
-  { key: 'auto', chip: 'Auto', label: 'Auto liability', note: 'Combined single limit', amount: 'autoCoverageAmount', expiration: 'autoExpirationDate', policy: 'autoPolicyNumber', setting: 'minAutomobile' },
-  { key: 'wc', chip: 'WC', label: "Workers' compensation", note: 'Each accident', amount: 'wcCoverageAmount', expiration: 'wcExpirationDate', policy: 'wcPolicyNumber', setting: 'minWorkersComp' },
-  { key: 'umb', chip: 'Umb', label: 'Umbrella / excess', note: 'Each occurrence', amount: 'umbCoverageAmount', expiration: 'umbExpirationDate', policy: 'umbPolicyNumber', setting: 'minUmbrella' },
+  { key: 'gl', chip: 'GL', label: 'General liability', short: 'General liability', note: 'Per-occurrence limit', amount: 'glCoverageAmount', expiration: 'glExpirationDate', policy: 'glPolicyNumber', setting: 'minGeneralLiability' },
+  { key: 'auto', chip: 'Auto', label: 'Auto liability', short: 'Auto', note: 'Combined single limit', amount: 'autoCoverageAmount', expiration: 'autoExpirationDate', policy: 'autoPolicyNumber', setting: 'minAutomobile' },
+  { key: 'wc', chip: 'WC', label: "Workers' compensation", short: "Workers' comp", note: 'Each accident', amount: 'wcCoverageAmount', expiration: 'wcExpirationDate', policy: 'wcPolicyNumber', setting: 'minWorkersComp' },
+  { key: 'umb', chip: 'Umb', label: 'Umbrella / excess', short: 'Umbrella', note: 'Each occurrence', amount: 'umbCoverageAmount', expiration: 'umbExpirationDate', policy: 'umbPolicyNumber', setting: 'minUmbrella' },
 ];
 
 // Coverage amounts live in cents; the contract and the UI talk whole dollars.
@@ -81,6 +81,7 @@ function coverageFor(coi, settings, { now = new Date() } = {}) {
       key: line.key,
       chip: line.chip,
       label: line.label,
+      short: line.short,
       note: line.note,
       verdict,
       tone: VERDICT_TONE[verdict],

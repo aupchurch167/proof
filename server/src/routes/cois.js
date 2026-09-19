@@ -108,7 +108,17 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'COI not found' });
     }
 
-    res.json(coi);
+    // Whether the reviewer is looking at this vendor's first certificate or a
+    // renewal — the review screen says so in its title.
+    const earlier = await prisma.coi.count({
+      where: {
+        vendorId: coi.vendorId,
+        status: 'APPROVED',
+        submittedAt: { lt: coi.submittedAt },
+      },
+    });
+
+    res.json({ ...coi, isRenewal: earlier > 0 });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get COI' });
   }

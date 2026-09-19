@@ -1,16 +1,19 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticate } = require('../middleware/auth');
-const { EVENT_TYPES, EVENT_TONE, eventTypeFor, actorGroup, NOTIFICATION_EVENT } = require('../services/auditEvents');
+const {
+  EVENT_TYPES, EVENT_TONE, eventTypeFor, phraseFor, actorGroup,
+  NOTIFICATION_EVENT, NOTIFICATION_PHRASE,
+} = require('../services/auditEvents');
 
 const router = express.Router();
 
 const RANGE_DAYS = { '7': 7, '30': 30, all: 36500 };
 
 function sentence(entity, action, details) {
-  const name = details?.vendorName || details?.name || details?.email || null;
-  const label = `${action} ${entity}`;
-  return name ? `${name} — ${label}` : label;
+  const name = details?.vendorName || details?.name || null;
+  const phrase = phraseFor(entity, action);
+  return name ? `${name} — ${phrase}` : phrase.charAt(0).toUpperCase() + phrase.slice(1);
 }
 
 // GET /api/audit — the event log, already filtered and counted.
@@ -25,12 +28,23 @@ router.get('/', authenticate, async (req, res) => {
     const since = new Date(Date.now() - days * 86400000);
     const q = String(search).trim().toLowerCase();
 
+    // Audit rows for a vendor's certificates carry the COI id, not the vendor
+    // id, so the vendor timeline has to match both.
+    let entityIds = null;
+    if (vendorId) {
+      const cois = await prisma.coi.findMany({
+        where: { vendorId, orgId: req.user.orgId },
+        select: { id: true },
+      });
+      entityIds = [vendorId, ...cois.map((c) => c.id)];
+    }
+
     const [auditRows, notificationRows] = await Promise.all([
       prisma.auditLog.findMany({
         where: {
           orgId: req.user.orgId,
           createdAt: { gte: since },
-          ...(vendorId && { entityId: vendorId }),
+          ...(entityIds && { entityId: { in: entityIds } }),
         },
         orderBy: { createdAt: 'desc' },
         take: 500,
@@ -69,7 +83,10 @@ router.get('/', authenticate, async (req, res) => {
         id: `n_${row.id}`,
         at: row.sentAt,
         type: NOTIFICATION_EVENT[row.type] || 'Reminder',
-        detail: `${row.vendor?.name || row.recipientEmail} — ${row.type.replace(/_/g, ' ').toLowerCase()}${row.status === 'FAILED' ? ' (not delivered)' : ''}`,
+        detail: `${row.vendor?.name || row.recipientEmail} — ${NOTIFICATION_PHRASE[row.type] || 'notification sent'}`
+          + (row.status === 'FAILED' ? ' (not delivered)' : '')
+          + (row.meta?.step ? ` · follow-up at day ${row.meta.step}` : '')
+          + (row.meta?.window != null ? ` · ${row.meta.window}-day notice` : ''),
         by: 'Proof',
         entity: 'vendor',
         entityId: row.vendorId,

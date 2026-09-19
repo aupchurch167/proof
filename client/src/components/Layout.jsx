@@ -44,22 +44,32 @@ export default function Layout({ children }) {
   const [plan, setPlan] = useState(null);
   const [portalToken, setPortalToken] = useState(null);
 
+  // Badges and the plan meter are ambient — a failure here must never take the
+  // shell down with it. They load once and refresh on a slow timer rather than
+  // on every navigation, which would otherwise add two requests to every click.
   useEffect(() => {
-    // Badges and the plan meter are ambient — a failure here must never take
-    // the shell down with it.
-    api.get('/reports/compliance')
-      .then((s) => setCounts({
-        gaps: (s.nonCompliant || 0) + (s.expired || 0),
-        review: s.pending || 0,
-      }))
-      .catch(() => {});
-    api.get('/organization/usage')
-      .then((u) => {
-        setPlan(u);
-        setPortalToken(u.portalPreviewToken);
-      })
-      .catch(() => {});
-  }, [location.pathname]);
+    let cancelled = false;
+
+    const load = () => {
+      api.get('/reports/compliance')
+        .then((s) => {
+          if (cancelled) return;
+          setCounts({ gaps: (s.nonCompliant || 0) + (s.expired || 0), review: s.pending || 0 });
+        })
+        .catch(() => {});
+      api.get('/organization/usage')
+        .then((u) => {
+          if (cancelled) return;
+          setPlan(u);
+          setPortalToken(u.portalPreviewToken);
+        })
+        .catch(() => {});
+    };
+
+    load();
+    const timer = setInterval(load, 120000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
 
   const isActive = (path) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
@@ -145,14 +155,16 @@ export default function Layout({ children }) {
               {initials(user?.firstName, user?.lastName)}
             </span>
             <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-[13px] font-semibold truncate">
+              <span className="text-[13px] font-semibold truncate" title={`${user?.firstName || ''} ${user?.lastName || ''}`}>
                 {user?.firstName} {user?.lastName}
               </span>
-              <span className="text-[11px] text-on-navy-4 capitalize">{(user?.role || '').toLowerCase()}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-on-navy-4 capitalize">{(user?.role || '').toLowerCase()}</span>
+                <button onClick={logout} className="text-[11px] text-on-navy-4 hover:text-white underline-offset-2 hover:underline">
+                  Log out
+                </button>
+              </div>
             </div>
-            <button onClick={logout} className="text-[11px] text-on-navy-4 hover:text-white" title="Log out">
-              Log out
-            </button>
           </div>
         </div>
       </aside>
