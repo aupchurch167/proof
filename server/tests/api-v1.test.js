@@ -1,5 +1,13 @@
+jest.mock('../src/services/storage', () => ({
+  uploadFile: jest.fn().mockResolvedValue('test/mock-file.pdf'),
+  getSignedUrl: jest.fn().mockResolvedValue('https://mock-signed-url.com/test.pdf'),
+  downloadFile: jest.fn().mockResolvedValue(Buffer.from('mock-pdf')),
+  deleteFile: jest.fn().mockResolvedValue(undefined),
+}));
+
 const request = require('supertest');
 const app = require('../src/app');
+const { getSignedUrl } = require('../src/services/storage');
 const { generateToken, hashToken, tokenPrefix } = require('../src/lib/apiTokens');
 const { ALL_SCOPES, SCOPES } = require('../src/middleware/apiAuth');
 const { prisma, createTestVendor, createTestCoi, cleanupTestData } = require('./setup');
@@ -224,6 +232,82 @@ describe('POST /vendors/:id/coi-requests', () => {
       .set(auth(tokenReadOnly))
       .send({});
     expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /vendors/:id/coi/document', () => {
+  it('returns a signed URL for the latest approved COI PDF', async () => {
+    const vendor = await createTestVendor(orgA.id, {
+      name: 'Doc Vendor',
+      email: `doc-${Date.now()}@apex.com`,
+    });
+    await createTestCoi(vendor.id, orgA.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/older.pdf',
+      submittedAt: new Date(Date.now() - DAY),
+    });
+    // Newer but not approved — must not win over the latest APPROVED row.
+    await createTestCoi(vendor.id, orgA.id, {
+      status: 'PENDING_REVIEW',
+      pdfPath: 'cois/pending.pdf',
+      submittedAt: new Date(),
+    });
+    const latest = await createTestCoi(vendor.id, orgA.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/latest-approved.pdf',
+      submittedAt: new Date(Date.now() - 60 * 1000),
+    });
+
+    getSignedUrl.mockClear();
+    const before = Date.now();
+    const res = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/vendors/${vendor.id}/coi/document`)
+      .set(auth(tokenReadOnly));
+
+    expect(res.status).toBe(200);
+    expect(getSignedUrl).toHaveBeenCalledWith('cois/latest-approved.pdf');
+    expect(res.body.data).toMatchObject({
+      url: 'https://mock-signed-url.com/test.pdf',
+      expiresInSeconds: 900,
+      contentType: 'application/pdf',
+      filename: 'latest-approved.pdf',
+      coiId: latest.id,
+    });
+    const expiresAtMs = new Date(res.body.data.expiresAt).getTime();
+    expect(expiresAtMs).toBeGreaterThanOrEqual(before + 900 * 1000);
+    expect(expiresAtMs).toBeLessThanOrEqual(Date.now() + 900 * 1000);
+  });
+
+  it('404 when the vendor is missing', async () => {
+    const res = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/vendors/00000000-0000-0000-0000-000000000000/coi/document`)
+      .set(auth(tokenA));
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('vendor_not_found');
+  });
+
+  it('404 when there is no approved COI with a pdfPath', async () => {
+    const noDoc = await createTestVendor(orgA.id, {
+      name: 'No Doc Vendor',
+      email: `nodoc-${Date.now()}@apex.com`,
+    });
+    const emptyPdf = await createTestVendor(orgA.id, {
+      name: 'Empty PDF Vendor',
+      email: `emptypdf-${Date.now()}@apex.com`,
+    });
+    await createTestCoi(emptyPdf.id, orgA.id, { status: 'APPROVED', pdfPath: '' });
+
+    const missing = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/vendors/${noDoc.id}/coi/document`)
+      .set(auth(tokenA));
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('coi_document_not_found');
+
+    const empty = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/vendors/${emptyPdf.id}/coi/document`)
+      .set(auth(tokenA));
+    expect(empty.status).toBe(404);
+    expect(empty.body.error.code).toBe('coi_document_not_found');
   });
 });
 
