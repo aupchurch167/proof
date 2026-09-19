@@ -1,427 +1,389 @@
-import { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
+import { COVERAGES } from '../constants/status';
+import { Button, StatusPill, Eyebrow } from '../components/ui';
 
-function formatCurrency(cents) {
-  if (cents == null) return 'N/A';
-  return `$${(cents / 100).toLocaleString()}`;
-}
+const VERDICT_TONE = { Meets: 'ok', Expiring: 'warn', 'Under limit': 'bad', Missing: 'bad', Expired: 'bad', 'Not required': 'none' };
 
-function formatDate(d) {
-  if (!d) return 'N/A';
-  return new Date(d).toLocaleDateString();
+const money = (cents) => (cents == null ? null : `$${Math.round(cents / 100).toLocaleString()}`);
+const shortMoney = (cents) => {
+  if (cents == null) return null;
+  const d = Math.round(cents / 100);
+  if (d >= 1000000) return `$${(d / 1000000).toString().replace(/\.0$/, '')}M`;
+  if (d >= 1000) return `$${Math.round(d / 1000)}K`;
+  return `$${d}`;
+};
+const day = (d) => (d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
+
+// One coverage row in the read-out. Limits and dates are click-to-edit so a
+// misread value can be corrected without leaving the screen.
+function ExtractedRow({ line, coi, required, onSave, canEdit }) {
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState('');
+
+  const amount = coi[`${line.key}CoverageAmount`];
+  const expires = coi[`${line.key}ExpirationDate`];
+
+  let verdict;
+  if (!required) verdict = 'Not required';
+  else if (amount == null && !expires) verdict = 'Missing';
+  else if (expires && new Date(expires) < new Date()) verdict = 'Expired';
+  else if (amount == null || amount < required) verdict = 'Under limit';
+  else verdict = 'Meets';
+
+  const begin = (field, value) => {
+    if (!canEdit) return;
+    setEditing(field);
+    setDraft(field === 'amount' ? (amount == null ? '' : String(Math.round(amount / 100))) : (expires ? new Date(expires).toISOString().slice(0, 10) : ''));
+  };
+
+  const commit = async () => {
+    const field = editing;
+    setEditing(null);
+    if (field === 'amount') {
+      const dollars = Number(draft);
+      if (draft !== '' && !Number.isFinite(dollars)) return;
+      await onSave({ [`${line.key}CoverageAmount`]: draft === '' ? null : Math.round(dollars * 100) });
+    } else {
+      await onSave({ [`${line.key}ExpirationDate`]: draft || null });
+    }
+  };
+
+  const cell = (label, node) => (
+    <div className="flex flex-col gap-px min-w-0">
+      <span className="text-faint text-[10px] uppercase tracking-[0.05em]">{label}</span>
+      {node}
+    </div>
+  );
+
+  const editable = 'text-ink font-semibold text-left hover:text-amber truncate';
+
+  return (
+    <div className="px-[22px] py-3.5 border-b border-line-divider flex flex-col gap-1.5">
+      <div className="flex justify-between items-center gap-2.5">
+        <span className="text-[13px] font-bold text-navy">{line.label}</span>
+        <StatusPill tone={VERDICT_TONE[verdict]}>{verdict}</StatusPill>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        {cell('Limit', editing === 'amount' ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(null); }}
+            className="w-full px-1 py-0.5 border border-amber rounded-chip text-xs bg-amber-bg focus:outline-none"
+          />
+        ) : (
+          <button type="button" onClick={() => begin('amount')} className={editable} disabled={!canEdit}>
+            {money(amount) || '—'}
+          </button>
+        ))}
+        {cell('Required', <span className="text-ink-2">{required ? shortMoney(required) : 'Not required'}</span>)}
+        {cell('Expires', editing === 'expires' ? (
+          <input
+            autoFocus
+            type="date"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(null); }}
+            className="w-full px-1 py-0.5 border border-amber rounded-chip text-xs bg-amber-bg focus:outline-none"
+          />
+        ) : (
+          <button type="button" onClick={() => begin('expires')} className={`${editable} text-ink-2 !font-normal`} disabled={!canEdit}>
+            {expires ? day(expires) : '—'}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function CoiDetail() {
   const { id } = useParams();
-  const { user } = useAuth();
-  const toast = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const queueMode = searchParams.get('queue') === 'pending';
+  const { user } = useAuth();
+  const toast = useToast();
+
   const [coi, setCoi] = useState(null);
+  const [settings, setSettings] = useState(null);
+  const [org, setOrg] = useState(null);
+  const [queue, setQueue] = useState([]);
+  const [pdfUrl, setPdfUrl] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const [showReject, setShowReject] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [reanalyzing, setReanalyzing] = useState(false);
-  const [queueCount, setQueueCount] = useState(null);
 
-  useEffect(() => {
-    api.get(`/cois/${id}`)
-      .then((c) => { setCoi(c); setForm(c); })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [id]);
+  const inQueue = searchParams.get('queue') === 'pending';
+  const canReview = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
 
-  useEffect(() => {
-    if (!queueMode) return;
-    api.get('/cois?status=PENDING_REVIEW')
-      .then((rows) => setQueueCount(rows.length))
-      .catch(console.error);
-  }, [queueMode, id]);
-
-  async function advanceQueue() {
+  const load = useCallback(async () => {
     try {
-      const rows = await api.get('/cois?status=PENDING_REVIEW');
-      const next = rows.find((c) => c.id !== id);
-      if (next) {
-        navigate(`/cois/${next.id}?queue=pending`);
-      } else {
-        toast.success('All pending COIs reviewed!');
-        navigate('/cois?status=PENDING_REVIEW');
-      }
+      const [c, s, o] = await Promise.all([
+        api.get(`/cois/${id}`),
+        api.get('/settings').catch(() => null),
+        api.get('/organization').catch(() => null),
+      ]);
+      setCoi(c);
+      setSettings(s);
+      setOrg(o);
+      api.get(`/cois/${id}/pdf`).then(({ url }) => setPdfUrl(url)).catch(() => {});
+      if (inQueue) api.get('/cois?status=PENDING_REVIEW').then(setQueue).catch(() => {});
     } catch (err) {
-      toast.error('Could not load next pending COI');
+      toast.error("Couldn't load this certificate");
+    } finally {
+      setLoading(false);
     }
-  }
+  }, [id, inQueue]);
 
-  // The form holds the full COI object, but the update endpoint only accepts
-  // these editable fields — send just those so we don't ship id/vendor/etc.
-  const EDITABLE_COI_FIELDS = [
-    'coverageType',
-    'glPolicyNumber', 'glCoverageAmount', 'glExpirationDate',
-    'wcPolicyNumber', 'wcCoverageAmount', 'wcExpirationDate',
-    'umbPolicyNumber', 'umbCoverageAmount', 'umbExpirationDate',
-    'autoPolicyNumber', 'autoCoverageAmount', 'autoExpirationDate',
-    'agentName', 'agentEmail', 'agentPhone', 'insuranceCompany',
-    'certificateHolderName', 'certificateHolderAddress',
-  ];
+  useEffect(() => { load(); }, [load]);
 
-  const handleSave = async () => {
+  const saveField = async (patch) => {
     try {
-      const payload = {};
-      for (const f of EDITABLE_COI_FIELDS) {
-        if (form[f] !== undefined) payload[f] = form[f];
-      }
-      const updated = await api.put(`/cois/${id}`, payload);
-      setCoi({ ...coi, ...updated });
-      setEditing(false);
-      toast.success('Changes saved');
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
-
-  const handleReanalyze = async () => {
-    setReanalyzing(true);
-    try {
-      const updated = await api.post(`/cois/${id}/reanalyze`);
+      const updated = await api.put(`/cois/${id}`, patch);
       setCoi(updated);
-      setForm(updated);
-      toast.success('COI re-analyzed');
-    } catch (err) {
-      toast.error(`Re-analysis failed: ${err.message}`);
-    } finally {
-      setReanalyzing(false);
-    }
-  };
-
-  const handleApprove = async () => {
-    try {
-      const updated = await api.post(`/cois/${id}/approve`);
-      setCoi({ ...coi, ...updated, status: 'APPROVED' });
-      toast.success('COI approved');
-      if (queueMode) await advanceQueue();
+      toast.success('Corrected');
     } catch (err) {
       toast.error(err.message);
     }
   };
 
-  const handleReject = async () => {
-    if (!rejectReason.trim()) return toast.warning('Please provide a reason');
+  // Approve/reject walk the queue rather than dumping the reviewer back to a list.
+  const advance = () => {
+    const next = queue.find((c) => c.id !== id);
+    if (inQueue && next) navigate(`/cois/${next.id}?queue=pending`);
+    else navigate('/cois');
+  };
+
+  const approve = async () => {
+    setBusy(true);
     try {
-      const updated = await api.post(`/cois/${id}/reject`, { reason: rejectReason });
-      setCoi({ ...coi, ...updated, status: 'REJECTED' });
-      setShowReject(false);
-      setRejectReason('');
-      toast.success('COI rejected');
-      if (queueMode) await advanceQueue();
+      await api.post(`/cois/${id}/approve`);
+      toast.success('Approved');
+      advance();
     } catch (err) {
       toast.error(err.message);
-    }
-  };
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      await api.delete(`/cois/${id}`);
-      navigate(`/vendors/${coi.vendor?.id}`);
     } finally {
-      setDeleting(false);
+      setBusy(false);
     }
   };
 
-  const canReview = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role) && coi?.status === 'PENDING_REVIEW';
+  const reject = async () => {
+    if (!rejectReason.trim()) return;
+    setBusy(true);
+    try {
+      await api.post(`/cois/${id}/reject`, { reason: rejectReason });
+      toast.success('Changes requested — the vendor and their agent have been emailed');
+      advance();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+      setRejecting(false);
+    }
+  };
 
-  if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
-  if (!coi) return <div className="text-center py-12 text-gray-500">COI not found</div>;
+  // A / R shortcuts, but never while the reviewer is typing a reason.
+  useEffect(() => {
+    if (!canReview || !coi || coi.status !== 'PENDING_REVIEW') return;
+    const onKey = (e) => {
+      if (e.target.matches('input, textarea, select')) return;
+      if (e.key.toLowerCase() === 'a') approve();
+      if (e.key.toLowerCase() === 'r') setRejecting(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canReview, coi, queue]);
 
-  const coverageRows = [
-    { label: 'General Liability', policy: 'glPolicyNumber', amount: 'glCoverageAmount', date: 'glExpirationDate' },
-    { label: 'Workers Comp', policy: 'wcPolicyNumber', amount: 'wcCoverageAmount', date: 'wcExpirationDate' },
-    { label: 'Umbrella', policy: 'umbPolicyNumber', amount: 'umbCoverageAmount', date: 'umbExpirationDate' },
-    { label: 'Automobile', policy: 'autoPolicyNumber', amount: 'autoCoverageAmount', date: 'autoExpirationDate' },
-  ];
+  if (loading) return <div className="p-9 text-[13px] text-muted">Loading…</div>;
+  if (!coi) return <div className="p-9 text-[13px] text-muted">Certificate not found.</div>;
+
+  const requiredFor = (key) => {
+    const map = { gl: 'minGeneralLiability', auto: 'minAutomobile', wc: 'minWorkersComp', umb: 'minUmbrella' };
+    const value = settings?.[map[key]];
+    return value > 0 ? value : null;
+  };
+
+  const problems = COVERAGES.map((line) => {
+    const required = requiredFor(line.key);
+    if (!required) return null;
+    const amount = coi[`${line.key}CoverageAmount`];
+    const expires = coi[`${line.key}ExpirationDate`];
+    if (amount == null && !expires) return `${line.label} is not on the certificate`;
+    if (expires && new Date(expires) < new Date()) return `${line.label} expired ${day(expires)}`;
+    if (amount == null || amount < required) return `${line.label} is ${money(amount) || 'unstated'}; you require ${shortMoney(required)}`;
+    return null;
+  }).filter(Boolean);
+
+  const holderMatches = !org?.name || !coi.certificateHolderName
+    ? null
+    : coi.certificateHolderName.toLowerCase().includes(org.name.toLowerCase())
+      || org.name.toLowerCase().includes(coi.certificateHolderName.toLowerCase());
+
+  const coverThrough = COVERAGES
+    .map((l) => coi[`${l.key}ExpirationDate`])
+    .filter(Boolean)
+    .sort()[0];
+
+  const isPending = coi.status === 'PENDING_REVIEW';
+  const queuePosition = queue.findIndex((c) => c.id === id);
 
   return (
-    <div>
-      <Link to="/cois?status=PENDING_REVIEW" className="text-sm text-blue-600 hover:underline mb-4 inline-block">
-        {queueMode ? '← Back to pending reviews' : 'Back to COIs'}
-      </Link>
+    <div className="flex flex-col flex-1 min-h-screen">
+      <div className="px-9 py-[18px] bg-white border-b border-line flex justify-between items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <Link to={inQueue ? '/' : '/cois'} className="text-[13px] text-muted hover:text-navy whitespace-nowrap">
+            ← {inQueue ? 'Dashboard' : 'Certificates'}
+          </Link>
+          <span className="w-px h-[18px] bg-line" />
+          <div className="flex flex-col min-w-0">
+            <span className="text-base font-bold text-navy truncate">
+              {coi.vendor?.name} — {coi.vendor?.cois?.length > 1 ? 'renewal' : 'new'} certificate
+            </span>
+            <span className="text-xs text-muted">
+              Uploaded {day(coi.submittedAt)}
+              {coi.aiExtractedData ? ' · read by Proof' : ' · not yet read'}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2.5">
+          {inQueue && queue.length > 0 && (
+            <span className="text-xs text-muted whitespace-nowrap">
+              {queuePosition >= 0 ? queuePosition + 1 : 1} of {queue.length} in queue
+            </span>
+          )}
+          {inQueue && queue.length > 1 && <Button size="sm" onClick={advance}>Skip →</Button>}
+        </div>
+      </div>
 
-      {queueMode && queueCount !== null && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <p className="text-sm text-blue-900">
-            Reviewing pending COIs — <strong>{queueCount}</strong> remaining
-          </p>
-          {canReview && (
-            <button
-              onClick={advanceQueue}
-              className="text-sm text-blue-700 hover:underline self-start sm:self-auto"
+      <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_440px]">
+        <div className="bg-warm p-7 flex items-start justify-center min-h-[400px]">
+          {pdfUrl ? (
+            <iframe
+              title="Certificate"
+              src={pdfUrl}
+              className="w-full max-w-[620px] bg-white rounded border-0"
+              style={{ aspectRatio: '8.5 / 11', boxShadow: '0 10px 40px rgba(15,32,66,.15)' }}
+            />
+          ) : (
+            <div
+              className="w-full max-w-[620px] bg-white rounded flex items-center justify-center text-[13px] text-muted"
+              style={{ aspectRatio: '8.5 / 11', boxShadow: '0 10px 40px rgba(15,32,66,.15)' }}
             >
-              Skip to next →
-            </button>
+              Loading the certificate…
+            </div>
           )}
         </div>
-      )}
 
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-6">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold">COI Detail</h1>
-          <p className="text-gray-600">
-            Vendor: <Link to={`/vendors/${coi.vendor?.id}`} className="text-blue-600 hover:underline">
-              {coi.vendor?.name}
-            </Link>
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {coi.pdfPath && (
-            <button
-              onClick={async () => {
-                const { url } = await api.get(`/cois/${coi.id}/pdf`);
-                window.open(url, '_blank');
-              }}
-              className="text-sm text-blue-600 hover:underline py-1">View PDF</button>
-          )}
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-            coi.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-            coi.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-            coi.status === 'PENDING_REVIEW' ? 'bg-blue-100 text-blue-800' :
-            'bg-gray-100 text-gray-800'
-          }`}>
-            {coi.status.replace('_', ' ')}
-          </span>
-        </div>
-      </div>
+        <div className="bg-white border-l border-line flex flex-col">
+          <div className="px-[22px] py-[18px] border-b border-line-divider flex flex-col gap-1.5">
+            <Eyebrow tone="amber" dot>What Proof read</Eyebrow>
+            <span className="text-[13px] text-ink-2 leading-[1.5]">
+              Compared against your <b className="text-navy">Default</b> requirement template.
+              {canReview && ' Click any value to correct it.'}
+            </span>
+          </div>
 
-      {/* Compliance flags */}
-      {coi.complianceFlags && coi.complianceFlags.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
-          <h3 className="font-semibold text-yellow-800 mb-2">Compliance Issues</h3>
-          <ul className="space-y-1">
-            {coi.complianceFlags.map((flag, i) => (
-              <li key={i} className="text-sm text-yellow-700">{flag.message}</li>
+          <div className="flex-1 overflow-auto">
+            {COVERAGES.map((line) => (
+              <ExtractedRow
+                key={line.key}
+                line={line}
+                coi={coi}
+                required={requiredFor(line.key)}
+                onSave={saveField}
+                canEdit={canReview}
+              />
             ))}
-          </ul>
-        </div>
-      )}
 
-      {/* Coverage — Desktop table */}
-      <div className="hidden sm:block bg-white rounded-xl border mb-6 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 border-b">
-              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Coverage Type</th>
-              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Policy Number</th>
-              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Coverage Amount</th>
-              <th className="text-left px-4 sm:px-6 py-3 font-medium text-gray-600">Expiration Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {coverageRows.map((row) => (
-              <tr key={row.label} className="border-b last:border-0">
-                <td className="px-4 sm:px-6 py-4 font-medium">{row.label}</td>
-                <td className="px-4 sm:px-6 py-4 text-gray-600">
-                  {editing ? (
-                    <input value={form[row.policy] || ''} onChange={(e) => setForm({ ...form, [row.policy]: e.target.value })}
-                      className="px-2 py-1.5 border rounded w-full text-sm" />
-                  ) : coi[row.policy] || 'N/A'}
-                </td>
-                <td className="px-4 sm:px-6 py-4 text-gray-600">
-                  {editing ? (
-                    <input type="number" value={form[row.amount] || ''} onChange={(e) => setForm({ ...form, [row.amount]: parseInt(e.target.value) || null })}
-                      className="px-2 py-1.5 border rounded w-full text-sm" placeholder="Amount in cents" />
-                  ) : formatCurrency(coi[row.amount])}
-                </td>
-                <td className="px-4 sm:px-6 py-4 text-gray-600">
-                  {editing ? (
-                    <input type="date" value={form[row.date]?.split('T')[0] || ''} onChange={(e) => setForm({ ...form, [row.date]: e.target.value })}
-                      className="px-2 py-1.5 border rounded text-sm" />
-                  ) : formatDate(coi[row.date])}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Coverage — Mobile cards */}
-      <div className="sm:hidden space-y-3 mb-6">
-        {coverageRows.map((row) => (
-          <div key={row.label} className="bg-white rounded-xl border p-4">
-            <p className="font-medium mb-2">{row.label}</p>
-            {editing ? (
-              <div className="space-y-2">
-                <div>
-                  <label className="text-xs text-gray-500">Policy Number</label>
-                  <input value={form[row.policy] || ''} onChange={(e) => setForm({ ...form, [row.policy]: e.target.value })}
-                    className="w-full px-3 py-2.5 border rounded-lg text-base" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Amount (cents)</label>
-                  <input type="number" value={form[row.amount] || ''} onChange={(e) => setForm({ ...form, [row.amount]: parseInt(e.target.value) || null })}
-                    className="w-full px-3 py-2.5 border rounded-lg text-base" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Expiration</label>
-                  <input type="date" value={form[row.date]?.split('T')[0] || ''} onChange={(e) => setForm({ ...form, [row.date]: e.target.value })}
-                    className="w-full px-3 py-2.5 border rounded-lg text-base" />
-                </div>
+            <div className="px-[22px] py-3.5 border-b border-line-divider flex flex-col gap-1.5">
+              <div className="flex justify-between items-center gap-2.5">
+                <span className="text-[13px] font-bold text-navy">Certificate holder</span>
+                {holderMatches === null ? (
+                  <StatusPill tone="none">Not stated</StatusPill>
+                ) : (
+                  <StatusPill tone={holderMatches ? 'ok' : 'bad'}>{holderMatches ? 'Matches' : 'Mismatch'}</StatusPill>
+                )}
               </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-2 text-sm">
-                <div>
-                  <p className="text-xs text-gray-400">Policy</p>
-                  <p className="text-gray-600">{coi[row.policy] || 'N/A'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Amount</p>
-                  <p className="text-gray-600">{formatCurrency(coi[row.amount])}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Expires</p>
-                  <p className="text-gray-600">{formatDate(coi[row.date])}</p>
-                </div>
+              <span className="text-xs text-ink-2">
+                {coi.certificateHolderName || 'No certificate holder on the document'}
+              </span>
+              {holderMatches === false && (
+                <span className="text-xs text-bad-text">Expected: {org?.name}</span>
+              )}
+            </div>
+
+            {(coi.agentName || coi.agentEmail || coi.insuranceCompany) && (
+              <div className="px-[22px] py-3.5 flex flex-col gap-1 text-xs text-ink-2">
+                <span className="text-[10px] uppercase tracking-[0.05em] text-faint">Agent</span>
+                <span>{[coi.agentName, coi.insuranceCompany, coi.agentEmail].filter(Boolean).join(' · ')}</span>
               </div>
             )}
           </div>
-        ))}
-      </div>
 
-      {/* Certificate Holder / Additionally Insured */}
-      <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
-        <h3 className="font-semibold mb-3">Certificate Holder / Additionally Insured</h3>
-        {coi.certificateHolderName ? (
-          <div className="space-y-3">
-            <div className="text-sm">
-              <span className="text-gray-500">Name:</span> {coi.certificateHolderName}
-            </div>
-            {coi.certificateHolderAddress && (
-              <div className="text-sm">
-                <span className="text-gray-500">Address:</span> {coi.certificateHolderAddress}
-              </div>
-            )}
-            {(() => {
-              const orgName = coi.organization?.name;
-              if (!orgName) return null;
-              const holderNorm = coi.certificateHolderName.toLowerCase().trim();
-              const orgNorm = orgName.toLowerCase().trim();
-              const isMatch = holderNorm.includes(orgNorm) || orgNorm.includes(holderNorm);
-              return isMatch ? (
-                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                  ✓ Additionally Insured Verified
-                </span>
-              ) : (
-                <div>
-                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                    ⚠ Additionally Insured Mismatch
+          {canReview && isPending && (
+            <div className="px-[22px] py-4 border-t border-line bg-card-alt flex flex-col gap-2.5">
+              {problems.length === 0 ? (
+                <div className="flex gap-2.5 items-start px-3 py-2.5 bg-ok-bg rounded-control text-[13px] text-ok-text leading-[1.45]">
+                  <span className="font-extrabold">✓</span>
+                  <span>
+                    All required coverage meets your template. Approving marks{' '}
+                    <b>{coi.vendor?.name}</b> covered{coverThrough ? ` through ${day(coverThrough)}` : ''}.
                   </span>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Expected: {orgName}
-                  </p>
                 </div>
-              );
-            })()}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-400">Not extracted</p>
-        )}
-      </div>
+              ) : (
+                <div className="flex gap-2.5 items-start px-3 py-2.5 bg-bad-bg rounded-control text-[13px] text-bad-text leading-[1.45]">
+                  <span className="font-extrabold">!</span>
+                  <div className="flex flex-col gap-1">
+                    {problems.map((p, i) => <span key={i}>{p}</span>)}
+                  </div>
+                </div>
+              )}
 
-      {/* Agent info */}
-      <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
-        <h3 className="font-semibold mb-3">Insurance Agent</h3>
-        <div className="grid sm:grid-cols-2 gap-3 text-sm">
-          <div>
-            <span className="text-gray-500">Name:</span> {coi.agentName || 'N/A'}
-          </div>
-          <div>
-            <span className="text-gray-500">Email:</span> <span className="break-all">{coi.agentEmail || 'N/A'}</span>
-          </div>
-          <div>
-            <span className="text-gray-500">Phone:</span> {coi.agentPhone || 'N/A'}
-          </div>
-          <div>
-            <span className="text-gray-500">Company:</span> {coi.insuranceCompany || 'N/A'}
-          </div>
-        </div>
-      </div>
-
-      {/* Review info */}
-      {coi.reviewedBy && (
-        <div className="bg-white rounded-xl border p-4 sm:p-6 mb-6">
-          <h3 className="font-semibold mb-3">Review</h3>
-          <div className="text-sm space-y-1">
-            <p><span className="text-gray-500">Reviewed by:</span> {coi.reviewedBy.firstName} {coi.reviewedBy.lastName}</p>
-            <p><span className="text-gray-500">Reviewed at:</span> {coi.reviewedAt ? new Date(coi.reviewedAt).toLocaleString() : 'N/A'}</p>
-            {coi.reviewNotes && <p><span className="text-gray-500">Notes:</span> {coi.reviewNotes}</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2 sm:gap-3">
-        {['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role) && !editing && (
-          <button onClick={() => setEditing(true)}
-            className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50">Edit Data</button>
-        )}
-        {['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role) && !editing && coi.pdfPath && (
-          <button onClick={handleReanalyze} disabled={reanalyzing}
-            className="px-4 py-2.5 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
-            {reanalyzing ? 'Re-analyzing…' : 'Re-analyze'}
-          </button>
-        )}
-        {editing && (
-          <>
-            <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm">Save Changes</button>
-            <button onClick={() => { setEditing(false); setForm(coi); }} className="px-4 py-2.5 border rounded-lg text-sm">Cancel</button>
-          </>
-        )}
-        {canReview && !editing && (
-          <>
-            <button onClick={handleApprove}
-              className="bg-green-600 text-white px-4 py-2.5 rounded-lg text-sm hover:bg-green-700">Approve</button>
-            <button onClick={() => setShowReject(true)}
-              className="bg-red-600 text-white px-4 py-2.5 rounded-lg text-sm hover:bg-red-700">Reject</button>
-          </>
-        )}
-        {['ADMIN', 'MEMBER'].includes(user?.role) && !editing && (
-          <button onClick={() => setShowDeleteModal(true)}
-            className="text-red-600 hover:underline text-sm py-2.5">Delete COI</button>
-        )}
-      </div>
-
-      {/* Reject modal */}
-      {showReject && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-          <div className="bg-white rounded-t-xl sm:rounded-xl p-6 w-full sm:max-w-md sm:mx-4">
-            <h3 className="text-lg font-semibold mb-4">Reject COI</h3>
-            <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Reason for rejection..."
-              className="w-full px-3 py-2.5 border rounded-lg mb-4 h-32 resize-none text-base sm:text-sm" />
-            <div className="flex flex-col sm:flex-row gap-2 sm:justify-end">
-              <button onClick={() => setShowReject(false)} className="px-4 py-2.5 border rounded-lg text-sm order-2 sm:order-1">Cancel</button>
-              <button onClick={handleReject} className="bg-red-600 text-white px-4 py-2.5 rounded-lg text-sm order-1 sm:order-2">Reject</button>
+              {rejecting ? (
+                <div className="flex flex-col gap-2">
+                  <textarea
+                    autoFocus
+                    rows={3}
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="What does the vendor need to fix? This is emailed to them and their agent."
+                    className="w-full px-3 py-2 rounded-control border border-line-strong text-[13px] focus:outline-none focus:border-navy"
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="danger" onClick={reject} disabled={busy || !rejectReason.trim()} className="flex-1">
+                      {busy ? 'Sending…' : 'Send request'}
+                    </Button>
+                    <Button onClick={() => setRejecting(false)}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Button variant="approve" onClick={approve} disabled={busy} className="flex-1 !py-[11px] !text-sm !font-bold">
+                    {busy ? 'Approving…' : 'Approve'}
+                  </Button>
+                  <Button variant="danger" onClick={() => setRejecting(true)} disabled={busy} className="!py-[11px] !text-sm">
+                    Request changes
+                  </Button>
+                </div>
+              )}
+              <span className="text-[11px] text-faint text-center">A to approve · R to request changes</span>
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      <DeleteConfirmationModal
-        isOpen={showDeleteModal}
-        itemCount={1}
-        itemLabel="COI"
-        loading={deleting}
-        onConfirm={handleDelete}
-        onCancel={() => setShowDeleteModal(false)}
-      />
+          {!isPending && (
+            <div className="px-[22px] py-4 border-t border-line bg-card-alt text-[13px] text-muted">
+              This certificate has already been reviewed.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

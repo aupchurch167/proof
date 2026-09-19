@@ -20,19 +20,27 @@ function sentence(entity, action, details) {
 // without the tiles fighting each other.
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { range = '30', actor = 'Anyone', type = 'All', search = '' } = req.query;
+    const { range = '30', actor = 'Anyone', type = 'All', search = '', vendorId } = req.query;
     const days = RANGE_DAYS[range] || 30;
     const since = new Date(Date.now() - days * 86400000);
     const q = String(search).trim().toLowerCase();
 
     const [auditRows, notificationRows] = await Promise.all([
       prisma.auditLog.findMany({
-        where: { orgId: req.user.orgId, createdAt: { gte: since } },
+        where: {
+          orgId: req.user.orgId,
+          createdAt: { gte: since },
+          ...(vendorId && { entityId: vendorId }),
+        },
         orderBy: { createdAt: 'desc' },
         take: 500,
       }),
       prisma.notificationLog.findMany({
-        where: { orgId: req.user.orgId, sentAt: { gte: since } },
+        where: {
+          orgId: req.user.orgId,
+          sentAt: { gte: since },
+          ...(vendorId && { vendorId }),
+        },
         orderBy: { sentAt: 'desc' },
         take: 500,
         include: { vendor: { select: { id: true, name: true } } },
@@ -93,6 +101,41 @@ router.get('/', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Audit log error:', err);
     res.status(500).json({ error: 'Failed to load audit log' });
+  }
+});
+
+// GET /api/audit/week — the "Proof did this week" panel on the dashboard.
+router.get('/week', authenticate, async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 7 * 86400000);
+    const orgId = req.user.orgId;
+
+    const [certificatesRead, remindersSent, renewalsReceived, issuesCaught] = await Promise.all([
+      prisma.coi.count({ where: { orgId, submittedAt: { gte: since } } }),
+      prisma.notificationLog.count({
+        where: {
+          orgId,
+          status: 'SENT',
+          type: { in: ['UPLOAD_REQUEST', 'UPLOAD_CHASE', 'EXPIRATION_REMINDER'] },
+          sentAt: { gte: since },
+        },
+      }),
+      prisma.coi.count({ where: { orgId, status: 'APPROVED', reviewedAt: { gte: since } } }),
+      // An "issue caught" is a certificate the checks turned away, plus one
+      // Proof read and flagged without anyone having to notice it.
+      prisma.coi.count({
+        where: {
+          orgId,
+          submittedAt: { gte: since },
+          OR: [{ status: 'REJECTED' }, { NOT: { complianceFlags: { equals: null } } }],
+        },
+      }),
+    ]);
+
+    res.json({ certificatesRead, remindersSent, renewalsReceived, issuesCaught });
+  } catch (err) {
+    console.error('Audit week error:', err);
+    res.status(500).json({ error: 'Failed to load weekly activity' });
   }
 });
 
