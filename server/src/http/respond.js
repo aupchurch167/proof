@@ -1,15 +1,19 @@
 // Shared response conventions for the versioned public API (/api/v1).
 //
 // Every consumer branches on these shapes, so they live in one place:
-//   single:    { "data": { ... } }
+//   single:    { ...resource }                      <- the resource itself
 //   list:      { "data": [ ... ], "nextCursor": "...|null", "hasMore": bool }
 //   error:     { "error": { "code": "...", "message": "...", "details": {} } }
+//
+// Single resources are returned unwrapped. Lists keep the `data` envelope
+// because they carry pagination alongside the rows; a single resource has
+// nothing to carry, so wrapping it only forces every consumer to unwrap.
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-function data(res, payload, status = 200) {
-  return res.status(status).json({ data: payload });
+function resource(res, payload, status = 200) {
+  return res.status(status).json(payload);
 }
 
 function paginated(res, items, nextCursor, hasMore) {
@@ -56,7 +60,7 @@ function decodeCursor(raw) {
 module.exports = {
   DEFAULT_LIMIT,
   MAX_LIMIT,
-  data,
+  resource,
   paginated,
   error,
   errors,

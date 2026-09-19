@@ -144,6 +144,10 @@ model Vendor {
   uploadToken         String    @unique @default(uuid())
   coiStatus           CoiStatus @default(NO_COI)
   coreId              String?   @unique
+  // The calling system's own id for this vendor (e.g. MyProject's Vendor.id),
+  // supplied on create through the public API. Unique per org so a retried
+  // create returns the existing vendor instead of duplicating it.
+  externalId          String?
   airtableRecordId    String?   @unique
   deletedAt           DateTime?
   createdAt           DateTime  @default(now())
@@ -154,6 +158,7 @@ model Vendor {
   notifications NotificationLog[]
   coiRequests   CoiRequest[]
 
+  @@unique([orgId, externalId])
   @@index([orgId, deletedAt])
 }
 
@@ -285,6 +290,12 @@ model CoiRequest {
   coverageTypes    String[]         @default([])
   note             String?
   requestedByEmail String?
+  // Contract fields supplied by API consumers. `requestedBy` is a free-form
+  // actor label ("system", a username); requestedByEmail stays the address we
+  // would actually write to, so the two are not interchangeable.
+  requestedBy      String?
+  additionalInsured String?
+  dueDate          DateTime?
   source           String           @default("app")
   apiClientId      String?
   createdAt        DateTime         @default(now())

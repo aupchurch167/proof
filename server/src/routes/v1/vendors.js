@@ -1,7 +1,7 @@
 const express = require('express');
 const prisma = require('../../lib/prisma');
 const { requireScope, SCOPES } = require('../../middleware/apiAuth');
-const { data, paginated, errors, parseLimit, encodeCursor, decodeCursor } = require('../../http/respond');
+const { resource, paginated, errors, parseLimit, encodeCursor, decodeCursor } = require('../../http/respond');
 const {
   COVERAGE_TYPES,
   serializeVendor,
@@ -9,8 +9,15 @@ const {
   internalStatusesFor,
 } = require('../../http/serializers');
 const { generateUploadToken } = require('../../utils/tokens');
-const { sendUploadRequestEmail } = require('../../services/email');
-const { isValidTrade } = require('../../constants/trades');
+const { isValidTrade, mapTradeToCanonical } = require('../../constants/trades');
+const { getPlanLimits, getPlanLabel } = require('../../config/plans');
+const { logAudit } = require('../../services/audit');
+const core = require('../../lib/core');
+const {
+  validateCoiRequestBody,
+  openRequestFor,
+  createCoiRequest,
+} = require('../../services/coiRequests');
 
 const router = express.Router({ mergeParams: true });
 
@@ -106,6 +113,157 @@ router.get('/', requireScope(SCOPES.VENDORS_READ), async (req, res) => {
   }
 });
 
+// Build a routable-looking address for a vendor created without one. Proof
+// requires an email on every Vendor; this mirrors the convention the Airtable
+// importer uses so the "no real contact yet" state is recognisable and the
+// record can still be created and fixed later.
+function synthesizeEmail(name) {
+  const slug = String(name || 'vendor')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'vendor';
+  return `${slug}-${Date.now().toString(36)}@no-email.proofcoi.local`;
+}
+
+// POST /api/v1/orgs/:orgSlug/vendors — create a vendor from an external system.
+//
+// Idempotent on externalId: a retried create (the caller's job failed partway,
+// or an operator hit retry) returns the vendor already linked to that id with
+// 200 instead of duplicating it.
+router.post('/', requireScope(SCOPES.VENDORS_WRITE), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { name, email, phone, trade, externalId, contactName, address } = body;
+
+    if (typeof name !== 'string' || !name.trim()) {
+      return errors.validation(res, 'name is required');
+    }
+    for (const [field, value] of Object.entries({ email, phone, trade, externalId, contactName, address })) {
+      if (value !== undefined && value !== null && typeof value !== 'string') {
+        return errors.validation(res, `${field} must be a string when provided`);
+      }
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return errors.validation(res, 'email must be a valid email address', { email });
+    }
+
+    const normalizedExternalId = externalId ? externalId.trim() : null;
+
+    if (normalizedExternalId) {
+      const existing = await prisma.vendor.findFirst({
+        where: { orgId: req.org.id, externalId: normalizedExternalId, deletedAt: null },
+        include: VENDOR_INCLUDE,
+      });
+      if (existing) {
+        return resource(res, serializeVendor(existing, toSerializerOpts(existing, true)), 200);
+      }
+    }
+
+    // Callers carry their own trade vocabulary (MyProject sends ELECTRICAL,
+    // FIRE_PROTECTION, OTHER...). Map what we recognise onto Proof's canonical
+    // list and drop what we don't — an unfamiliar trade is not worth failing a
+    // vendor create over, and the field is optional.
+    let canonicalTrade = null;
+    let tradeUnmapped = false;
+    if (trade && trade.trim()) {
+      canonicalTrade = mapTradeToCanonical(trade.trim());
+      tradeUnmapped = canonicalTrade === null;
+    }
+
+    // The public API is a billable write path like any other, so it honours the
+    // org's plan ceiling. 403 with a machine-readable code — never a 404.
+    const org = await prisma.organization.findUnique({
+      where: { id: req.org.id },
+      select: { plan: true },
+    });
+    const plan = org?.plan || 'FREE';
+    const limits = getPlanLimits(plan);
+    if (limits.maxVendors !== Infinity) {
+      const count = await prisma.vendor.count({ where: { orgId: req.org.id, deletedAt: null } });
+      if (count >= limits.maxVendors) {
+        return errors.forbidden(
+          res,
+          `This organization has reached the vendor limit (${limits.maxVendors}) for its ${getPlanLabel(plan)} plan.`
+        );
+      }
+    }
+
+    let created;
+    try {
+      created = await prisma.vendor.create({
+        data: {
+          orgId: req.org.id,
+          name: name.trim(),
+          email: email ? email.trim() : synthesizeEmail(name),
+          phone: phone ? phone.trim() : null,
+          contactName: contactName ? contactName.trim() : null,
+          address: address ? address.trim() : null,
+          trade: canonicalTrade,
+          externalId: normalizedExternalId,
+        },
+      });
+    } catch (err) {
+      // Lost a race against a concurrent create for the same externalId.
+      if (err.code === 'P2002' && normalizedExternalId) {
+        const existing = await prisma.vendor.findFirst({
+          where: { orgId: req.org.id, externalId: normalizedExternalId },
+          include: VENDOR_INCLUDE,
+        });
+        if (existing) {
+          return resource(res, serializeVendor(existing, toSerializerOpts(existing, true)), 200);
+        }
+      }
+      throw err;
+    }
+
+    // Replace the default UUID token with a signed JWT the portal can verify.
+    const vendor = await prisma.vendor.update({
+      where: { id: created.id },
+      data: { uploadToken: generateUploadToken(created.id) },
+      include: VENDOR_INCLUDE,
+    });
+
+    logAudit({
+      orgId: req.org.id,
+      action: 'create',
+      entity: 'vendor',
+      entityId: vendor.id,
+      details: { name: vendor.name, email: vendor.email, externalId: normalizedExternalId, via: 'api', apiClientId: req.apiClient?.id || null },
+      ipAddress: req.ip,
+    });
+
+    mirrorCreateToCore(vendor);
+
+    if (tradeUnmapped) {
+      console.warn(`[API v1] Unrecognized trade "${trade}" on vendor create; stored as null`);
+    }
+
+    return resource(res, serializeVendor(vendor, toSerializerOpts(vendor, true)), 201);
+  } catch (err) {
+    console.error('[API v1] create vendor error:', err);
+    return errors.server(res);
+  }
+});
+
+// Mirror the new vendor into Helm Core so `coreVendorId` fills in, matching what
+// the app's own create does. Best-effort: Core being down must not fail the API
+// create, and the next update will retry the link.
+async function mirrorCreateToCore(vendor) {
+  if (!core.isEnabled()) return;
+  try {
+    const result = await core.createVendor(vendor);
+    const coreId = result && result.data && result.data.id;
+    if (coreId) {
+      await prisma.vendor.update({ where: { id: vendor.id }, data: { coreId } });
+    } else {
+      console.warn('[Core] createVendor returned no id; vendor not linked', { vendorId: vendor.id });
+    }
+  } catch (err) {
+    console.error('[Core] Failed to mirror vendor create:', core.formatError(err));
+  }
+}
+
 // GET /api/v1/orgs/:orgSlug/vendors/:vendorId — COI detail view.
 router.get('/:vendorId', requireScope(SCOPES.VENDORS_READ), async (req, res) => {
   try {
@@ -115,7 +273,7 @@ router.get('/:vendorId', requireScope(SCOPES.VENDORS_READ), async (req, res) => 
     });
     if (!vendor) return errors.notFound(res, 'vendor_not_found', 'Vendor not found');
 
-    return data(res, serializeVendor(vendor, toSerializerOpts(vendor, true)));
+    return resource(res, serializeVendor(vendor, toSerializerOpts(vendor, true)));
   } catch (err) {
     console.error('[API v1] get vendor error:', err);
     return errors.server(res);
@@ -168,25 +326,16 @@ router.get('/:vendorId/coi-requests', requireScope(SCOPES.COI_REQUESTS_READ), as
 });
 
 // POST /api/v1/orgs/:orgSlug/vendors/:vendorId/coi-requests — "Request COI".
+//
+// The vendor-nested form of the create below. It keeps its 409-on-open-request
+// behaviour: this is the interactive "Request COI" action, where telling the
+// caller a request is already outstanding is the useful answer. The top-level
+// collection route is the idempotent machine-to-machine path.
 router.post('/:vendorId/coi-requests', requireScope(SCOPES.COI_REQUESTS_WRITE), async (req, res) => {
   try {
     const body = req.body || {};
-    const { coverageTypes, note, requestedByEmail } = body;
-
-    // Validation
-    if (coverageTypes !== undefined) {
-      if (!Array.isArray(coverageTypes) || coverageTypes.some((t) => !COVERAGE_TYPES.includes(t))) {
-        return errors.validation(res, 'coverageTypes must be an array of known coverage types', {
-          allowed: COVERAGE_TYPES,
-        });
-      }
-    }
-    if (note !== undefined && typeof note !== 'string') {
-      return errors.validation(res, 'note must be a string');
-    }
-    if (requestedByEmail !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedByEmail || '')) {
-      return errors.validation(res, 'requestedByEmail must be a valid email');
-    }
+    const invalid = validateCoiRequestBody(body);
+    if (invalid) return errors.validation(res, invalid.message, invalid.details || {});
 
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.vendorId, orgId: req.org.id, deletedAt: null },
@@ -194,57 +343,21 @@ router.post('/:vendorId/coi-requests', requireScope(SCOPES.COI_REQUESTS_WRITE), 
     });
     if (!vendor) return errors.notFound(res, 'vendor_not_found', 'Vendor not found');
 
-    // Idempotent-ish: never create a second open request for the same vendor.
-    const open = await prisma.coiRequest.findFirst({
-      where: { vendorId: vendor.id, status: 'REQUESTED' },
-    });
+    const open = await openRequestFor(vendor.id);
     if (open) {
       return errors.conflict(res, 'coi_request_conflict', 'A COI request is already open for this vendor', {
         request: serializeCoiRequest(open),
       });
     }
 
-    const created = await prisma.coiRequest.create({
-      data: {
-        orgId: req.org.id,
-        vendorId: vendor.id,
-        coverageTypes: Array.isArray(coverageTypes) ? coverageTypes : [],
-        note: typeof note === 'string' ? note : null,
-        requestedByEmail: requestedByEmail || null,
-        source: 'api',
-        apiClientId: req.apiClient?.id || null,
-      },
+    const created = await createCoiRequest({
+      org: req.org,
+      vendor,
+      apiClientId: req.apiClient?.id || null,
+      body,
     });
 
-    // Kick off Proof's existing COI-request workflow: rotate the upload token,
-    // email the vendor, and log it (so the app UI's cooldown + lastRequestedAt
-    // see API-originated requests too). Best-effort — the request record stands
-    // even if the email send fails.
-    try {
-      const uploadToken = generateUploadToken(vendor.id);
-      await prisma.vendor.update({ where: { id: vendor.id }, data: { uploadToken } });
-      const portalUrl = `${process.env.APP_URL}/portal/${uploadToken}`;
-      const cc = vendor.additionalEmails?.length > 0 ? vendor.additionalEmails : undefined;
-      await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization, cc);
-      await prisma.notificationLog.create({
-        data: {
-          orgId: req.org.id,
-          vendorId: vendor.id,
-          type: 'UPLOAD_REQUEST',
-          recipientEmail: vendor.email,
-          status: 'SENT',
-        },
-      });
-    } catch (mailErr) {
-      console.error('[API v1] COI request email failed:', mailErr.message);
-    }
-
-    // Reflect the outstanding request as `pending` unless a COI already exists.
-    if (vendor.coiStatus === 'NO_COI') {
-      await prisma.vendor.update({ where: { id: vendor.id }, data: { coiStatus: 'PENDING' } });
-    }
-
-    return data(res, serializeCoiRequest(created), 201);
+    return resource(res, serializeCoiRequest(created), 201);
   } catch (err) {
     console.error('[API v1] create coi-request error:', err);
     return errors.server(res);

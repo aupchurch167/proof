@@ -4,7 +4,7 @@ import { api } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 
 const SCOPE_PRESETS = {
-  full: { label: 'Read & request COIs', scopes: ['vendors:read', 'coi-requests:read', 'coi-requests:write'] },
+  full: { label: 'Read, create vendors & request COIs', scopes: ['vendors:read', 'vendors:write', 'coi-requests:read', 'coi-requests:write'] },
   read: { label: 'Read only', scopes: ['vendors:read', 'coi-requests:read'] },
 };
 
@@ -160,7 +160,7 @@ export default function Integrations() {
       <div className="bg-white rounded-xl border p-6 mb-6">
         <h2 className="text-lg font-semibold mb-1">API keys</h2>
         <p className="text-sm text-gray-500 mb-4">
-          A key lets another application read your vendors and request COIs on your behalf. Keys are scoped to this organization only.
+          A key lets another application read your vendors, add new ones, and request COIs on your behalf. Keys are scoped to this organization only.
         </p>
 
         {newToken && (

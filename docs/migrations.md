@@ -59,3 +59,25 @@ npx prisma migrate deploy
 Because the reconcile migration is idempotent, if you are unsure whether a
 specific object exists you can also `migrate resolve --applied` it safely and
 move on. Take a database backup before baselining.
+
+## Vendor externalId + `vendors:write` scope (20260919100000)
+
+Adds `Vendor.externalId` (unique per org) so external systems can create
+vendors idempotently, the `requestedBy` / `additionalInsured` / `dueDate`
+columns on `CoiRequest`, and a data migration for the new `vendors:write`
+scope.
+
+The data migration matters operationally: API tokens store their scope list
+**materialized at creation time**, so introducing a new scope does not
+retroactively grant it — an existing "all scopes" token would start returning
+`403` on `POST /vendors`. The migration therefore appends `vendors:write` to
+every token that already holds the full pre-existing scope set
+(`vendors:read` + `coi-requests:read` + `coi-requests:write`). Tokens minted
+with a deliberately narrower subset are left alone.
+
+Verified:
+- **Fresh DB**: all migrations apply; `prisma migrate diff` reports no
+  difference against `schema.prisma`.
+- **Existing DB** with a full-scope token and a read-only token: the full-scope
+  token gains `vendors:write`, the read-only token is untouched. Re-running is
+  a no-op (`IF NOT EXISTS` on DDL; the `UPDATE` is guarded by `NOT (... = ANY)`).

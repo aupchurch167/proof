@@ -5,6 +5,7 @@ const { errors } = require('../http/respond');
 // Scopes a token can hold. `*` is a wildcard granting everything.
 const SCOPES = {
   VENDORS_READ: 'vendors:read',
+  VENDORS_WRITE: 'vendors:write',
   COI_REQUESTS_READ: 'coi-requests:read',
   COI_REQUESTS_WRITE: 'coi-requests:write',
 };

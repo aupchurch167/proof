@@ -16,7 +16,9 @@ new endpoints drop in without bespoke plumbing.
 - **Base path**: `/api/v1/orgs/:orgSlug/...`. `:orgSlug` accepts an org **slug
   or id** (many orgs have no slug).
 - **JSON** in and out.
-- **Single resource**: `{ "data": { ... } }`.
+- **Single resource**: the resource itself, unwrapped — `{ "id": ..., ... }`.
+  Only lists carry a `data` envelope, because they have pagination to carry
+  alongside the rows.
 - **Lists** (cursor pagination):
   ```json
   { "data": [ ... ], "nextCursor": "opaque-or-null", "hasMore": true }
@@ -30,7 +32,7 @@ new endpoints drop in without bespoke plumbing.
 | `400` / `422` | validation error (bad body/params) |
 | `401` | missing/invalid token (`unauthorized`) |
 | `403` | token valid but not authorized for this org, or missing scope (`forbidden`) |
-| `404` | org / vendor not found (`organization_not_found`, `vendor_not_found`) |
+| `404` | org / vendor not found, or no such endpoint (`organization_not_found`, `vendor_not_found`, `route_not_found`) |
 | `409` | conflict, e.g. a COI request is already open (`coi_request_conflict`) |
 | `5xx` | Proof-side failure (`internal_error`) |
 
@@ -42,8 +44,8 @@ as a SHA-256 hash (raw value shown once at creation).
 - A token is scoped to **one org** (`orgId`) **or** flagged as a **platform
   token** (`allOrgs`) that can access any org, validated against the `:orgSlug`
   in the path.
-- Tokens carry **scopes**: `vendors:read`, `coi-requests:read`,
-  `coi-requests:write` (or `*` for all).
+- Tokens carry **scopes**: `vendors:read`, `vendors:write`,
+  `coi-requests:read`, `coi-requests:write` (or `*` for all).
 - **Dev bypass** (non-production only): send `x-helm-test-org-slug: <slug>` with
   no bearer token to talk to a local Proof without minting tokens.
 
@@ -76,6 +78,7 @@ Rate limit: 600 requests / 15 min, keyed per token.
   "email": "bids@apexelectrical.com",
   "phone": "+16155551234",
   "coreVendorId": "core_vendor_abc",
+  "externalId": "myproject-vendor-123",
   "coi": {
     "status": "compliant",
     "expiresAt": "2026-09-30",
@@ -89,6 +92,8 @@ Rate limit: 600 requests / 15 min, keyed per token.
 
 - `id` — Proof's opaque, stable vendor id (a UUID). Store as `proofVendorId`.
 - `coreVendorId` — present only when the vendor is linked to Core.
+- `externalId` — the calling system's own id for this vendor, if it supplied
+  one on create. Unique per org.
 - `coi.expiresAt` — earliest expiration among coverages (drives the badge).
   Calendar date (`YYYY-MM-DD`); timestamps like `lastRequestedAt` are full ISO.
 - `coi.coverages` — returned by the **detail** endpoint only. `limit` is in
@@ -110,9 +115,17 @@ below the org's required limits (`NON_COMPLIANT`) surfaces as `expired`
   "vendorId": "9c4e...-uuid",
   "status": "requested",
   "coverageTypes": ["general_liability", "workers_comp"],
+  "additionalInsured": "Mark Allan Contracting",
+  "requestedBy": "system",
+  "requestedByEmail": "estimator@buildco.com",
+  "dueDate": "2026-10-03T00:00:00Z",
   "requestedAt": "2026-07-21T16:40:00Z"
 }
 ```
+
+`requestedBy` is a free-form actor label (`"system"`, a username);
+`requestedByEmail` is the address a human would be written to at. They are
+separate fields — only the latter is validated as an email.
 
 `status` is `requested`, `fulfilled`, or `cancelled`. A request auto-resolves to
 `fulfilled` when the vendor next becomes compliant.
@@ -126,6 +139,35 @@ below the org's required limits (`NON_COMPLIANT`) surfaces as `expired`
 List/search vendors. Optional query params: `search` (name/email), `trade`,
 `coiStatus` (the enum above), `cursor`, `limit`. Returns paginated `Vendor`
 (list form omits `coverages`). Scope: `vendors:read`.
+
+### `POST /vendors`
+
+Create a vendor. Body:
+
+```json
+{
+  "name": "Apex Electrical LLC",
+  "trade": "ELECTRICAL",
+  "email": "bids@apexelectrical.com",
+  "phone": "+16155551234",
+  "externalId": "myproject-vendor-123"
+}
+```
+
+Only `name` is required. Scope: `vendors:write`.
+
+- **Idempotent on `externalId`**: if one is supplied and already maps to a
+  vendor in this org, returns `200` with that vendor instead of creating a
+  second. Without an `externalId` every call creates a new vendor.
+- **`trade`** is mapped onto Proof's canonical trade list, so callers can send
+  their own vocabulary (`ELECTRICAL` → `Electrical`). A trade Proof doesn't
+  recognise is stored as `null` rather than failing the create — the field is
+  optional and an unfamiliar trade is not worth losing a vendor over.
+- **`email`** is optional. A vendor created without one gets a non-routable
+  `@no-email.proofcoi.local` placeholder (the same convention the Airtable
+  importer uses), so the record exists and can be corrected later.
+- `403 forbidden` if the org is at its plan's vendor limit.
+- `201` with the created `Vendor` (unwrapped, `coverages` included).
 
 ### `GET /vendors/:vendorId`
 
@@ -149,7 +191,37 @@ Body (all optional):
 
 ### `GET /vendors/:vendorId/coi-requests`
 
-Request history, newest first (paginated). Scope: `coi-requests:read`.
+Request history for one vendor, newest first (paginated). Scope:
+`coi-requests:read`.
+
+### `POST /coi-requests`
+
+Create a COI request for the vendor named in the body — the collection-style
+form an external system calls right after creating a vendor. Same side effects
+as the vendor-nested route above. Scope: `coi-requests:write`.
+
+```json
+{
+  "vendorId": "9c4e...-uuid",
+  "additionalInsured": "Mark Allan Contracting",
+  "requestedBy": "system",
+  "dueDate": "2026-10-03T00:00:00.000Z"
+}
+```
+
+Only `vendorId` is required; `coverageTypes` and `note` are also accepted.
+
+- **Idempotent**: if a request is already open for the vendor, returns `200`
+  with that request rather than `409`. This is the machine-to-machine path, so
+  a caller retrying a half-finished onboarding job converges instead of
+  failing forever. (The vendor-nested route keeps its `409` — that one backs an
+  interactive "Request COI" button, where "already open" is the useful answer.)
+- `201` with the created `COI request`, or `200` with the open one.
+
+### `GET /coi-requests`
+
+Request history across the org, newest first (paginated). Optional
+`vendorId` and `status` filters. Scope: `coi-requests:read`.
 
 ---
 

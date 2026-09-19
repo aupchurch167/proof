@@ -166,7 +166,10 @@ describe('GET /vendors/:id', () => {
   it('returns full coverages with dollar limits and per-coverage status', async () => {
     const res = await request(app).get(`/api/v1/orgs/${orgA.slug}/vendors/${vendorWithCoi.id}`).set(auth(tokenA));
     expect(res.status).toBe(200);
-    const v = res.body.data;
+    // Single resources come back unwrapped — the shipped consumers type this
+    // response as the vendor itself, not as { data: vendor }.
+    const v = res.body;
+    expect(v.id).toBe(vendorWithCoi.id);
     expect(Array.isArray(v.coi.coverages)).toBe(true);
 
     const gl = v.coi.coverages.find((c) => c.type === 'general_liability');
@@ -192,9 +195,9 @@ describe('POST /vendors/:id/coi-requests', () => {
       .send({ coverageTypes: ['general_liability'], note: 'Needed to award', requestedByEmail: 'est@buildco.com' });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.status).toBe('requested');
-    expect(res.body.data.coverageTypes).toEqual(['general_liability']);
-    expect(res.body.data.vendorId).toBe(vendorNoCoi.id);
+    expect(res.body.status).toBe('requested');
+    expect(res.body.coverageTypes).toEqual(['general_liability']);
+    expect(res.body.vendorId).toBe(vendorNoCoi.id);
 
     const vendor = await prisma.vendor.findUnique({ where: { id: vendorNoCoi.id } });
     expect(vendor.coiStatus).toBe('PENDING');
@@ -235,6 +238,281 @@ describe('GET /vendors/:id/coi-requests', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThanOrEqual(1);
     expect(res.body.data[0].vendorId).toBe(vendorNoCoi.id);
+  });
+});
+
+// The exact sequence MyProject's vendor-onboarding job runs: create the vendor,
+// then open a COI request against the id it got back.
+describe('POST /vendors (create)', () => {
+  it('creates a vendor and returns it unwrapped with a top-level id', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({
+        name: 'MAC API Probe Vendor',
+        trade: 'OTHER',
+        email: 'probe@buildco.com',
+        phone: '+14045550100',
+        externalId: 'myproject-probe-1',
+      });
+
+    expect(res.status).toBe(201);
+    expect(typeof res.body.id).toBe('string');
+    expect(res.body.name).toBe('MAC API Probe Vendor');
+    expect(res.body.email).toBe('probe@buildco.com');
+    expect(res.body.phone).toBe('+14045550100');
+    expect(res.body.externalId).toBe('myproject-probe-1');
+    expect(res.body.coi.status).toBe('none');
+    // No stray envelope around it.
+    expect(res.body.data).toBeUndefined();
+  });
+
+  it('is idempotent on externalId — a retry returns the same vendor with 200', async () => {
+    const first = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Retry Co', externalId: 'myproject-retry-1', email: 'retry@buildco.com' });
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Retry Co', externalId: 'myproject-retry-1', email: 'retry@buildco.com' });
+
+    expect(second.status).toBe(200);
+    expect(second.body.id).toBe(first.body.id);
+
+    const count = await prisma.vendor.count({
+      where: { orgId: orgA.id, externalId: 'myproject-retry-1' },
+    });
+    expect(count).toBe(1);
+  });
+
+  it('scopes externalId per org — two orgs may use the same external id', async () => {
+    const a = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Shared Id A', externalId: 'shared-1', email: 'a@shared.com' });
+    const b = await request(app)
+      .post(`/api/v1/orgs/${orgB.slug}/vendors`)
+      .set(auth(tokenB))
+      .send({ name: 'Shared Id B', externalId: 'shared-1', email: 'b@shared.com' });
+
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    expect(a.body.id).not.toBe(b.body.id);
+  });
+
+  it('maps a caller trade vocabulary onto the canonical list', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Sparky LLC', trade: 'ELECTRICAL', email: 'sparky@buildco.com' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.trade).toBe('Electrical');
+  });
+
+  it('stores an unrecognized trade as null rather than rejecting the vendor', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Gutter Folks', trade: 'GUTTERS', email: 'g@buildco.com' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.trade).toBeNull();
+  });
+
+  it('synthesizes a non-routable address when the caller has no email', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'No Contact Yet', externalId: 'myproject-noemail-1' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.email).toMatch(/@no-email\.proofcoi\.local$/);
+  });
+
+  it('422 when name is missing', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ email: 'nameless@buildco.com' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('validation_error');
+    expect(res.body.error.message).toMatch(/name/);
+  });
+
+  it('422 on a malformed email', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Bad Email Co', email: 'not-an-email' });
+
+    expect(res.status).toBe(422);
+  });
+
+  it('403 when the token lacks vendors:write', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenReadOnly))
+      .send({ name: 'Denied Co', email: 'denied@buildco.com' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('forbidden');
+  });
+
+  it('403 when creating into another org', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgB.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Wrong Org Co', email: 'wrong@buildco.com' });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /coi-requests (collection)', () => {
+  it('creates a request for the vendor named in the body', async () => {
+    const vendor = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Request Target', email: 'target@buildco.com', externalId: 'myproject-target-1' });
+    expect(vendor.status).toBe(201);
+
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/coi-requests`)
+      .set(auth(tokenA))
+      .send({
+        vendorId: vendor.body.id,
+        additionalInsured: 'Mark Allan Contracting',
+        requestedBy: 'system',
+        dueDate: '2026-10-03T00:00:00.000Z',
+      });
+
+    expect(res.status).toBe(201);
+    expect(typeof res.body.id).toBe('string');
+    expect(res.body.vendorId).toBe(vendor.body.id);
+    expect(res.body.status).toBe('requested');
+    expect(res.body.additionalInsured).toBe('Mark Allan Contracting');
+    // `requestedBy` is an actor label, not an address — it must not be forced
+    // through email validation.
+    expect(res.body.requestedBy).toBe('system');
+    expect(res.body.data).toBeUndefined();
+  });
+
+  it('is idempotent — a retry returns the open request with 200, not a 409', async () => {
+    const vendor = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({ name: 'Retry Request Co', email: 'rr@buildco.com' });
+
+    const body = { vendorId: vendor.body.id, additionalInsured: 'MAC', requestedBy: 'system' };
+    const first = await request(app).post(`/api/v1/orgs/${orgA.slug}/coi-requests`).set(auth(tokenA)).send(body);
+    const second = await request(app).post(`/api/v1/orgs/${orgA.slug}/coi-requests`).set(auth(tokenA)).send(body);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(second.body.id).toBe(first.body.id);
+
+    const count = await prisma.coiRequest.count({ where: { vendorId: vendor.body.id } });
+    expect(count).toBe(1);
+  });
+
+  it('422 when vendorId is missing', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/coi-requests`)
+      .set(auth(tokenA))
+      .send({ additionalInsured: 'MAC' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/vendorId/);
+  });
+
+  it('404 with a JSON envelope for a vendor in another org', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/coi-requests`)
+      .set(auth(tokenA))
+      .send({ vendorId: '00000000-0000-0000-0000-000000000000' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('vendor_not_found');
+    expect(res.body.error.message).toBeTruthy();
+  });
+
+  it('422 on a malformed dueDate', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/coi-requests`)
+      .set(auth(tokenA))
+      .send({ vendorId: vendorWithCoi.id, dueDate: 'next tuesday' });
+
+    expect(res.status).toBe(422);
+  });
+
+  it('403 when the token lacks coi-requests:write', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/coi-requests`)
+      .set(auth(tokenReadOnly))
+      .send({ vendorId: vendorWithCoi.id });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('onboarding round trip', () => {
+  it('create vendor -> create coi-request -> GET vendor shows a pending COI', async () => {
+    const created = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/vendors`)
+      .set(auth(tokenA))
+      .send({
+        name: 'Round Trip Co',
+        trade: 'PLUMBING',
+        email: 'rt@buildco.com',
+        phone: '+14045550199',
+        externalId: 'myproject-roundtrip-1',
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.coi.status).toBe('none');
+
+    const requested = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/coi-requests`)
+      .set(auth(tokenA))
+      .send({
+        vendorId: created.body.id,
+        additionalInsured: 'Mark Allan Contracting',
+        requestedBy: 'system',
+        dueDate: new Date(Date.now() + 14 * DAY).toISOString(),
+      });
+    expect(requested.status).toBe(201);
+
+    const fetched = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/vendors/${created.body.id}`)
+      .set(auth(tokenA));
+
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.id).toBe(created.body.id);
+    expect(fetched.body.coi.status).toBe('pending');
+    expect(fetched.body.coi.lastRequestedAt).toBeTruthy();
+
+    // The vendor's upload token is a signed JWT the portal can verify, not the
+    // default UUID — otherwise the emailed portal link 404s.
+    const row = await prisma.vendor.findUnique({ where: { id: created.body.id } });
+    expect(row.uploadToken.split('.')).toHaveLength(3);
+  });
+});
+
+describe('unimplemented routes still answer in the API envelope', () => {
+  it('404s with error.message rather than HTML or an empty body', async () => {
+    const res = await request(app)
+      .post(`/api/v1/orgs/${orgA.slug}/not-a-real-collection`)
+      .set(auth(tokenA))
+      .send({});
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('route_not_found');
+    expect(res.body.error.message).toMatch(/No such endpoint/);
+    expect(res.body.error.details).toEqual({});
   });
 });
 

@@ -116,6 +116,7 @@ function serializeVendor(vendor, { latestApprovedCoi = null, lastRequestedAt = n
     email: vendor.email,
     phone: vendor.phone || null,
     coreVendorId: vendor.coreId || null,
+    externalId: vendor.externalId || null,
     coi,
   };
 }
@@ -133,7 +134,10 @@ function serializeCoiRequest(reqRow) {
     status: REQUEST_STATUS_MAP[reqRow.status] || reqRow.status.toLowerCase(),
     coverageTypes: reqRow.coverageTypes || [],
     note: reqRow.note || null,
+    requestedBy: reqRow.requestedBy || null,
     requestedByEmail: reqRow.requestedByEmail || null,
+    additionalInsured: reqRow.additionalInsured || null,
+    dueDate: isoDateTime(reqRow.dueDate),
     requestedAt: isoDateTime(reqRow.createdAt),
   };
 }
