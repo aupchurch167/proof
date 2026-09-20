@@ -118,6 +118,8 @@ export default function CoiDetail() {
   const [pdfError, setPdfError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [corrected, setCorrected] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -151,9 +153,33 @@ export default function CoiDetail() {
     try {
       const updated = await api.put(`/cois/${id}`, patch);
       setCoi(updated);
+      setCorrected(true);
       toast.success('Corrected');
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  // Re-run the extraction against the stored PDF. Worth offering on the review
+  // screen because the first read can fail outright (no API key) or misread a
+  // scan, and re-uploading the certificate is the vendor's job, not the
+  // reviewer's.
+  const reanalyze = async () => {
+    // A fresh read replaces every extracted field, so warn only when the
+    // reviewer has hand-corrected something that would be thrown away.
+    if (corrected && !window.confirm('Re-analyzing replaces every value below, including the corrections you just made. Continue?')) return;
+    setReanalyzing(true);
+    try {
+      const updated = await api.post(`/cois/${id}/reanalyze`);
+      // The route returns the stored row; isRenewal is computed by the GET only,
+      // so merge rather than replace or the header flips to "new certificate".
+      setCoi((prev) => ({ ...prev, ...updated }));
+      setCorrected(false);
+      toast.success('Re-read by Proof');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setReanalyzing(false);
     }
   };
 
@@ -194,7 +220,7 @@ export default function CoiDetail() {
 
   // A / R shortcuts, but never while the reviewer is typing a reason.
   useEffect(() => {
-    if (!canReview || !coi || coi.status !== 'PENDING_REVIEW') return;
+    if (!canReview || !coi || coi.status !== 'PENDING_REVIEW' || reanalyzing) return;
     const onKey = (e) => {
       if (e.target.matches('input, textarea, select')) return;
       if (e.key.toLowerCase() === 'a') approve();
@@ -202,7 +228,7 @@ export default function CoiDetail() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [canReview, coi, queue]);
+  }, [canReview, coi, queue, reanalyzing]);
 
   if (loading) return <div className="p-9 text-[13px] text-muted">Loading…</div>;
   if (!coi) return <div className="p-9 text-[13px] text-muted">Certificate not found.</div>;
@@ -288,7 +314,19 @@ export default function CoiDetail() {
 
         <div className="bg-white border-l border-line flex flex-col">
           <div className="px-[22px] py-[18px] border-b border-line-divider flex flex-col gap-1.5">
-            <Eyebrow tone="amber" dot>What Proof read</Eyebrow>
+            <div className="flex justify-between items-center gap-2.5">
+              <Eyebrow tone="amber" dot>What Proof read</Eyebrow>
+              {canReview && (
+                <Button
+                  size="sm"
+                  onClick={reanalyze}
+                  disabled={reanalyzing || busy}
+                  title="Read the certificate again with AI and replace the values below"
+                >
+                  {reanalyzing ? 'Re-analyzing…' : '↻ Re-analyze with AI'}
+                </Button>
+              )}
+            </div>
             <span className="text-[13px] text-ink-2 leading-[1.5]">
               Compared against your <b className="text-navy">Default</b> requirement template.
               {canReview && ' Click any value to correct it.'}
