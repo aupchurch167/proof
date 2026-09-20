@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const prisma = require('../lib/prisma');
+const { isExtractLimitError } = require('../lib/extractErrors');
 
 const DEFAULT_EXTRACT_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_EXTRACT_DAILY_CAP = 10;
@@ -13,14 +14,6 @@ class ExtractLimitError extends Error {
     this.status = status;
     this.code = code;
   }
-}
-
-function isExtractLimitError(err) {
-  return Boolean(
-    err && (err.name === 'ExtractLimitError'
-      || err.code === 'EXTRACT_DAILY_CAP'
-      || err.code === 'EXTRACT_BYTE_LIMIT')
-  );
 }
 
 function getExtractMaxBytes() {

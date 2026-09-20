@@ -3,7 +3,8 @@ const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { updateVendorStatus, checkCompliance } = require('../services/compliance');
 const { getSignedUrl, deleteFile, downloadFile } = require('../services/storage');
-const { extractCoiData, isExtractLimitError } = require('../services/coiExtractor');
+const { extractCoiData } = require('../services/coiExtractor');
+const { isExtractLimitError } = require('../lib/extractErrors');
 const { z } = require('zod');
 const { logAudit } = require('../services/audit');
 

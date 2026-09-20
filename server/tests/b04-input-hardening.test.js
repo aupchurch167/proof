@@ -5,9 +5,9 @@ jest.mock('../src/services/storage', () => ({
   deleteFile: jest.fn().mockResolvedValue(undefined),
 }));
 
-const sendMock = jest.fn().mockResolvedValue({ data: { id: 'msg_1' }, error: null });
+const mockSend = jest.fn().mockResolvedValue({ data: { id: 'msg_1' }, error: null });
 jest.mock('resend', () => ({
-  Resend: jest.fn(() => ({ emails: { send: (...args) => sendMock(...args) } })),
+  Resend: jest.fn(() => ({ emails: { send: (...args) => mockSend(...args) } })),
 }));
 
 const request = require('supertest');
@@ -55,7 +55,7 @@ describe('A4-03 email HTML escape', () => {
   it('escapes an org name that contains <img in outbound HTML', async () => {
     expect(escapeHtml('<img src=x onerror=alert(1)>')).toBe('&lt;img src=x onerror=alert(1)&gt;');
 
-    sendMock.mockClear();
+    mockSend.mockClear();
     await sendUploadRequestEmail(
       'vendor@example.com',
       'Acme <b>Co</b>',
@@ -63,8 +63,8 @@ describe('A4-03 email HTML escape', () => {
       { name: '<img src=x onerror=alert(1)>', email: 'gc@test.com', address: '1 Main' }
     );
 
-    expect(sendMock).toHaveBeenCalled();
-    const payload = sendMock.mock.calls[0][0];
+    expect(mockSend).toHaveBeenCalled();
+    const payload = mockSend.mock.calls[0][0];
     expect(payload.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(payload.html).not.toContain('<img src=x onerror=alert(1)>');
     expect(payload.html).toContain('Acme &lt;b&gt;Co&lt;/b&gt;');
