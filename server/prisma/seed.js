@@ -4,7 +4,13 @@ const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash('password123', 12);
+  if (process.env.NODE_ENV === 'production') {
+    console.error('Refusing to run seed against a production database');
+    process.exit(1);
+  }
+
+  const seedPassword = process.env.SEED_PASSWORD || 'password123';
+  const passwordHash = await bcrypt.hash(seedPassword, 12);
 
   const org = await prisma.organization.create({
     data: {
@@ -27,6 +33,7 @@ async function main() {
           firstName: 'Mark',
           lastName: 'Allan',
           role: 'ADMIN',
+          emailVerified: true,
         },
       },
     },
@@ -190,7 +197,7 @@ async function main() {
     },
   });
 
-  console.log('Seed complete. Login: admin@markallancont.com / password123');
+  console.log(`Seed complete. Login: admin@markallancont.com / ${seedPassword}`);
   console.log(`Created ${3} vendors with ${6} COIs across different coverage types`);
 }
 

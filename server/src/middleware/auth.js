@@ -1,4 +1,5 @@
-const jwt = require('jsonwebtoken');
+const prisma = require('../lib/prisma');
+const { verifyAccessToken } = require('../utils/tokens');
 
 function authenticate(req, res, next) {
   const header = req.headers.authorization;
@@ -8,7 +9,7 @@ function authenticate(req, res, next) {
 
   const token = header.split(' ')[1];
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = verifyAccessToken(token);
     req.user = payload;
     next();
   } catch (err) {
@@ -25,4 +26,36 @@ function authorize(...roles) {
   };
 }
 
-module.exports = { authenticate, authorize };
+async function requireVerified(req, res, next) {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { emailVerified: true },
+    });
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        error: 'Email verification required',
+        code: 'EMAIL_NOT_VERIFIED',
+      });
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+function authenticateVerified(req, res, next) {
+  authenticate(req, res, (err) => {
+    if (err) return next(err);
+    if (res.headersSent) return;
+    requireVerified(req, res, next);
+  });
+}
+
+module.exports = { authenticate, authorize, requireVerified, authenticateVerified };

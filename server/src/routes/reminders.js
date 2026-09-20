@@ -1,6 +1,6 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
-const { authenticate } = require('../middleware/auth');
+const { authenticateVerified: authenticate } = require('../middleware/auth');
 const {
   DEFAULT_REMINDER_DAYS,
   DEFAULT_CHASE_DAYS,

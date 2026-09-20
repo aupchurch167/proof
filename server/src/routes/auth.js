@@ -1,15 +1,62 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
-const { generateAccessToken, generateRefreshToken } = require('../utils/tokens');
 const { authenticate } = require('../middleware/auth');
 const { validate, passwordSchema } = require('../utils/validation');
 const { sendPasswordResetEmail, sendEmailVerificationEmail } = require('../services/email');
 const { verifyGoogleIdToken, isGoogleConfigured } = require('../lib/google');
+const {
+  issueTokenPair,
+  rotateRefreshToken,
+  revokeFamilyForRefreshToken,
+  revokeAllForUser,
+} = require('../lib/sessions');
+const { hashToken } = require('../lib/apiTokens');
+const { verifyAccessToken } = require('../utils/tokens');
 
 const router = express.Router();
+
+const INVITE_TTL_MS = 48 * 60 * 60 * 1000;
+const SIGNUP_MESSAGE = 'If this address is new, we sent a verification email.';
+
+function slugForOrg(name) {
+  const base = String(name || 'org')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'org';
+  return `${base}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+function publicUser(user, orgName) {
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.role,
+    orgId: user.orgId,
+    orgName,
+    emailVerified: user.emailVerified,
+  };
+}
+
+async function findInviteUser(rawToken) {
+  const tokenHash = hashToken(rawToken);
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { inviteTokenHash: tokenHash },
+        { inviteToken: rawToken },
+      ],
+    },
+    include: { organization: true },
+  });
+  if (!user) return null;
+  if (!user.inviteTokenExpiry || user.inviteTokenExpiry < new Date()) return null;
+  return user;
+}
 
 // GET /api/auth/config — public client config (which providers are enabled)
 router.get('/config', (req, res) => {
@@ -21,12 +68,14 @@ router.post('/signup', validate('signup'), async (req, res) => {
   try {
     const { orgName, email, password, firstName, lastName, phone, address } = req.body;
 
+    // Hash first so existing-vs-new timing is closer (A1-06).
+    const passwordHash = await bcrypt.hash(password, 12);
+
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
-      return res.status(409).json({ error: 'Email already registered' });
+      return res.status(201).json({ message: SIGNUP_MESSAGE });
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
     const emailVerifyToken = crypto.randomBytes(32).toString('hex');
 
     const result = await prisma.$transaction(async (tx) => {
@@ -36,6 +85,7 @@ router.post('/signup', validate('signup'), async (req, res) => {
           email,
           phone: phone || null,
           address: address || null,
+          slug: slugForOrg(orgName),
           settings: {
             create: {},
           },
@@ -60,22 +110,12 @@ router.post('/signup', validate('signup'), async (req, res) => {
     const verifyUrl = `${process.env.APP_URL || 'https://app.proofcoi.com'}/verify-email?token=${emailVerifyToken}`;
     await sendEmailVerificationEmail(email, verifyUrl).catch(console.error);
 
-    const accessToken = generateAccessToken(result.user);
-    const refreshToken = generateRefreshToken(result.user);
+    const tokens = await issueTokenPair(result.user);
 
     res.status(201).json({
-      accessToken,
-      refreshToken,
-      user: {
-        id: result.user.id,
-        email: result.user.email,
-        firstName: result.user.firstName,
-        lastName: result.user.lastName,
-        role: result.user.role,
-        orgId: result.user.orgId,
-        orgName: result.org.name,
-        emailVerified: false,
-      },
+      message: SIGNUP_MESSAGE,
+      ...tokens,
+      user: publicUser({ ...result.user, emailVerified: false }, result.org.name),
     });
   } catch (err) {
     console.error('Signup error:', err);
@@ -111,22 +151,11 @@ router.post('/login', validate('login'), async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    const tokens = await issueTokenPair(user);
 
     res.json({
-      accessToken,
-      refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        orgId: user.orgId,
-        orgName: user.organization.name,
-        emailVerified: user.emailVerified,
-      },
+      ...tokens,
+      user: publicUser(user, user.organization.name),
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -150,29 +179,54 @@ router.post('/google', async (req, res) => {
       return res.status(401).json({ error: 'Invalid Google credential' });
     }
 
-    // Match an existing account by Google id first, then fall back to email so
-    // users who originally signed up with a password can link Google.
+    const profileEmail = String(profile.email || '').trim().toLowerCase();
+
     let user = await prisma.user.findFirst({
-      where: { OR: [{ googleId: profile.googleId }, { email: profile.email }] },
+      where: { googleId: profile.googleId },
       include: { organization: true },
     });
 
     if (user) {
-      // Link the Google id (and mark verified) on first Google login for an
-      // account that was created another way.
-      if (!user.googleId || !user.emailVerified) {
+      // googleId is not enough after an email change: Google must still own
+      // the address currently on the row (A1-03).
+      if (String(user.email || '').trim().toLowerCase() !== profileEmail) {
+        return res.status(409).json({
+          error: 'This Google account is no longer linked to this email. Sign in with your password or verify the new address.',
+        });
+      }
+      if (!user.emailVerified) {
         user = await prisma.user.update({
           where: { id: user.id },
+          data: { emailVerified: true, emailVerifyToken: null },
+          include: { organization: true },
+        });
+      }
+    } else {
+      const byEmail = await prisma.user.findUnique({
+        where: { email: profile.email },
+        include: { organization: true },
+      });
+      if (byEmail) {
+        // Email-link only when the inbox is already verified. A leftover
+        // googleId on an unverified row must not auto-verify.
+        if (!byEmail.emailVerified) {
+          return res.status(409).json({
+            error: 'An account with this email already exists. Verify your email or sign in with your password.',
+          });
+        }
+        user = await prisma.user.update({
+          where: { id: byEmail.id },
           data: {
-            googleId: user.googleId || profile.googleId,
+            googleId: byEmail.googleId || profile.googleId,
             emailVerified: true,
             emailVerifyToken: null,
           },
           include: { organization: true },
         });
       }
-    } else {
-      // New user — provision an organization, mirroring the signup flow.
+    }
+
+    if (!user) {
       const created = await prisma.$transaction(async (tx) => {
         const org = await tx.organization.create({
           data: {
@@ -180,6 +234,7 @@ router.post('/google', async (req, res) => {
               || `${profile.firstName} ${profile.lastName}`.trim()
               || profile.email,
             email: profile.email,
+            slug: slugForOrg(orgName || profile.email),
             settings: { create: {} },
           },
         });
@@ -202,22 +257,11 @@ router.post('/google', async (req, res) => {
       user = created;
     }
 
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    const tokens = await issueTokenPair(user);
 
     res.json({
-      accessToken,
-      refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        orgId: user.orgId,
-        orgName: user.organization.name,
-        emailVerified: user.emailVerified,
-      },
+      ...tokens,
+      user: publicUser(user, user.organization.name),
     });
   } catch (err) {
     console.error('Google auth error:', err);
@@ -233,19 +277,38 @@ router.post('/refresh', async (req, res) => {
       return res.status(400).json({ error: 'Refresh token required' });
     }
 
-    const payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-    const user = await prisma.user.findUnique({ where: { id: payload.id } });
-
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+    const rotated = await rotateRefreshToken(refreshToken);
+    if (!rotated) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
     }
 
-    const newAccessToken = generateAccessToken(user);
-    const newRefreshToken = generateRefreshToken(user);
-
-    res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
+    res.json(rotated);
   } catch (err) {
     return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+});
+
+// POST /api/auth/logout — revoke the refresh family (A1-01)
+router.post('/logout', async (req, res) => {
+  try {
+    const { refreshToken } = req.body || {};
+    if (refreshToken) {
+      await revokeFamilyForRefreshToken(refreshToken);
+    } else {
+      const header = req.headers.authorization;
+      if (header && header.startsWith('Bearer ')) {
+        try {
+          const payload = verifyAccessToken(header.split(' ')[1]);
+          if (payload?.id) await revokeAllForUser(payload.id);
+        } catch (err) {
+          // Access token may already be expired; still succeed locally.
+        }
+      }
+    }
+    res.json({ message: 'Logged out' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ error: 'Failed to log out' });
   }
 });
 
@@ -261,16 +324,7 @@ router.get('/me', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({
-      id: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: user.role,
-      orgId: user.orgId,
-      orgName: user.organization.name,
-      emailVerified: user.emailVerified,
-    });
+    res.json(publicUser(user, user.organization.name));
   } catch (err) {
     res.status(500).json({ error: 'Failed to get user' });
   }
@@ -281,11 +335,7 @@ router.post('/accept-invite', validate('acceptInvite'), async (req, res) => {
   try {
     const { token, firstName, lastName, password } = req.body;
 
-    const user = await prisma.user.findUnique({
-      where: { inviteToken: token },
-      include: { organization: true },
-    });
-
+    const user = await findInviteUser(token);
     if (!user) {
       return res.status(404).json({ error: 'Invalid or expired invite link' });
     }
@@ -299,25 +349,19 @@ router.post('/accept-invite', validate('acceptInvite'), async (req, res) => {
         lastName,
         passwordHash,
         inviteToken: null,
+        inviteTokenHash: null,
+        inviteTokenExpiry: null,
+        emailVerified: true,
+        emailVerifyToken: null,
       },
       include: { organization: true },
     });
 
-    const accessToken = generateAccessToken(updated);
-    const refreshToken = generateRefreshToken(updated);
+    const tokens = await issueTokenPair(updated);
 
     res.json({
-      accessToken,
-      refreshToken,
-      user: {
-        id: updated.id,
-        email: updated.email,
-        firstName: updated.firstName,
-        lastName: updated.lastName,
-        role: updated.role,
-        orgId: updated.orgId,
-        orgName: updated.organization.name,
-      },
+      ...tokens,
+      user: publicUser(updated, updated.organization.name),
     });
   } catch (err) {
     console.error('Accept invite error:', err);
@@ -333,11 +377,7 @@ router.get('/invite-info', async (req, res) => {
       return res.status(400).json({ error: 'Token required' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { inviteToken: token },
-      include: { organization: { select: { name: true } } },
-    });
-
+    const user = await findInviteUser(token);
     if (!user) {
       return res.status(404).json({ error: 'Invalid or expired invite link' });
     }
@@ -349,7 +389,7 @@ router.get('/invite-info', async (req, res) => {
 });
 
 // PUT /api/auth/me — update own profile
-router.put('/me', authenticate, async (req, res) => {
+router.put('/me', authenticate, validate('updateProfile'), async (req, res) => {
   try {
     const { firstName, lastName, email, currentPassword, newPassword } = req.body;
 
@@ -363,11 +403,23 @@ router.put('/me', authenticate, async (req, res) => {
     if (lastName) data.lastName = lastName;
 
     if (email && email !== user.email) {
+      if (!user.passwordHash) {
+        return res.status(400).json({ error: 'Set a password before changing email' });
+      }
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Current password required to change email' });
+      }
+      const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
       const existing = await prisma.user.findUnique({ where: { email } });
       if (existing) {
         return res.status(409).json({ error: 'Email already in use' });
       }
       data.email = email;
+      data.emailVerified = false;
+      data.emailVerifyToken = crypto.randomBytes(32).toString('hex');
     }
 
     if (newPassword) {
@@ -396,15 +448,12 @@ router.put('/me', authenticate, async (req, res) => {
       include: { organization: true },
     });
 
-    res.json({
-      id: updated.id,
-      email: updated.email,
-      firstName: updated.firstName,
-      lastName: updated.lastName,
-      role: updated.role,
-      orgId: updated.orgId,
-      orgName: updated.organization.name,
-    });
+    if (data.emailVerifyToken) {
+      const verifyUrl = `${process.env.APP_URL || 'https://app.proofcoi.com'}/verify-email?token=${data.emailVerifyToken}`;
+      await sendEmailVerificationEmail(updated.email, verifyUrl).catch(console.error);
+    }
+
+    res.json(publicUser(updated, updated.organization.name));
   } catch (err) {
     console.error('Update profile error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
@@ -465,6 +514,7 @@ router.post('/reset-password', async (req, res) => {
       where: { id: user.id },
       data: { passwordHash, resetToken: null, resetTokenExpiry: null },
     });
+    await revokeAllForUser(user.id);
 
     res.json({ message: 'Password has been reset successfully' });
   } catch (err) {

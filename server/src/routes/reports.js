@@ -1,7 +1,7 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { PDFDocument } = require('pdf-lib');
-const { authenticate } = require('../middleware/auth');
+const { authenticateVerified: authenticate } = require('../middleware/auth');
 const { downloadFile } = require('../services/storage');
 const { buildTimeline } = require('../services/coverageTimeline');
 const { COVERAGE_LINES } = require('../services/coverage');

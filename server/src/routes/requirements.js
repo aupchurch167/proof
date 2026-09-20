@@ -1,6 +1,6 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { COVERAGE_LINES, coverageFor } = require('../services/coverage');
 const { logAudit } = require('../services/audit');
 

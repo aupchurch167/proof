@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { api } from '../utils/api';
+import { api, API_BASE } from '../utils/api';
 
 const AuthContext = createContext(null);
 
@@ -22,38 +22,60 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const login = async (email, password) => {
-    const data = await api.post('/auth/login', { email, password });
+  const storeSession = (data) => {
+    if (!data?.accessToken || !data?.refreshToken) return false;
     localStorage.setItem('accessToken', data.accessToken);
     localStorage.setItem('refreshToken', data.refreshToken);
     setUser(data.user);
+    return true;
+  };
+
+  const login = async (email, password) => {
+    const data = await api.post('/auth/login', { email, password });
+    storeSession(data);
     return data.user;
   };
 
   const signup = async (formData) => {
     const data = await api.post('/auth/signup', formData);
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
-    setUser(data.user);
-    return data.user;
+    storeSession(data);
+    return data;
   };
 
   const loginWithGoogle = async (credential, orgName) => {
     const data = await api.post('/auth/google', { credential, orgName });
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
-    setUser(data.user);
+    storeSession(data);
     return data.user;
   };
 
-  const logout = () => {
+  const refreshUser = async () => {
+    const me = await api.get('/auth/me');
+    setUser(me);
+    return me;
+  };
+
+  const logout = async () => {
+    const refreshToken = localStorage.getItem('refreshToken');
+    const accessToken = localStorage.getItem('accessToken');
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: JSON.stringify({ refreshToken }),
+      });
+    } catch (_) {
+      // Local logout still proceeds if the network call fails.
+    }
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, loginWithGoogle, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

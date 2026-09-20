@@ -17,8 +17,8 @@ function hasScope(client, scope) {
   return scopes.includes('*') || scopes.includes(scope);
 }
 
-// Resolve an org by its slug or, as a fallback, its id — matching how the public
-// apply routes resolve orgs (many orgs have no slug set).
+// Resolve an org by its slug or, as a fallback, its id. Authenticated v1
+// tokens may use either; the public apply form is slug-only (A2-05).
 function resolveOrg(slugOrId) {
   return prisma.organization.findFirst({
     where: { OR: [{ slug: slugOrId }, { id: slugOrId }] },

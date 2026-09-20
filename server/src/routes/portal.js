@@ -9,8 +9,33 @@ const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
 const { uploadFile } = require('../services/storage');
+const { verifyUploadToken } = require('../utils/tokens');
 
 const router = express.Router();
+
+async function loadPortalVendor(req, res, query = {}) {
+  let payload;
+  try {
+    payload = verifyUploadToken(req.params.uploadToken);
+  } catch (err) {
+    res.status(401).json({ error: 'Upload link has expired or is invalid', orgName: null });
+    return null;
+  }
+  if (!payload.vendorId) {
+    res.status(401).json({ error: 'Upload link has expired or is invalid', orgName: null });
+    return null;
+  }
+
+  const vendor = await prisma.vendor.findFirst({
+    where: { id: payload.vendorId, deletedAt: null },
+    ...query,
+  });
+  if (!vendor) {
+    res.status(404).json({ error: 'Upload link has expired or is invalid', orgName: null });
+    return null;
+  }
+  return vendor;
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -27,8 +52,7 @@ const upload = multer({
 // GET /api/portal/:uploadToken
 router.get('/:uploadToken', async (req, res) => {
   try {
-    const vendor = await prisma.vendor.findFirst({
-      where: { uploadToken: req.params.uploadToken, deletedAt: null },
+    const vendor = await loadPortalVendor(req, res, {
       select: {
         id: true, name: true, contactName: true, email: true, phone: true, address: true,
         orgId: true,
@@ -42,10 +66,7 @@ router.get('/:uploadToken', async (req, res) => {
         },
       },
     });
-
-    if (!vendor) {
-      return res.status(404).json({ error: 'Upload link has expired or is invalid', orgName: null });
-    }
+    if (!vendor) return;
 
     // The portal has to tell a vendor exactly what to send, so it carries the
     // org's requirements and what is currently on file for them.
@@ -74,13 +95,8 @@ router.put('/:uploadToken/info', async (req, res) => {
   try {
     const { name, contactName, email, phone, address } = req.body;
 
-    const vendor = await prisma.vendor.findFirst({
-      where: { uploadToken: req.params.uploadToken, deletedAt: null },
-    });
-
-    if (!vendor) {
-      return res.status(404).json({ error: 'Upload link has expired or is invalid' });
-    }
+    const vendor = await loadPortalVendor(req, res);
+    if (!vendor) return;
 
     const updated = await prisma.vendor.update({
       where: { id: vendor.id },
@@ -103,14 +119,10 @@ router.put('/:uploadToken/info', async (req, res) => {
 // POST /api/portal/:uploadToken/upload
 router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
   try {
-    const vendor = await prisma.vendor.findFirst({
-      where: { uploadToken: req.params.uploadToken, deletedAt: null },
+    const vendor = await loadPortalVendor(req, res, {
       include: { organization: { include: { settings: true } } },
     });
-
-    if (!vendor) {
-      return res.status(404).json({ error: 'Upload link has expired or is invalid' });
-    }
+    if (!vendor) return;
 
     if (!req.file) {
       return res.status(400).json({ error: 'PDF file required' });

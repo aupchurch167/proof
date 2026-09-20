@@ -1,6 +1,10 @@
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-which-is-32-chars!!';
+process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'test-refresh-secret-32-chars-ok!';
+
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { generateAccessToken, generateUploadToken } = require('../src/utils/tokens');
+const { hashToken } = require('../src/lib/apiTokens');
 
 const prisma = new PrismaClient();
 
@@ -30,7 +34,12 @@ async function createTestUser(orgId, overrides = {}) {
       firstName: overrides.firstName || 'Test',
       lastName: overrides.lastName || 'User',
       role: overrides.role || 'ADMIN',
-      inviteToken: overrides.inviteToken || null,
+      emailVerified: overrides.emailVerified ?? true,
+      ...(overrides.inviteToken && {
+        inviteToken: overrides.inviteToken,
+        inviteTokenHash: hashToken(overrides.inviteToken),
+        inviteTokenExpiry: overrides.inviteTokenExpiry || new Date(Date.now() + 48 * 60 * 60 * 1000),
+      }),
     },
     include: { organization: true },
   });
@@ -99,6 +108,7 @@ function getAuthToken(user) {
 
 async function cleanupTestData() {
   // Delete in dependency order
+  await prisma.session.deleteMany({});
   await prisma.auditLog.deleteMany({});
   await prisma.coiRequest.deleteMany({});
   await prisma.notificationLog.deleteMany({});

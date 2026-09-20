@@ -1,22 +1,40 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const prisma = require('../lib/prisma');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { sendInviteEmail } = require('../services/email');
 const { logAudit } = require('../services/audit');
+const { hashToken } = require('../lib/apiTokens');
+const { revokeAllForUser } = require('../lib/sessions');
 
 const router = express.Router();
+
+const INVITE_TTL_MS = 48 * 60 * 60 * 1000;
+
+function serializeUser(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.role,
+    createdAt: user.createdAt,
+    invitePending: Boolean(user.inviteTokenHash || user.inviteToken),
+  };
+}
 
 // GET /api/users — ADMIN only
 router.get('/', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const users = await prisma.user.findMany({
       where: { orgId: req.user.orgId },
-      select: { id: true, email: true, firstName: true, lastName: true, role: true, inviteToken: true, createdAt: true },
+      select: {
+        id: true, email: true, firstName: true, lastName: true, role: true,
+        inviteToken: true, inviteTokenHash: true, createdAt: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
-    res.json(users);
+    res.json(users.map(serializeUser));
   } catch (err) {
     res.status(500).json({ error: 'Failed to list users' });
   }
@@ -39,7 +57,9 @@ router.post('/invite', authenticate, authorize('ADMIN'), async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    const inviteToken = uuidv4();
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const inviteTokenHash = hashToken(rawToken);
+    const inviteTokenExpiry = new Date(Date.now() + INVITE_TTL_MS);
 
     const user = await prisma.user.create({
       data: {
@@ -49,9 +69,10 @@ router.post('/invite', authenticate, authorize('ADMIN'), async (req, res) => {
         firstName: '',
         lastName: '',
         role: assignRole,
-        inviteToken,
+        inviteTokenHash,
+        inviteTokenExpiry,
       },
-      select: { id: true, email: true, role: true, inviteToken: true, createdAt: true },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, createdAt: true },
     });
 
     // Fetch org name for the email
@@ -60,10 +81,10 @@ router.post('/invite', authenticate, authorize('ADMIN'), async (req, res) => {
       select: { name: true },
     });
 
-    const inviteUrl = `${process.env.APP_URL}/accept-invite?token=${inviteToken}`;
+    const inviteUrl = `${process.env.APP_URL}/accept-invite?token=${rawToken}`;
     await sendInviteEmail(email, org?.name || 'your organization', inviteUrl).catch(console.error);
 
-    res.status(201).json(user);
+    res.status(201).json({ ...user, invitePending: true });
   } catch (err) {
     console.error('Invite error:', err);
     res.status(500).json({ error: 'Failed to invite user' });
@@ -135,6 +156,7 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
       }
     }
 
+    await revokeAllForUser(targetUser.id);
     await prisma.user.delete({ where: { id: req.params.id } });
     logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'remove', entity: 'user', entityId: req.params.id, details: { email: targetUser.email }, ipAddress: req.ip });
 

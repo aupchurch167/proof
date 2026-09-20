@@ -1,7 +1,8 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
+const { generateUploadToken } = require('../utils/tokens');
 
 const router = express.Router();
 
@@ -46,8 +47,8 @@ router.put('/', authenticate, authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// GET /api/organization/usage — plan meter for the sidebar, plus a token the
-// "Vendor portal" nav link can preview. One call so the shell doesn't fan out.
+// GET /api/organization/usage — plan meter for the sidebar. ADMIN-only mint of
+// a short-lived portal preview JWT (never the stored uploadToken).
 router.get('/usage', authenticate, async (req, res) => {
   try {
     const org = await prisma.organization.findUnique({
@@ -60,11 +61,13 @@ router.get('/usage', authenticate, async (req, res) => {
     const [vendorCount, coiCount, sampleVendor] = await Promise.all([
       prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } }),
       prisma.coi.count({ where: { orgId: req.user.orgId } }),
-      prisma.vendor.findFirst({
-        where: { orgId: req.user.orgId, deletedAt: null },
-        orderBy: { createdAt: 'asc' },
-        select: { uploadToken: true },
-      }),
+      req.user.role === 'ADMIN'
+        ? prisma.vendor.findFirst({
+          where: { orgId: req.user.orgId, deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        })
+        : Promise.resolve(null),
     ]);
 
     // Infinity doesn't survive JSON, so an unlimited plan reports a null limit
@@ -75,13 +78,17 @@ router.get('/usage', authenticate, async (req, res) => {
       percent: limit === Infinity ? 0 : Math.min(100, Math.round((used / limit) * 100)),
     });
 
-    res.json({
+    const body = {
       plan,
       planLabel: getPlanLabel(plan),
       vendors: meter(vendorCount, limits.maxVendors),
       cois: meter(coiCount, limits.maxCois),
-      portalPreviewToken: sampleVendor?.uploadToken || null,
-    });
+    };
+    if (req.user.role === 'ADMIN' && sampleVendor) {
+      body.portalPreviewToken = generateUploadToken(sampleVendor.id, '15m');
+    }
+
+    res.json(body);
   } catch (err) {
     console.error('Usage error:', err);
     res.status(500).json({ error: 'Failed to load plan usage' });

@@ -7,6 +7,7 @@ export default function Signup() {
   const [form, setForm] = useState({ orgName: '', email: '', password: '', firstName: '', lastName: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const { signup, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
 
@@ -17,8 +18,13 @@ export default function Signup() {
     setError('');
     setLoading(true);
     try {
-      await signup(form);
-      navigate('/');
+      const data = await signup(form);
+      if (data.accessToken) {
+        navigate('/');
+      } else {
+        setError('');
+        setSubmitted(true);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -46,6 +52,11 @@ export default function Signup() {
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-card shadow-sm border">
           <h2 className="text-xl font-semibold mb-1">Create your account</h2>
           <p className="text-sm text-muted mb-6">You'll be the admin for your organization. You can invite team members later.</p>
+          {submitted && (
+            <div className="bg-ok-bg text-ok-text px-4 py-3 rounded-control mb-4 text-sm">
+              If this address is new, we sent a verification email.
+            </div>
+          )}
           {error && <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control mb-4 text-sm">{error}</div>}
           <div className="mb-4">
             <label className="block text-sm font-medium text-ink-2 mb-1">Company Name</label>

@@ -54,7 +54,7 @@ describe('POST /api/vendors', () => {
     expect(res.status).toBe(201);
     expect(res.body.name).toBe('Acme Corp');
     expect(res.body.email).toBe('acme@test.com');
-    expect(res.body).toHaveProperty('uploadToken');
+    expect(res.body).not.toHaveProperty('uploadToken');
   });
 
   it('returns 400 with missing name', async () => {
