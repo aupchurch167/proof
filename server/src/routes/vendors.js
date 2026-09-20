@@ -10,9 +10,10 @@ const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
 const { coverageFor, coverageReason } = require('../services/coverage');
-const { uploadFile, deleteFile, getSignedUrl } = require('../services/storage');
+const { uploadFile, getSignedUrl } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
+const { isVendorEmailConflict } = require('../lib/prismaErrors');
 const { isPlaceholderEmail, placeholderReason } = require('../utils/email');
 const { logAudit } = require('../services/audit');
 const core = require('../lib/core');
@@ -68,6 +69,7 @@ router.get('/', authenticate, async (req, res) => {
         orderBy: { name: 'asc' },
         include: {
           cois: {
+            where: { deletedAt: null },
             orderBy: { submittedAt: 'desc' },
             select: {
               id: true, status: true, submittedAt: true, coverageType: true,
@@ -137,6 +139,12 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
 
     res.status(201).json(omitVendorSecrets(updated));
   } catch (err) {
+    if (isVendorEmailConflict(err)) {
+      return res.status(409).json({
+        error: 'A vendor with this email already exists',
+        code: 'VENDOR_EMAIL_CONFLICT',
+      });
+    }
     console.error('Create vendor error:', err);
     res.status(500).json({ error: 'Failed to create vendor' });
   }
@@ -196,7 +204,7 @@ router.get('/:id', authenticate, async (req, res) => {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
       include: {
-        cois: { orderBy: { submittedAt: 'desc' } },
+        cois: { where: { deletedAt: null }, orderBy: { submittedAt: 'desc' } },
       },
     });
 
@@ -272,11 +280,28 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
 
     res.json(omitVendorSecrets(updated));
   } catch (err) {
+    if (isVendorEmailConflict(err)) {
+      return res.status(409).json({
+        error: 'A vendor with this email already exists',
+        code: 'VENDOR_EMAIL_CONFLICT',
+      });
+    }
     res.status(500).json({ error: 'Failed to update vendor' });
   }
 });
 
-// DELETE /api/vendors/bulk (soft delete multiple, hard delete COIs first)
+async function softDeleteVendorsAndCois(tx, { ids, orgId, now = new Date() }) {
+  await tx.coi.updateMany({
+    where: { vendorId: { in: ids }, orgId, deletedAt: null },
+    data: { deletedAt: now },
+  });
+  return tx.vendor.updateMany({
+    where: { id: { in: ids }, orgId, deletedAt: null },
+    data: { deletedAt: now },
+  });
+}
+
+// DELETE /api/vendors/bulk (soft-delete vendors and COIs; keep Spaces objects)
 router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
   try {
     const { ids } = req.body;
@@ -290,26 +315,9 @@ router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, r
       select: { coreId: true },
     });
 
-    // Delete COI files from Spaces, then delete records
-    const coisToDelete = await prisma.coi.findMany({
-      where: { vendorId: { in: ids }, orgId: req.user.orgId },
-      select: { pdfPath: true },
-    });
-    for (const c of coisToDelete) {
-      if (c.pdfPath) {
-        await deleteFile(c.pdfPath).catch(err => console.error('[Storage] Delete failed:', err.message));
-      }
-    }
-
-    await prisma.coi.deleteMany({
-      where: { vendorId: { in: ids }, orgId: req.user.orgId },
-    });
-
-    // Then, soft-delete the vendors
-    const { count } = await prisma.vendor.updateMany({
-      where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null },
-      data: { deletedAt: new Date() },
-    });
+    const { count } = await prisma.$transaction((tx) => (
+      softDeleteVendorsAndCois(tx, { ids, orgId: req.user.orgId })
+    ));
 
     for (const v of linked) mirrorDeleteToCore(v.coreId);
 
@@ -320,7 +328,7 @@ router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, r
   }
 });
 
-// DELETE /api/vendors/:id (soft delete, hard delete COIs first)
+// DELETE /api/vendors/:id (soft-delete vendor and COIs; keep Spaces objects)
 router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
@@ -331,26 +339,9 @@ router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, re
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
-    // Delete COI files from Spaces, then delete records
-    const vendorCois = await prisma.coi.findMany({
-      where: { vendorId: req.params.id, orgId: req.user.orgId },
-      select: { pdfPath: true },
-    });
-    for (const c of vendorCois) {
-      if (c.pdfPath) {
-        await deleteFile(c.pdfPath).catch(err => console.error('[Storage] Delete failed:', err.message));
-      }
-    }
-
-    await prisma.coi.deleteMany({
-      where: { vendorId: req.params.id, orgId: req.user.orgId },
-    });
-
-    // Then soft-delete the vendor
-    await prisma.vendor.update({
-      where: { id: req.params.id },
-      data: { deletedAt: new Date() },
-    });
+    await prisma.$transaction((tx) => (
+      softDeleteVendorsAndCois(tx, { ids: [vendor.id], orgId: req.user.orgId })
+    ));
 
     mirrorDeleteToCore(vendor.coreId);
 

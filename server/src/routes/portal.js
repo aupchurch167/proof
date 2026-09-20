@@ -60,7 +60,7 @@ router.get('/:uploadToken', async (req, res) => {
           select: { id: true, name: true, email: true, address: true, additionalInsuredNote: true },
         },
         cois: {
-          where: { status: 'APPROVED' },
+          where: { status: 'APPROVED', deletedAt: null },
           orderBy: { submittedAt: 'desc' },
           take: 1,
         },

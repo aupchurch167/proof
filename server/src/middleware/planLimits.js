@@ -64,7 +64,10 @@ function enforcePlanLimit(resource) {
       next();
     } catch (err) {
       console.error('Plan limit check failed:', err);
-      next();
+      return res.status(503).json({
+        error: 'Plan limit check unavailable. Please try again.',
+        code: 'PLAN_LIMIT_UNAVAILABLE',
+      });
     }
   };
 }
