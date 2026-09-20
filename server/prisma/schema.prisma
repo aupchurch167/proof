@@ -127,18 +127,38 @@ model User {
   firstName    String
   lastName     String
   role             UserRole @default(ADMIN)
-  emailVerified    Boolean  @default(false)
-  emailVerifyToken String?  @unique
-  inviteToken      String?  @unique
-  resetToken       String?  @unique
-  resetTokenExpiry DateTime?
+  emailVerified     Boolean  @default(false)
+  emailVerifyToken  String?  @unique
+  inviteToken       String?  @unique
+  inviteTokenHash   String?  @unique
+  inviteTokenExpiry DateTime?
+  resetToken        String?  @unique
+  resetTokenExpiry  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   reviewedCois Coi[]        @relation("ReviewedBy")
+  sessions     Session[]
 
   @@index([orgId])
+}
+
+// Hashed refresh tokens. A family is one login; logout / password reset revoke
+// the whole family so a stolen refresh JWT cannot be used after those events.
+model Session {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  family    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
 }
 
 model Vendor {

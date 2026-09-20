@@ -77,9 +77,12 @@ describe('POST /api/auth/google', () => {
     expect(dbUser.googleId).toBeTruthy();
   });
 
-  it('links Google to an existing password account matched by email', async () => {
+  it('links Google to an existing verified password account matched by email', async () => {
     const org = await createTestOrg();
-    const user = await createTestUser(org.id, { email: `glink-${Date.now()}@test.com` });
+    const user = await createTestUser(org.id, {
+      email: `glink-${Date.now()}@test.com`,
+      emailVerified: true,
+    });
 
     verifyGoogleIdToken.mockResolvedValue({
       googleId: `google-link-${Date.now()}`,
@@ -100,6 +103,32 @@ describe('POST /api/auth/google', () => {
     expect(dbUser.emailVerified).toBe(true);
     // Existing password is preserved so the user can still log in either way.
     expect(dbUser.passwordHash).toBeTruthy();
+  });
+
+  it('refuses to attach Google to an unverified password account (X-04 / A1-03)', async () => {
+    const org = await createTestOrg();
+    const user = await createTestUser(org.id, {
+      email: `gunverified-${Date.now()}@test.com`,
+      emailVerified: false,
+    });
+
+    verifyGoogleIdToken.mockResolvedValue({
+      googleId: `google-unverified-${Date.now()}`,
+      email: user.email,
+      firstName: 'Test',
+      lastName: 'User',
+    });
+
+    const res = await request(app)
+      .post('/api/auth/google')
+      .send({ credential: 'valid-token' });
+
+    expect(res.status).toBe(409);
+    expect(res.body).not.toHaveProperty('accessToken');
+
+    const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+    expect(dbUser.googleId).toBeNull();
+    expect(dbUser.emailVerified).toBe(false);
   });
 });
 

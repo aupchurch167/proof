@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const prisma = require('../lib/prisma');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
 const { checkCompliance } = require('../services/compliance');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');

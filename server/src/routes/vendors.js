@@ -3,7 +3,8 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('../lib/prisma');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
+const { omitVendorSecrets } = require('../http/sanitize');
 const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
@@ -85,7 +86,7 @@ router.get('/', authenticate, async (req, res) => {
     res.json(vendors.map((vendor) => {
       const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
       const coverages = coverageFor(latestApproved, settings, { now });
-      return {
+      return omitVendorSecrets({
         ...vendor,
         // The list only ever renders the newest certificate.
         cois: vendor.cois.slice(0, 1),
@@ -95,7 +96,7 @@ router.get('/', authenticate, async (req, res) => {
           .filter((c) => c.expiresAt && c.verdict !== 'skipped')
           .map((c) => c.expiresAt)
           .sort()[0] || null,
-      };
+      });
     }));
   } catch (err) {
     res.status(500).json({ error: 'Failed to list vendors' });
@@ -134,7 +135,7 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
 
     mirrorCreateToCore(updated);
 
-    res.status(201).json(updated);
+    res.status(201).json(omitVendorSecrets(updated));
   } catch (err) {
     console.error('Create vendor error:', err);
     res.status(500).json({ error: 'Failed to create vendor' });
@@ -219,7 +220,7 @@ router.get('/:id', authenticate, async (req, res) => {
     const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
     const coverages = coverageFor(latestApproved, settings, {});
 
-    res.json({
+    res.json(omitVendorSecrets({
       ...vendor,
       w9Url,
       masterAgreementUrl,
@@ -231,7 +232,7 @@ router.get('/:id', authenticate, async (req, res) => {
       supersededCoiIds: latestApproved
         ? vendor.cois.filter((c) => c.status === 'APPROVED' && c.id !== latestApproved.id).map((c) => c.id)
         : [],
-    });
+    }));
   } catch (err) {
     res.status(500).json({ error: 'Failed to get vendor' });
   }
@@ -269,7 +270,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
 
     mirrorUpdateToCore(updated);
 
-    res.json(updated);
+    res.json(omitVendorSecrets(updated));
   } catch (err) {
     res.status(500).json({ error: 'Failed to update vendor' });
   }

@@ -144,7 +144,7 @@ export default function Users() {
               <tr><td colSpan={4} className="text-center py-8 text-faint">No team members yet. Invite someone to get started.</td></tr>
             )}
             {users.map((u) => {
-              const isPending = !!u.inviteToken;
+              const isPending = !!u.invitePending;
               const displayName = isPending
                 ? u.email
                 : `${u.firstName} ${u.lastName}`;

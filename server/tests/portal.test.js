@@ -43,6 +43,38 @@ describe('GET /api/portal/:uploadToken', () => {
     expect(res.body.error).toMatch(/expired|invalid/i);
   });
 
+  it('returns 401 for a UUID token that is not a JWT', async () => {
+    const res = await request(app)
+      .get('/api/portal/11111111-2222-3333-4444-555555555555');
+
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 when the JWT is expired', async () => {
+    const jwt = require('jsonwebtoken');
+    const expired = jwt.sign(
+      { vendorId: vendor.id, purpose: 'upload' },
+      process.env.JWT_SECRET,
+      { expiresIn: '0s', algorithm: 'HS256' }
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    const res = await request(app).get(`/api/portal/${expired}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 when the JWT purpose is not upload', async () => {
+    const jwt = require('jsonwebtoken');
+    const wrong = jwt.sign(
+      { vendorId: vendor.id, purpose: 'preview' },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d', algorithm: 'HS256' }
+    );
+
+    const res = await request(app).get(`/api/portal/${wrong}`);
+    expect(res.status).toBe(401);
+  });
+
   it('returns 404 when token is valid JWT but vendor not found', async () => {
     // Generate a valid JWT for a non-existent vendor ID
     const { generateUploadToken } = require('../src/utils/tokens');

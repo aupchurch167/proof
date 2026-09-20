@@ -39,7 +39,7 @@ function Meter({ label, used, limit }) {
 }
 
 export default function Settings() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const toast = useToast();
   const { usage } = useUsage();
 
@@ -48,12 +48,13 @@ export default function Settings() {
   const [org, setOrg] = useState(null);
   const [orgForm, setOrgForm] = useState({ name: '', email: '', phone: '', address: '', additionalInsuredNote: '' });
   const [team, setTeam] = useState([]);
-  const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', email: '' });
+  const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', email: '', currentPassword: '' });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [saving, setSaving] = useState('');
 
   const isAdmin = user?.role === 'ADMIN';
-  const applyUrl = org ? `${window.location.origin}/apply/${org.slug || org.id}` : null;
+  const applyUrl = org?.slug ? `${window.location.origin}/apply/${org.slug}` : null;
+  const emailChanging = profileForm.email && user?.email && profileForm.email !== user.email;
 
   useEffect(() => {
     Promise.all([
@@ -67,7 +68,7 @@ export default function Settings() {
           name: o.name || '', email: o.email || '', phone: o.phone || '',
           address: o.address || '', additionalInsuredNote: o.additionalInsuredNote || '',
         });
-        setProfileForm({ firstName: me.firstName, lastName: me.lastName, email: me.email });
+        setProfileForm({ firstName: me.firstName, lastName: me.lastName, email: me.email, currentPassword: '' });
         setTeam(Array.isArray(t) ? t : []);
       })
       .catch(() => toast.error("Couldn't load settings"))
@@ -89,8 +90,16 @@ export default function Settings() {
   const saveProfile = async () => {
     setSaving('profile');
     try {
-      await api.put('/auth/me', profileForm);
-      toast.success('Profile saved');
+      const payload = {
+        firstName: profileForm.firstName,
+        lastName: profileForm.lastName,
+        email: profileForm.email,
+      };
+      if (emailChanging) payload.currentPassword = profileForm.currentPassword;
+      await api.put('/auth/me', payload);
+      if (refreshUser) await refreshUser();
+      setProfileForm((prev) => ({ ...prev, currentPassword: '' }));
+      toast.success(emailChanging ? 'Profile saved. Check your inbox to verify the new email.' : 'Profile saved');
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -214,6 +223,11 @@ export default function Settings() {
                 Anyone with this link can apply to become one of your vendors. Each vendor also gets
                 their own private upload link in every certificate request.
               </p>
+              {!applyUrl && (
+                <p className="text-xs text-muted">
+                  The public apply form is available once this organization has a URL slug.
+                </p>
+              )}
               {applyUrl && (
                 <div className="flex gap-2 items-center flex-wrap">
                   <code className="px-3 py-2 bg-card-alt border border-line rounded-control text-xs text-ink break-all">
@@ -249,6 +263,16 @@ export default function Settings() {
                   <Field label="Email" className="sm:col-span-2">
                     <input value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} className={input} />
                   </Field>
+                  {emailChanging && (
+                    <Field label="Current password" hint="required to change email" className="sm:col-span-2">
+                      <input
+                        type="password"
+                        value={profileForm.currentPassword}
+                        onChange={(e) => setProfileForm({ ...profileForm, currentPassword: e.target.value })}
+                        className={input}
+                      />
+                    </Field>
+                  )}
                 </div>
                 <div className="flex justify-end">
                   <Button variant="navy" onClick={saveProfile} disabled={saving === 'profile'}>

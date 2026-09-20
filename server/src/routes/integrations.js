@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { generateToken, hashToken, tokenPrefix } = require('../lib/apiTokens');
 const { ALL_SCOPES } = require('../middleware/apiAuth');
 const { EVENTS } = require('../services/webhookDispatcher');

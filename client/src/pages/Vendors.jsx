@@ -180,7 +180,9 @@ export default function Vendors() {
     VENDOR_FILTERS.find((f) => f.statuses?.includes(statusParam))?.label || 'All';
 
   useEffect(() => {
-    api.get('/organization').then((org) => setApplyUrl(`${window.location.origin}/apply/${org.slug || org.id}`)).catch(() => {});
+    api.get('/organization').then((org) => {
+      setApplyUrl(org.slug ? `${window.location.origin}/apply/${org.slug}` : '');
+    }).catch(() => {});
   }, []);
 
   const fetchVendors = async () => {

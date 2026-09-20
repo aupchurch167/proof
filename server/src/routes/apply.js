@@ -9,6 +9,7 @@ const { extractCoiData } = require('../services/coiExtractor');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
 const { generateUploadToken } = require('../utils/tokens');
 const { isValidTrade } = require('../constants/trades');
+const { evaluatePlanLimit } = require('../middleware/planLimits');
 
 const router = express.Router();
 
@@ -31,9 +32,12 @@ const applyLimiter = rateLimit({
   message: { error: 'Too many submissions, please try again later' },
 });
 
-function findOrg(slugOrId, extra = {}) {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function findOrgBySlug(slug, extra = {}) {
+  if (!slug || UUID_RE.test(slug)) return null;
   return prisma.organization.findFirst({
-    where: { OR: [{ slug: slugOrId }, { id: slugOrId }] },
+    where: { slug },
     ...extra,
   });
 }
@@ -41,11 +45,11 @@ function findOrg(slugOrId, extra = {}) {
 // GET /api/apply/:slug — minimal public org info so the form can brand itself.
 router.get('/:slug', async (req, res) => {
   try {
-    const org = await findOrg(req.params.slug, {
+    const org = await findOrgBySlug(req.params.slug, {
       select: { id: true, name: true, slug: true },
     });
     if (!org) return res.status(404).json({ error: 'Not found' });
-    res.json({ name: org.name, slug: org.slug || org.id });
+    res.json({ name: org.name, slug: org.slug });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load' });
   }
@@ -58,8 +62,16 @@ router.post(
   upload.fields([{ name: 'w9', maxCount: 1 }, { name: 'coi', maxCount: 1 }]),
   async (req, res) => {
     try {
-      const org = await findOrg(req.params.slug, { include: { settings: true } });
+      const org = await findOrgBySlug(req.params.slug, { include: { settings: true } });
       if (!org) return res.status(404).json({ error: 'Not found' });
+
+      const limit = await evaluatePlanLimit(org.id, 'vendor');
+      if (!limit.ok) {
+        return res.status(403).json({
+          ...limit.body,
+          error: 'This organization has reached its vendor limit. Please contact them to resolve this.',
+        });
+      }
 
       const { name, contactName, phone, email, trade, notes, address, city, state, zip } = req.body;
       if (!name || !email || !phone || !address) {
