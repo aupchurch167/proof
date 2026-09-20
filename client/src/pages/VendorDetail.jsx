@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useUsage } from '../contexts/UsageContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import PdfUploadZone from '../components/PdfUploadZone';
 import EmailTagInput from '../components/EmailTagInput';
@@ -71,6 +72,7 @@ export default function VendorDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const toast = useToast();
+  const { refreshUsage } = useUsage();
 
   const [vendor, setVendor] = useState(null);
   const [replies, setReplies] = useState([]);
@@ -360,6 +362,7 @@ export default function VendorDetail() {
           try {
             await api.delete(`/vendors/${id}`);
             toast.success('Vendor deleted');
+            refreshUsage();
             navigate('/vendors');
           } finally {
             setDeleting(false);

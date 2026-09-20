@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useUsage } from '../contexts/UsageContext';
 import { Button, Card, PageTitle } from '../components/ui';
 
 const TABS = ['Company', 'Team', 'Plan & billing', 'Vendor portal', 'Profile'];
@@ -40,12 +41,12 @@ function Meter({ label, used, limit }) {
 export default function Settings() {
   const { user } = useAuth();
   const toast = useToast();
+  const { usage } = useUsage();
 
   const [tab, setTab] = useState('Company');
   const [loading, setLoading] = useState(true);
   const [org, setOrg] = useState(null);
   const [orgForm, setOrgForm] = useState({ name: '', email: '', phone: '', address: '', additionalInsuredNote: '' });
-  const [usage, setUsage] = useState(null);
   const [team, setTeam] = useState([]);
   const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', email: '' });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -58,17 +59,15 @@ export default function Settings() {
     Promise.all([
       api.get('/organization'),
       api.get('/auth/me'),
-      api.get('/organization/usage').catch(() => null),
       api.get('/users').catch(() => []),
     ])
-      .then(([o, me, u, t]) => {
+      .then(([o, me, t]) => {
         setOrg(o);
         setOrgForm({
           name: o.name || '', email: o.email || '', phone: o.phone || '',
           address: o.address || '', additionalInsuredNote: o.additionalInsuredNote || '',
         });
         setProfileForm({ firstName: me.firstName, lastName: me.lastName, email: me.email });
-        setUsage(u);
         setTeam(Array.isArray(t) ? t : []);
       })
       .catch(() => toast.error("Couldn't load settings"))

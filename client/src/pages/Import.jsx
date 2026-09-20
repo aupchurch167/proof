@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useUsage } from '../contexts/UsageContext';
 import { api } from '../utils/api';
 import PdfUploadZone from '../components/PdfUploadZone';
 
@@ -86,6 +87,7 @@ function PdfStatusBadge({ status, error: errorMsg }) {
 
 export default function Import() {
   const { user } = useAuth();
+  const { refreshUsage } = useUsage();
   const [importType, setImportType] = useState('vendors');
   const [step, setStep] = useState(0);
   const [requestAfterImport, setRequestAfterImport] = useState(true);
@@ -238,6 +240,7 @@ export default function Import() {
       const data = await res.json();
       setResults(data);
       setStep(3);
+      if (importType === 'vendors') refreshUsage();
     } catch (err) {
       setError(err.message);
     } finally {
