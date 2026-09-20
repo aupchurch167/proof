@@ -8,7 +8,7 @@ Audit files live on `cursor/audit-pre-launch-30f7` (PR #9) and were not all on `
 |---|---|
 | A1-01 | **Fixed — pending verification** — `Session` table (hash + family + expiry). Logout revokes family. Password reset revokes all sessions. `/auth/refresh` rotates and rejects revoked/unknown tokens. |
 | A1-02 | **Fixed — pending verification** — `requireVerified` on session APIs except auth, portal, apply, webhooks, health, import templates, and v1. Unverified → 403 `EMAIL_NOT_VERIFIED`. `/auth/me` and resend-verify still work. |
-| A1-03 | **Fixed — pending verification** — Google links by email only if `emailVerified` or an existing `googleId`. Unverified password rows get 409 and are not attached. |
+| A1-03 | **Fixed — pending verification** — Email-link only if `emailVerified` is already true (bare `googleId` is not enough). A `googleId` hit requires `profile.email` to still equal the current `user.email` (normalized); otherwise 409 and no auto-verify. Prompt V hole: leftover googleId after PUT /me email change no longer re-verifies the squatted address. |
 | A1-04 | **Fixed — pending verification** — Invites hashed at rest, 48h expiry. `GET /users` and invite create no longer return `inviteToken`. Accept after expiry → 404. |
 | A1-06 | **Fixed — pending verification** — Signup existing email → 201 generic message (no tokens). Residual: body shape still differs for new vs existing. |
 | A1-09 | **Fixed — pending verification** — Accept-invite sets `emailVerified: true`. |

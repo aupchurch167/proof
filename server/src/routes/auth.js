@@ -179,20 +179,37 @@ router.post('/google', async (req, res) => {
       return res.status(401).json({ error: 'Invalid Google credential' });
     }
 
+    const profileEmail = String(profile.email || '').trim().toLowerCase();
+
     let user = await prisma.user.findFirst({
       where: { googleId: profile.googleId },
       include: { organization: true },
     });
 
-    if (!user) {
+    if (user) {
+      // googleId is not enough after an email change: Google must still own
+      // the address currently on the row (A1-03).
+      if (String(user.email || '').trim().toLowerCase() !== profileEmail) {
+        return res.status(409).json({
+          error: 'This Google account is no longer linked to this email. Sign in with your password or verify the new address.',
+        });
+      }
+      if (!user.emailVerified) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { emailVerified: true, emailVerifyToken: null },
+          include: { organization: true },
+        });
+      }
+    } else {
       const byEmail = await prisma.user.findUnique({
         where: { email: profile.email },
         include: { organization: true },
       });
       if (byEmail) {
-        // Only attach Google to a password row that already proved the inbox,
-        // or one that already has this googleId (handled above).
-        if (!byEmail.emailVerified && !byEmail.googleId) {
+        // Email-link only when the inbox is already verified. A leftover
+        // googleId on an unverified row must not auto-verify.
+        if (!byEmail.emailVerified) {
           return res.status(409).json({
             error: 'An account with this email already exists. Verify your email or sign in with your password.',
           });
@@ -207,12 +224,6 @@ router.post('/google', async (req, res) => {
           include: { organization: true },
         });
       }
-    } else if (!user.emailVerified) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { emailVerified: true, emailVerifyToken: null },
-        include: { organization: true },
-      });
     }
 
     if (!user) {
