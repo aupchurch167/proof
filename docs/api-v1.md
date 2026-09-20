@@ -30,7 +30,7 @@ new endpoints drop in without bespoke plumbing.
 | `400` / `422` | validation error (bad body/params) |
 | `401` | missing/invalid token (`unauthorized`) |
 | `403` | token valid but not authorized for this org, or missing scope (`forbidden`) |
-| `404` | org / vendor / COI document not found (`organization_not_found`, `vendor_not_found`, `coi_document_not_found`) |
+| `404` | org / vendor / COI / document not found (`organization_not_found`, `vendor_not_found`, `coi_not_found`, `coi_document_not_found`) |
 | `409` | conflict, e.g. a COI request is already open (`coi_request_conflict`) |
 | `5xx` | Proof-side failure (`internal_error`) |
 
@@ -117,6 +117,39 @@ below the org's required limits (`NON_COMPLIANT`) surfaces as `expired`
 `status` is `requested`, `fulfilled`, or `cancelled`. A request auto-resolves to
 `fulfilled` when the vendor next becomes compliant.
 
+### Historical COI
+
+```json
+{
+  "id": "7a1c...-uuid",
+  "vendorId": "9c4e...-uuid",
+  "vendorName": "Apex Electrical LLC",
+  "submittedAt": "2025-06-01T14:22:00.000Z",
+  "expiresAt": "2026-09-30",
+  "document": {
+    "url": "https://…signed…",
+    "expiresInSeconds": 900,
+    "contentType": "application/pdf",
+    "filename": "abc123.pdf",
+    "expiresAt": "2026-09-20T00:00:00.000Z"
+  },
+  "coverages": [
+    { "type": "general_liability", "status": "compliant", "expiresAt": "2026-09-30", "limit": 2000000 }
+  ],
+  "agentName": "Jordan Lee",
+  "agentEmail": "jordan@broker.com",
+  "agentPhone": "+16155550100",
+  "insuranceCompany": "Travelers"
+}
+```
+
+- `expiresAt` — earliest coverage expiration (`YYYY-MM-DD`), or `null` when no
+  expiration is on file. This is **not** invented from `submittedAt`.
+- `coverages` — same shape as vendor detail (`GET /vendors/:id`). Only lines
+  with a limit, expiration, or policy number are included.
+- `document` — short-lived signed download (same fields as
+  `GET /vendors/:id/coi/document`). Fetch promptly; do not persist the URL.
+
 ---
 
 ## Endpoints
@@ -178,6 +211,42 @@ Body (all optional):
 ### `GET /vendors/:vendorId/coi-requests`
 
 Request history, newest first (paginated). Scope: `coi-requests:read`.
+
+### `GET /cois`
+
+Historical **APPROVED** COI documents for the org whose coverage was active
+anytime in `[activeFrom, activeTo]`. This is every matching certificate — not
+just each vendor's latest. Scope: `vendors:read`.
+
+Query params:
+
+| Param | Default | Notes |
+|-------|---------|-------|
+| `activeFrom` | `2025-03-22` | ISO date (`YYYY-MM-DD`) or ISO datetime. Date-only is the UTC start of that day. |
+| `activeTo` | now | ISO date or datetime. Date-only is the UTC end of that day so the last day is inclusive. |
+| `cursor`, `limit` | same as vendors | Opaque cursor pagination. |
+
+**Overlap rule** (also documented in `server/src/http/coiCoverageWindow.js`):
+
+Include a `Coi` where `status === APPROVED` and `pdfPath` is set, and coverage
+overlaps `[activeFrom, activeTo]`:
+
+- Coverage **start** is `submittedAt` (best available; the model has no
+  separate effective date).
+- Coverage **end** is the earliest non-null among `glExpirationDate` /
+  `wcExpirationDate` / `umbExpirationDate` / `autoExpirationDate`. If all four
+  are null, use `submittedAt` as a degenerate end so we do not invent an expiry.
+- Overlap: `start <= activeTo AND end >= activeFrom`.
+
+Returns a paginated list of `Historical COI` (newest `submittedAt` first, then
+`id`). `422` if a date is invalid or `activeFrom` is after `activeTo`.
+
+### `GET /cois/:coiId/document`
+
+Temporary signed URL for one approved COI PDF in this org. Scope:
+`vendors:read`. Response matches `GET /vendors/:id/coi/document` (plus
+`coiId`). `404 coi_not_found` if the COI is missing, belongs to another org,
+is not `APPROVED`, or has no `pdfPath`.
 
 ---
 

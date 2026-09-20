@@ -322,6 +322,236 @@ describe('GET /vendors/:id/coi-requests', () => {
   });
 });
 
+describe('GET /cois', () => {
+  let histOrg, histToken, histVendor, overlapping, expiredBefore, submittedAfter, pending, emptyPdf, degenerate;
+
+  beforeAll(async () => {
+    histOrg = await createOrg(`org-hist-${Date.now()}`);
+    histToken = await createApiClient({ orgId: histOrg.id, scopes: [SCOPES.VENDORS_READ] });
+    histVendor = await createTestVendor(histOrg.id, {
+      name: 'Historical Electric',
+      email: `hist-${Date.now()}@apex.com`,
+    });
+
+    overlapping = await createTestCoi(histVendor.id, histOrg.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/overlapping.pdf',
+      submittedAt: new Date('2025-01-15T12:00:00.000Z'),
+      glCoverageAmount: 200000000,
+      glExpirationDate: new Date('2025-12-01T00:00:00.000Z'),
+      agentName: 'Jordan Lee',
+      agentEmail: 'jordan@broker.com',
+      agentPhone: '+16155550100',
+      insuranceCompany: 'Travelers',
+    });
+    expiredBefore = await createTestCoi(histVendor.id, histOrg.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/expired-before.pdf',
+      submittedAt: new Date('2024-01-01T00:00:00.000Z'),
+      glExpirationDate: new Date('2025-01-01T00:00:00.000Z'),
+    });
+    submittedAfter = await createTestCoi(histVendor.id, histOrg.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/submitted-after.pdf',
+      submittedAt: new Date('2026-06-01T00:00:00.000Z'),
+      glExpirationDate: new Date('2027-01-01T00:00:00.000Z'),
+    });
+    pending = await createTestCoi(histVendor.id, histOrg.id, {
+      status: 'PENDING_REVIEW',
+      pdfPath: 'cois/pending.pdf',
+      submittedAt: new Date('2025-06-01T00:00:00.000Z'),
+      glExpirationDate: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    emptyPdf = await createTestCoi(histVendor.id, histOrg.id, {
+      status: 'APPROVED',
+      pdfPath: '',
+      submittedAt: new Date('2025-06-01T00:00:00.000Z'),
+      glExpirationDate: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    degenerate = await createTestCoi(histVendor.id, histOrg.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/degenerate.pdf',
+      submittedAt: new Date('2025-06-15T00:00:00.000Z'),
+    });
+  });
+
+  const window = 'activeFrom=2025-03-22&activeTo=2026-03-22';
+
+  it('returns approved COIs whose coverage overlapped the activity window', async () => {
+    getSignedUrl.mockClear();
+    const res = await request(app)
+      .get(`/api/v1/orgs/${histOrg.slug}/cois?${window}`)
+      .set(auth(histToken));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('data');
+    expect(res.body).toHaveProperty('nextCursor');
+    expect(res.body).toHaveProperty('hasMore');
+
+    const ids = res.body.data.map((c) => c.id);
+    expect(ids).toContain(overlapping.id);
+    expect(ids).toContain(degenerate.id);
+    expect(ids).not.toContain(expiredBefore.id);
+    expect(ids).not.toContain(submittedAfter.id);
+    expect(ids).not.toContain(pending.id);
+    expect(ids).not.toContain(emptyPdf.id);
+
+    const row = res.body.data.find((c) => c.id === overlapping.id);
+    expect(row.vendorId).toBe(histVendor.id);
+    expect(row.vendorName).toBe('Historical Electric');
+    expect(row.submittedAt).toBe('2025-01-15T12:00:00.000Z');
+    expect(row.expiresAt).toBe('2025-12-01');
+    expect(row.agentName).toBe('Jordan Lee');
+    expect(row.agentEmail).toBe('jordan@broker.com');
+    expect(row.agentPhone).toBe('+16155550100');
+    expect(row.insuranceCompany).toBe('Travelers');
+    expect(row.document).toMatchObject({
+      url: 'https://mock-signed-url.com/test.pdf',
+      expiresInSeconds: 900,
+      contentType: 'application/pdf',
+      filename: 'overlapping.pdf',
+    });
+    const gl = row.coverages.find((c) => c.type === 'general_liability');
+    expect(gl.limit).toBe(2000000);
+    expect(getSignedUrl).toHaveBeenCalledWith('cois/overlapping.pdf');
+
+    const deg = res.body.data.find((c) => c.id === degenerate.id);
+    expect(deg.expiresAt).toBeNull();
+  });
+
+  it('defaults activeFrom to 2025-03-22 and activeTo to now', async () => {
+    const res = await request(app)
+      .get(`/api/v1/orgs/${histOrg.slug}/cois`)
+      .set(auth(histToken));
+    expect(res.status).toBe(200);
+    const ids = res.body.data.map((c) => c.id);
+    expect(ids).toContain(overlapping.id);
+    expect(ids).not.toContain(expiredBefore.id);
+  });
+
+  it('paginates stably by submittedAt desc then id without dupes', async () => {
+    const pgOrg = await createOrg(`org-cois-pg-${Date.now()}`);
+    const token = await createApiClient({ orgId: pgOrg.id, scopes: [SCOPES.VENDORS_READ] });
+    const vendor = await createTestVendor(pgOrg.id, { name: 'Pager', email: `pg-${Date.now()}@pg.com` });
+    const stamps = [
+      new Date('2025-08-01T00:00:00.000Z'),
+      new Date('2025-07-01T00:00:00.000Z'),
+      new Date('2025-06-01T00:00:00.000Z'),
+    ];
+    const created = [];
+    for (const submittedAt of stamps) {
+      created.push(await createTestCoi(vendor.id, pgOrg.id, {
+        status: 'APPROVED',
+        pdfPath: `cois/${submittedAt.toISOString()}.pdf`,
+        submittedAt,
+        glExpirationDate: new Date('2026-01-01T00:00:00.000Z'),
+      }));
+    }
+
+    const seen = [];
+    let cursor = null;
+    let pages = 0;
+    do {
+      const url = `/api/v1/orgs/${pgOrg.slug}/cois?activeFrom=2025-03-22&activeTo=2026-03-22&limit=2${cursor ? `&cursor=${cursor}` : ''}`;
+      const res = await request(app).get(url).set(auth(token));
+      expect(res.status).toBe(200);
+      res.body.data.forEach((c) => seen.push(c.id));
+      cursor = res.body.nextCursor;
+      pages++;
+    } while (cursor && pages < 5);
+
+    expect(seen).toEqual([created[0].id, created[1].id, created[2].id]);
+    expect(new Set(seen).size).toBe(3);
+  });
+
+  it('422 on an invalid or inverted window', async () => {
+    const bad = await request(app)
+      .get(`/api/v1/orgs/${histOrg.slug}/cois?activeFrom=not-a-date`)
+      .set(auth(histToken));
+    expect(bad.status).toBe(422);
+
+    const inverted = await request(app)
+      .get(`/api/v1/orgs/${histOrg.slug}/cois?activeFrom=2026-01-01&activeTo=2025-01-01`)
+      .set(auth(histToken));
+    expect(inverted.status).toBe(422);
+  });
+
+  it('403 when the token lacks vendors:read', async () => {
+    const writeOnly = await createApiClient({
+      orgId: histOrg.id,
+      scopes: [SCOPES.COI_REQUESTS_WRITE],
+    });
+    const res = await request(app)
+      .get(`/api/v1/orgs/${histOrg.slug}/cois?${window}`)
+      .set(auth(writeOnly));
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /cois/:id/document', () => {
+  it('returns a signed URL for an approved COI in this org', async () => {
+    const vendor = await createTestVendor(orgA.id, {
+      name: 'Hist Doc Vendor',
+      email: `histdoc-${Date.now()}@apex.com`,
+    });
+    const coi = await createTestCoi(vendor.id, orgA.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/specific.pdf',
+    });
+
+    getSignedUrl.mockClear();
+    const res = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/cois/${coi.id}/document`)
+      .set(auth(tokenReadOnly));
+
+    expect(res.status).toBe(200);
+    expect(getSignedUrl).toHaveBeenCalledWith('cois/specific.pdf');
+    expect(res.body.data).toMatchObject({
+      url: 'https://mock-signed-url.com/test.pdf',
+      expiresInSeconds: 900,
+      contentType: 'application/pdf',
+      filename: 'specific.pdf',
+      coiId: coi.id,
+    });
+  });
+
+  it('404 when the COI is missing, not approved, or in another org', async () => {
+    const missing = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/cois/00000000-0000-0000-0000-000000000000/document`)
+      .set(auth(tokenA));
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('coi_not_found');
+
+    const vendor = await createTestVendor(orgA.id, {
+      name: 'Pending Doc',
+      email: `penddoc-${Date.now()}@apex.com`,
+    });
+    const pending = await createTestCoi(vendor.id, orgA.id, {
+      status: 'PENDING_REVIEW',
+      pdfPath: 'cois/not-approved.pdf',
+    });
+    const notApproved = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/cois/${pending.id}/document`)
+      .set(auth(tokenA));
+    expect(notApproved.status).toBe(404);
+    expect(notApproved.body.error.code).toBe('coi_not_found');
+
+    const otherVendor = await createTestVendor(orgB.id, {
+      name: 'Other Org Vendor',
+      email: `other-${Date.now()}@b.com`,
+    });
+    const otherCoi = await createTestCoi(otherVendor.id, orgB.id, {
+      status: 'APPROVED',
+      pdfPath: 'cois/other-org.pdf',
+    });
+    const wrongOrg = await request(app)
+      .get(`/api/v1/orgs/${orgA.slug}/cois/${otherCoi.id}/document`)
+      .set(auth(tokenA));
+    expect(wrongOrg.status).toBe(404);
+    expect(wrongOrg.body.error.code).toBe('coi_not_found');
+  });
+});
+
 describe('COI request auto-resolves when the vendor becomes compliant', () => {
   it('marks open requests FULFILLED via updateVendorStatus', async () => {
     const { updateVendorStatus } = require('../src/services/compliance');
