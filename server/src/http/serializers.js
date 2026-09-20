@@ -2,6 +2,12 @@
 // Keeping this in one module means the COI status computation and money/date
 // formatting have a single, testable definition every endpoint shares.
 
+const path = require('path');
+
+// Matches getSignedUrl()'s default TTL so the envelope's expiresInSeconds /
+// expiresAt describe the URL we actually issued.
+const SIGNED_URL_EXPIRES_IN = 900;
+
 // Number of days before expiry at which a still-valid policy is "expiring soon".
 // Mirrors the window used in services/compliance.js.
 const EXPIRING_SOON_DAYS = 30;
@@ -138,13 +144,47 @@ function serializeCoiRequest(reqRow) {
   };
 }
 
+function serializeSignedDocument(pdfPath, url) {
+  return {
+    url,
+    expiresInSeconds: SIGNED_URL_EXPIRES_IN,
+    contentType: 'application/pdf',
+    filename: path.posix.basename(pdfPath || '') || 'coi.pdf',
+    expiresAt: new Date(Date.now() + SIGNED_URL_EXPIRES_IN * 1000).toISOString(),
+  };
+}
+
+/**
+ * Historical approved COI row for GET /cois. `expiresAt` is the earliest
+ * coverage expiration (YYYY-MM-DD) or null — we do not substitute submittedAt
+ * here; that fallback is only used for the overlap filter.
+ */
+function serializeHistoricalCoi(coi, document) {
+  return {
+    id: coi.id,
+    vendorId: coi.vendorId,
+    vendorName: coi.vendor?.name || null,
+    submittedAt: isoDateTime(coi.submittedAt),
+    expiresAt: earliestExpiration(coi),
+    document,
+    coverages: coveragesFromCoi(coi),
+    agentName: coi.agentName || null,
+    agentEmail: coi.agentEmail || null,
+    agentPhone: coi.agentPhone || null,
+    insuranceCompany: coi.insuranceCompany || null,
+  };
+}
+
 module.exports = {
   COVERAGE_TYPES,
   EXPIRING_SOON_DAYS,
+  SIGNED_URL_EXPIRES_IN,
   mapCoiStatus,
   internalStatusesFor,
   coveragesFromCoi,
   earliestExpiration,
   serializeVendor,
   serializeCoiRequest,
+  serializeSignedDocument,
+  serializeHistoricalCoi,
 };
