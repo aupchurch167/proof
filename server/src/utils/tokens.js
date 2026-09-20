@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 const SIGN_OPTS = { algorithm: 'HS256' };
@@ -13,7 +14,7 @@ function generateAccessToken(user) {
 
 function generateRefreshToken(user) {
   return jwt.sign(
-    { id: user.id, orgId: user.orgId },
+    { id: user.id, orgId: user.orgId, jti: crypto.randomBytes(16).toString('hex') },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: '7d', ...SIGN_OPTS }
   );

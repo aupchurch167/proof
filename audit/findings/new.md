@@ -13,6 +13,7 @@
 - Invite of an already-registered email stays **409** (authenticated admin inside an org — allowed by A1-06).
 - `inviteToken` plaintext column is kept (expand). New invites write hash + expiry only. Contract (drop column) later.
 - Existing refresh JWTs issued before this deploy are not in `Session` and will 401 on `/auth/refresh`. Users re-login. No HttpOnly cookie migration (A1-07, out of scope).
+- Refresh JWTs now include a random `jti` so two logins in the same second do not collide on `Session.tokenHash`.
 - Public apply is slug-only. New signup/Google orgs now get an auto-generated slug (extra). Existing orgs without a slug cannot use `/apply/:id` anymore; Settings hides the apply URL until a slug exists. There is still no ADMIN UI to set `Organization.slug`.
 - ADMIN `GET /organization/usage` mints a 15-minute portal JWT (not the stored `uploadToken`). MEMBER/VIEWER do not receive the key.
 - Portal no longer matches the stored token string; a valid `purpose=upload` JWT for the vendor id works. UUID tokens 401 until cron/request-coi rotates them to JWTs.
