@@ -24,7 +24,7 @@ const router = express.Router({ mergeParams: true });
 // timestamp for each vendor in a single query, avoiding N+1 on the list route.
 const VENDOR_INCLUDE = {
   cois: {
-    where: { status: 'APPROVED' },
+    where: { status: 'APPROVED', deletedAt: null },
     orderBy: { submittedAt: 'desc' },
     take: 1,
   },

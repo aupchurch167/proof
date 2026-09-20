@@ -48,7 +48,7 @@ router.get('/upcoming', authenticate, async (req, res) => {
     const vendors = await prisma.vendor.findMany({
       where: { orgId: req.user.orgId, deletedAt: null },
       include: {
-        cois: { where: { status: 'APPROVED' }, orderBy: { submittedAt: 'desc' }, take: 1 },
+        cois: { where: { status: 'APPROVED', deletedAt: null }, orderBy: { submittedAt: 'desc' }, take: 1 },
         notifications: {
           where: { type: { in: ['UPLOAD_REQUEST', 'UPLOAD_CHASE', 'EXPIRATION_REMINDER'] }, status: 'SENT' },
           orderBy: { sentAt: 'desc' },
@@ -102,7 +102,7 @@ router.get('/upcoming', authenticate, async (req, res) => {
       const lastRequest = vendor.notifications.find((n) => n.type === 'UPLOAD_REQUEST');
       if (lastRequest && settings?.chaseNonResponders !== false && chaseDays.length > 0) {
         const uploadedSince = await prisma.coi.count({
-          where: { vendorId: vendor.id, submittedAt: { gt: lastRequest.sentAt } },
+          where: { vendorId: vendor.id, deletedAt: null, submittedAt: { gt: lastRequest.sentAt } },
         });
         if (uploadedSince === 0) {
           const since = daysSince(lastRequest.sentAt, now);

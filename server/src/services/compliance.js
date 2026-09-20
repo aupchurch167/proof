@@ -86,7 +86,7 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
 
   // Get the latest approved COI
   const latestCoi = await prisma.coi.findFirst({
-    where: { vendorId, status: 'APPROVED' },
+    where: { vendorId, status: 'APPROVED', deletedAt: null },
     orderBy: { submittedAt: 'desc' },
   });
 
@@ -94,7 +94,7 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
   if (!latestCoi) {
     // No approved COI: pending if one is under review, otherwise none on file.
     const pendingCoi = await prisma.coi.findFirst({
-      where: { vendorId, status: 'PENDING_REVIEW' },
+      where: { vendorId, status: 'PENDING_REVIEW', deletedAt: null },
     });
     status = pendingCoi ? 'PENDING' : 'NO_COI';
   } else {

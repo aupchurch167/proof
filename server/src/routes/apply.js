@@ -10,6 +10,7 @@ const { checkCompliance, updateVendorStatus } = require('../services/compliance'
 const { generateUploadToken } = require('../utils/tokens');
 const { isValidTrade } = require('../constants/trades');
 const { evaluatePlanLimit } = require('../middleware/planLimits');
+const { isVendorEmailConflict } = require('../lib/prismaErrors');
 
 const router = express.Router();
 
@@ -175,6 +176,9 @@ router.post(
 
       res.status(201).json({ message: 'Application submitted', vendorId: vendor.id });
     } catch (err) {
+      if (isVendorEmailConflict(err)) {
+        return res.status(409).json({ error: 'A vendor with this email already exists for this organization' });
+      }
       console.error('Apply error:', err);
       res.status(500).json({ error: 'Failed to submit application' });
     }

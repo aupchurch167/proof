@@ -95,7 +95,7 @@ router.get('/coverage', authenticate, async (req, res) => {
 router.get('/cois', authenticate, async (req, res) => {
   try {
     const { startDate, endDate, status, vendorId, filterBy } = req.query;
-    const where = { orgId: req.user.orgId };
+    const where = { orgId: req.user.orgId, deletedAt: null };
 
     if (status) where.status = status;
     if (vendorId) where.vendorId = vendorId;
@@ -192,6 +192,7 @@ router.get('/expiring', authenticate, async (req, res) => {
     const cois = await prisma.coi.findMany({
       where: {
         orgId: req.user.orgId,
+        deletedAt: null,
         status: 'APPROVED',
         OR: [
           { glExpirationDate: { lte: futureDate, gte: new Date() } },

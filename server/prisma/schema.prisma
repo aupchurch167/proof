@@ -188,6 +188,9 @@ model Vendor {
   coiRequests   CoiRequest[]
 
   @@index([orgId, deletedAt])
+  // Live-vendor email uniqueness is a partial unique index in SQL
+  // (Vendor_orgId_email_active_key): UNIQUE (orgId, email) WHERE deletedAt IS NULL.
+  // Prisma cannot express the WHERE clause; see the B03 migration.
 }
 
 model Coi {
@@ -238,6 +241,7 @@ model Coi {
   submittedAt     DateTime        @default(now())
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime?
 
   vendor       Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -247,6 +251,7 @@ model Coi {
   @@index([orgId, status])
   @@index([vendorId, status])
   @@index([orgId, submittedAt])
+  @@index([orgId, deletedAt])
 }
 
 model NotificationLog {
@@ -281,7 +286,7 @@ model AuditLog {
   ipAddress String?
   createdAt DateTime @default(now())
 
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
   @@index([orgId, entity, action])

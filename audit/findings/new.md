@@ -19,3 +19,13 @@
 - Portal no longer matches the stored token string; a valid `purpose=upload` JWT for the vendor id works. UUID tokens 401 until cron/request-coi rotates them to JWTs.
 - Google-only accounts (no password) cannot change email until they set a password.
 - `SEED_PASSWORD` is optional and not boot-validated. Seed still defaults to `password123` outside production.
+
+# Notes from B03 (not fixed in this batch)
+
+- Individual `DELETE /api/cois/:id` still hard-deletes the row and calls `deleteFile`. Vendor delete is the A3-02 path; per-certificate recycle is a follow-up.
+- A3-03 remainder: Settings / User / Vendor / Coi / NotificationLog / ApiClient / CoiRequest / WebhookEndpoint still `onDelete: Cascade` from Organization. Only AuditLog is Restrict. Need an offboarding job + written cascade plan before flipping the rest.
+- Vendor live-email unique is exact `(orgId, email)`, not `lower(email)`. `Foo@x.com` and `foo@x.com` can both exist.
+- Import still creates vendors one row at a time (token is now minted; the CSV is not one transaction).
+- Cron is still in-process. Advisory lock prevents double-send across processes; a missed 08:00 tick still waits until the next scheduled run (expiration windows catch up; token refresh does not).
+- SIGTERM stops cron timers but does not wait for an in-flight sweep before the 10s HTTP/Prisma shutdown fuse.
+- Restore rehearsal / Neon PITR (A3-01) remains owner-owned.

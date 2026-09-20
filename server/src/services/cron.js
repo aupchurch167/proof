@@ -18,6 +18,7 @@ const {
   shouldEscalateChase,
   earliestExpiration,
 } = require('./reminders');
+const { withAdvisoryLock, LOCK_KEYS } = require('../lib/advisoryLock');
 
 // Both vendor-facing jobs mint a fresh token before emailing, the same way
 // POST /api/vendors/:id/request-coi does. Vendors created by the import
@@ -42,7 +43,7 @@ function ccFor(vendor) {
  * entirely: a COI 27 days out still gets the "30 day" reminder. Each window
  * sends at most once per COI, tracked via NotificationLog.meta.window.
  */
-async function runExpirationSweep(prisma, { now = new Date() } = {}) {
+async function expirationSweepBody(prisma, now) {
   const stats = { sent: 0, skipped: 0, failed: 0 };
 
   const orgs = await prisma.organization.findMany({ include: { settings: true } });
@@ -56,7 +57,7 @@ async function runExpirationSweep(prisma, { now = new Date() } = {}) {
       where: { orgId: org.id, deletedAt: null },
       include: {
         cois: {
-          where: { status: 'APPROVED' },
+          where: { status: 'APPROVED', deletedAt: null },
           orderBy: { submittedAt: 'desc' },
           take: 1,
         },
@@ -134,6 +135,15 @@ async function runExpirationSweep(prisma, { now = new Date() } = {}) {
   return stats;
 }
 
+async function runExpirationSweep(prisma, { now = new Date() } = {}) {
+  const lock = await withAdvisoryLock(LOCK_KEYS.expiration, () => expirationSweepBody(prisma, now));
+  if (!lock.acquired) {
+    console.log('[Cron] Expiration sweep skipped — advisory lock not acquired');
+    return { sent: 0, skipped: 0, failed: 0, acquired: false };
+  }
+  return { ...lock.result, acquired: true };
+}
+
 /**
  * Daily non-responder chase.
  *
@@ -143,7 +153,7 @@ async function runExpirationSweep(prisma, { now = new Date() } = {}) {
  * escalated to an audit-log flag so it surfaces in the compliance cockpit
  * instead of quietly aging out.
  */
-async function runChaseSweep(prisma, { now = new Date() } = {}) {
+async function chaseSweepBody(prisma, now) {
   const stats = { sent: 0, skipped: 0, failed: 0, escalated: 0 };
 
   const orgs = await prisma.organization.findMany({ include: { settings: true } });
@@ -170,7 +180,7 @@ async function runChaseSweep(prisma, { now = new Date() } = {}) {
 
       // Any upload after the request means they responded — nothing to chase.
       const uploadsSince = await prisma.coi.count({
-        where: { vendorId: vendor.id, submittedAt: { gt: lastRequest.sentAt } },
+        where: { vendorId: vendor.id, deletedAt: null, submittedAt: { gt: lastRequest.sentAt } },
       });
       if (uploadsSince > 0) continue;
 
@@ -243,6 +253,15 @@ async function runChaseSweep(prisma, { now = new Date() } = {}) {
   return stats;
 }
 
+async function runChaseSweep(prisma, { now = new Date() } = {}) {
+  const lock = await withAdvisoryLock(LOCK_KEYS.chase, () => chaseSweepBody(prisma, now));
+  if (!lock.acquired) {
+    console.log('[Cron] Chase sweep skipped — advisory lock not acquired');
+    return { sent: 0, skipped: 0, failed: 0, escalated: 0, acquired: false };
+  }
+  return { ...lock.result, acquired: true };
+}
+
 // Flag a request the vendor has ignored through the whole chase ladder. Writes
 // one audit entry per request so the cockpit can surface it without the job
 // re-flagging the same vendor every morning.
@@ -295,6 +314,7 @@ function startExpirationCron(prisma) {
 
   job.start();
   console.log('[Cron] Expiration reminder job scheduled (daily at 8 AM)');
+  return job;
 }
 
 function startChaseCron(prisma) {
@@ -312,6 +332,31 @@ function startChaseCron(prisma) {
 
   job.start();
   console.log('[Cron] Non-responder chase job scheduled (daily at 9 AM)');
+  return job;
+}
+
+async function runTokenRefresh(prisma) {
+  const lock = await withAdvisoryLock(LOCK_KEYS.tokenRefresh, async () => {
+    const vendors = await prisma.vendor.findMany({
+      where: { deletedAt: null },
+      select: { id: true },
+    });
+
+    for (const vendor of vendors) {
+      await prisma.vendor.update({
+        where: { id: vendor.id },
+        data: { uploadToken: generateUploadToken(vendor.id) },
+      });
+    }
+
+    return vendors.length;
+  });
+
+  if (!lock.acquired) {
+    console.log('[Cron] Token refresh skipped — advisory lock not acquired');
+    return { acquired: false, refreshed: 0 };
+  }
+  return { acquired: true, refreshed: lock.result };
 }
 
 function startTokenRefreshCron(prisma) {
@@ -319,19 +364,10 @@ function startTokenRefreshCron(prisma) {
   const job = new CronJob('0 0 * * 0', async () => {
     console.log('[Cron] Refreshing vendor upload tokens...');
     try {
-      const vendors = await prisma.vendor.findMany({
-        where: { deletedAt: null },
-        select: { id: true },
-      });
-
-      for (const vendor of vendors) {
-        await prisma.vendor.update({
-          where: { id: vendor.id },
-          data: { uploadToken: generateUploadToken(vendor.id) },
-        });
+      const stats = await runTokenRefresh(prisma);
+      if (stats.acquired) {
+        console.log(`[Cron] Refreshed upload tokens for ${stats.refreshed} vendor(s)`);
       }
-
-      console.log(`[Cron] Refreshed upload tokens for ${vendors.length} vendor(s)`);
     } catch (err) {
       console.error('[Cron] Token refresh failed:', err);
     }
@@ -339,119 +375,130 @@ function startTokenRefreshCron(prisma) {
 
   job.start();
   console.log('[Cron] Token refresh job scheduled (Sundays at midnight)');
+  return job;
+}
+
+async function runWeeklySummary(prisma) {
+  const lock = await withAdvisoryLock(LOCK_KEYS.weeklySummary, async () => {
+    const orgs = await prisma.organization.findMany({
+      include: {
+        users: {
+          where: { role: 'ADMIN' },
+          select: { email: true, firstName: true },
+        },
+      },
+    });
+
+    for (const org of orgs) {
+      const admin = org.users[0];
+      if (!admin) {
+        console.log(`[Cron] Skipping org "${org.name}" — no admin user`);
+        continue;
+      }
+
+      const vendors = await prisma.vendor.findMany({
+        where: { orgId: org.id, deletedAt: null },
+        include: {
+          cois: {
+            where: { status: 'APPROVED', deletedAt: null },
+            orderBy: { submittedAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      if (vendors.length === 0) {
+        console.log(`[Cron] Skipping org "${org.name}" — no vendors`);
+        continue;
+      }
+
+      const now = new Date();
+      let compliant = 0;
+      let expiringSoon = 0;
+      let expired = 0;
+      let noCoi = 0;
+      const urgentList = [];
+
+      for (const vendor of vendors) {
+        const latestCoi = vendor.cois[0];
+        const earliestExpirationDate = earliestExpiration(latestCoi);
+
+        if (!earliestExpirationDate) {
+          noCoi++;
+          continue;
+        }
+
+        const days = daysUntil(earliestExpirationDate, now);
+
+        if (days < 0) {
+          expired++;
+          urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
+        } else if (days <= 30) {
+          expiringSoon++;
+          urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
+        } else {
+          compliant++;
+        }
+      }
+
+      urgentList.sort((a, b) => a.daysUntil - b.daysUntil);
+      const urgentVendors = urgentList.slice(0, 5);
+
+      const summary = {
+        totalVendors: vendors.length,
+        compliant,
+        expiringSoon,
+        expired,
+        noCoi,
+        urgentVendors,
+      };
+
+      try {
+        await sendWeeklySummaryEmail(admin.email, org.name, summary);
+
+        await prisma.notificationLog.create({
+          data: {
+            orgId: org.id,
+            type: 'WEEKLY_SUMMARY',
+            recipientEmail: admin.email,
+            status: 'SENT',
+          },
+        });
+
+        console.log(`[Cron] Weekly summary sent to ${admin.email} for org "${org.name}" (${vendors.length} vendors, ${expired} expired, ${expiringSoon} expiring)`);
+      } catch (err) {
+        console.error(`[Cron] Failed to send weekly summary for org "${org.name}":`, err.message);
+
+        await prisma.notificationLog.create({
+          data: {
+            orgId: org.id,
+            type: 'WEEKLY_SUMMARY',
+            recipientEmail: admin.email,
+            status: 'FAILED',
+          },
+        }).catch(() => {});
+      }
+    }
+
+    return true;
+  });
+
+  if (!lock.acquired) {
+    console.log('[Cron] Weekly summary skipped — advisory lock not acquired');
+    return { acquired: false };
+  }
+  return { acquired: true };
 }
 
 function startWeeklySummaryCron(prisma) {
   // Run every Monday at 8 AM
   const job = new CronJob('0 8 * * 1', async () => {
     console.log('[Cron] Running weekly compliance summary...');
-
     try {
-      const orgs = await prisma.organization.findMany({
-        include: {
-          users: {
-            where: { role: 'ADMIN' },
-            select: { email: true, firstName: true },
-          },
-        },
-      });
-
-      for (const org of orgs) {
-        // Find admin to send to
-        const admin = org.users[0];
-        if (!admin) {
-          console.log(`[Cron] Skipping org "${org.name}" — no admin user`);
-          continue;
-        }
-
-        // Get all vendors for this org
-        const vendors = await prisma.vendor.findMany({
-          where: { orgId: org.id, deletedAt: null },
-          include: {
-            cois: {
-              where: { status: 'APPROVED' },
-              orderBy: { submittedAt: 'desc' },
-              take: 1,
-            },
-          },
-        });
-
-        // Skip orgs with no vendors
-        if (vendors.length === 0) {
-          console.log(`[Cron] Skipping org "${org.name}" — no vendors`);
-          continue;
-        }
-
-        const now = new Date();
-        let compliant = 0;
-        let expiringSoon = 0;
-        let expired = 0;
-        let noCoi = 0;
-        const urgentList = [];
-
-        for (const vendor of vendors) {
-          const latestCoi = vendor.cois[0];
-          const earliestExpirationDate = earliestExpiration(latestCoi);
-
-          if (!earliestExpirationDate) {
-            noCoi++;
-            continue;
-          }
-
-          const days = daysUntil(earliestExpirationDate, now);
-
-          if (days < 0) {
-            expired++;
-            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
-          } else if (days <= 30) {
-            expiringSoon++;
-            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
-          } else {
-            compliant++;
-          }
-        }
-
-        // Sort by most urgent (most negative / lowest daysUntil first), take top 5
-        urgentList.sort((a, b) => a.daysUntil - b.daysUntil);
-        const urgentVendors = urgentList.slice(0, 5);
-
-        const summary = {
-          totalVendors: vendors.length,
-          compliant,
-          expiringSoon,
-          expired,
-          noCoi,
-          urgentVendors,
-        };
-
-        try {
-          await sendWeeklySummaryEmail(admin.email, org.name, summary);
-
-          await prisma.notificationLog.create({
-            data: {
-              orgId: org.id,
-              type: 'WEEKLY_SUMMARY',
-              recipientEmail: admin.email,
-              status: 'SENT',
-            },
-          });
-
-          console.log(`[Cron] Weekly summary sent to ${admin.email} for org "${org.name}" (${vendors.length} vendors, ${expired} expired, ${expiringSoon} expiring)`);
-        } catch (err) {
-          console.error(`[Cron] Failed to send weekly summary for org "${org.name}":`, err.message);
-
-          await prisma.notificationLog.create({
-            data: {
-              orgId: org.id,
-              type: 'WEEKLY_SUMMARY',
-              recipientEmail: admin.email,
-              status: 'FAILED',
-            },
-          }).catch(() => {});
-        }
+      const stats = await runWeeklySummary(prisma);
+      if (stats.acquired) {
+        console.log('[Cron] Weekly compliance summary complete');
       }
-
-      console.log('[Cron] Weekly compliance summary complete');
     } catch (err) {
       console.error('[Cron] Weekly summary job failed:', err);
     }
@@ -459,6 +506,22 @@ function startWeeklySummaryCron(prisma) {
 
   job.start();
   console.log('[Cron] Weekly summary job scheduled (Mondays at 8 AM)');
+  return job;
+}
+
+function startCronJobs(prisma) {
+  return [
+    startExpirationCron(prisma),
+    startChaseCron(prisma),
+    startTokenRefreshCron(prisma),
+    startWeeklySummaryCron(prisma),
+  ];
+}
+
+function stopCronJobs(jobs) {
+  for (const job of jobs || []) {
+    if (job && typeof job.stop === 'function') job.stop();
+  }
 }
 
 module.exports = {
@@ -466,6 +529,10 @@ module.exports = {
   startChaseCron,
   startTokenRefreshCron,
   startWeeklySummaryCron,
+  startCronJobs,
+  stopCronJobs,
   runExpirationSweep,
   runChaseSweep,
+  runTokenRefresh,
+  runWeeklySummary,
 };
