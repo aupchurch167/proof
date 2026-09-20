@@ -27,6 +27,7 @@
 const crypto = require('crypto');
 const { PrismaClient } = require('@prisma/client');
 const { EVENTS } = require('../src/services/webhookDispatcher');
+const { assertPublicHttpsUrl } = require('../src/lib/safeUrl');
 
 const prisma = new PrismaClient();
 
@@ -53,6 +54,12 @@ async function main() {
   }
   if (!args.url || typeof args.url !== 'string') {
     console.error('Error: --url is required.');
+    process.exit(1);
+  }
+  try {
+    await assertPublicHttpsUrl(args.url);
+  } catch (err) {
+    console.error(`Error: --url must be a public https URL (${err.message}).`);
     process.exit(1);
   }
   if (args.allOrgs && args.org) {

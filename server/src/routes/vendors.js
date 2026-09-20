@@ -142,7 +142,7 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
 });
 
 async function mirrorCreateToCore(vendor) {
-  if (!core.isEnabled()) return;
+  if (!core.isEnabled() || !(await core.shouldMirror(vendor))) return;
   try {
     const result = await core.createVendor(vendor);
     const coreId = result && result.data && result.data.id;
@@ -157,13 +157,13 @@ async function mirrorCreateToCore(vendor) {
 }
 
 async function mirrorUpdateToCore(vendor) {
-  if (!core.isEnabled()) return;
+  if (!core.isEnabled() || !(await core.shouldMirror(vendor))) return;
   if (!vendor.coreId) {
     // No link yet — treat as a create so we don't drop the update.
     return mirrorCreateToCore(vendor);
   }
   try {
-    await core.updateVendor(vendor.coreId, core.vendorToCorePayload(vendor));
+    await core.updateVendor(vendor.coreId, core.vendorToCorePayload(vendor), vendor);
   } catch (err) {
     console.error('[Core] Failed to mirror vendor update:', core.formatError(err));
   }
@@ -518,7 +518,7 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
     const portalUrl = `${process.env.APP_URL}/portal/${uploadToken}`;
 
     const cc = vendor.additionalEmails?.length > 0 ? vendor.additionalEmails : undefined;
-    await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization, cc);
+    const sent = await sendUploadRequestEmail(vendor.email, vendor.name, portalUrl, vendor.organization, cc);
 
     const log = await prisma.notificationLog.create({
       data: {
@@ -527,6 +527,7 @@ router.post('/:id/request-coi', authenticate, authorize('ADMIN', 'MEMBER', 'REVI
         type: 'UPLOAD_REQUEST',
         recipientEmail: vendor.email,
         status: 'SENT',
+        ...(sent?.id && { meta: { emailId: sent.id } }),
       },
     });
 

@@ -97,6 +97,20 @@ describe('Integrations — webhooks', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects http and private-IP webhook URLs', async () => {
+    const http = await request(app)
+      .post('/api/integrations/webhooks')
+      .set(auth(adminToken))
+      .send({ name: 'Local', url: 'http://127.0.0.1/' });
+    expect(http.status).toBe(400);
+
+    const metadata = await request(app)
+      .post('/api/integrations/webhooks')
+      .set(auth(adminToken))
+      .send({ name: 'Meta', url: 'https://169.254.169.254/' });
+    expect(metadata.status).toBe(400);
+  });
+
   it('creates a webhook, returns the secret once, then lists/toggles/deletes it', async () => {
     const created = await request(app)
       .post('/api/integrations/webhooks')

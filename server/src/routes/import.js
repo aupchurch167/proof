@@ -173,7 +173,7 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
 });
 
 async function mirrorImportedVendorToCore(vendor) {
-  if (!core.isEnabled()) return;
+  if (!core.isEnabled() || !(await core.shouldMirror(vendor))) return;
   try {
     const result = await core.createVendor(vendor);
     const coreId = result && result.data && result.data.id;

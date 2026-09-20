@@ -37,6 +37,7 @@ async function sendEmail(to, subject, html, cc) {
       throw new Error(error.message || 'Resend send failed');
     }
     console.log(`[Email] Sent to ${to}${cc?.length ? ` cc=${cc.join(',')}` : ''}: "${subject}" — id ${data?.id || 'unknown'}`);
+    return { id: data?.id || null };
   } catch (err) {
     console.error(`[Email] Failed to send to ${to}:`, err.message);
     throw err;
@@ -54,7 +55,7 @@ async function sendUploadRequestEmail(to, vendorName, portalUrl, org, cc) {
     orgEmail ? `<p style="margin:0;color:#4b5563;">${orgEmail}</p>` : '',
   ].filter(Boolean).join('\n');
 
-  await sendEmail(
+  return sendEmail(
     to,
     `Certificate of Insurance Request from ${orgName}`,
     `<h2>COI Upload Request</h2>

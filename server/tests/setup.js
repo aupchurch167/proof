@@ -13,6 +13,7 @@ async function createTestOrg(overrides = {}) {
       name: overrides.name || 'Test Org',
       email: overrides.email || `testorg-${Date.now()}@test.com`,
       plan: overrides.plan || 'FREE',
+      ...(overrides.slug && { slug: overrides.slug }),
       settings: { create: {} },
     },
     include: { settings: true },
