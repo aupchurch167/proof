@@ -58,6 +58,7 @@ describe('J-03 Core mirror org gate', () => {
       .send({ name: 'Tenant B Vendor', email: `b-${Date.now()}@sub.com` });
 
     expect(res.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 50));
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -75,6 +76,11 @@ describe('J-03 Core mirror org gate', () => {
       .send({ name: 'Tenant A Vendor', email: `a-${Date.now()}@sub.com` });
 
     expect(res.status).toBe(201);
+    // mirrorCreateToCore is fire-and-forget on the create route.
+    const started = Date.now();
+    while (spy.mock.calls.length === 0 && Date.now() - started < 500) {
+      await new Promise((r) => setImmediate(r));
+    }
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0][0].orgId).toBe(orgA.id);
   });

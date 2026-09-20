@@ -6,3 +6,4 @@
 - Outbound webhook delivery re-checks scheme/host/IP literals but does not re-resolve DNS at send time (registration-time resolve only).
 - `core.updateVendor` / `listVendors` still fall back to `CORE_ORG_SLUG` when no vendor org is supplied (delete / list helpers). Create/update paths used by the app pass the vendor.
 - Non-production Core calls still send `x-helm-test-*` bypass headers (Core has no real auth yet). Production refuses those headers and requires `CORE_API_TOKEN`.
+- `server/tests/portal.test.js` already expects 401 on an invalid portal token (A1-13 / B02). Current portal lookup still 404s. Pre-existing on `main`; not changed in this batch.

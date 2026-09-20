@@ -49,7 +49,10 @@ function validateEnv(env = process.env) {
   });
 
   if (!result.success) {
-    const errors = result.error.issues.map((issue) => issue.message);
+    const errors = result.error.issues.map((issue) => {
+      const field = issue.path.filter(Boolean).join('.') || 'env';
+      return issue.message.includes(field) ? issue.message : `${field}: ${issue.message}`;
+    });
     const err = new Error(`Invalid environment:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
     err.errors = errors;
     throw err;
