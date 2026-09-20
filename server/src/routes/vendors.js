@@ -8,6 +8,8 @@ const { omitVendorSecrets } = require('../http/sanitize');
 const { enforcePlanLimit } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
+const { isExtractLimitError } = require('../lib/extractErrors');
+const { rejectUnlessPdfMagic } = require('../utils/uploadFilters');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
 const { coverageFor, coverageReason } = require('../services/coverage');
 const { uploadFile, getSignedUrl } = require('../services/storage');
@@ -247,7 +249,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // PUT /api/vendors/:id
-router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), validate('updateVendor'), async (req, res) => {
   try {
     const { name, contactName, email, phone, address, trade, additionalEmails } = req.body;
 
@@ -367,6 +369,7 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
     if (!req.file) {
       return res.status(400).json({ error: 'PDF file required' });
     }
+    if (!rejectUnlessPdfMagic(req, res)) return;
 
     // Upload to DigitalOcean Spaces
     const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
@@ -376,8 +379,11 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
     let extractedData = null;
     let extractionError = null;
     try {
-      extractedData = await extractCoiData(req.file.buffer);
+      extractedData = await extractCoiData(req.file.buffer, { orgId: vendor.orgId });
     } catch (extractErr) {
+      if (isExtractLimitError(extractErr)) {
+        return res.status(extractErr.status).json({ error: extractErr.message, code: extractErr.code });
+      }
       extractionError = extractErr.message;
       console.error('AI extraction failed:', extractErr);
     }

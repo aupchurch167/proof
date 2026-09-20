@@ -5,7 +5,10 @@ const { v4: uuidv4 } = require('uuid');
 const rateLimit = require('express-rate-limit');
 const prisma = require('../lib/prisma');
 const { uploadFile } = require('../services/storage');
-const { extractCoiData } = require('../services/coiExtractor');
+const { extractCoiData, assertExtractAllowed } = require('../services/coiExtractor');
+const { isExtractLimitError } = require('../lib/extractErrors');
+const { hasPdfMagic } = require('../utils/uploadFilters');
+const { schemas, parseSchema } = require('../utils/validation');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
 const { generateUploadToken } = require('../utils/tokens');
 const { isValidTrade } = require('../constants/trades');
@@ -74,10 +77,11 @@ router.post(
         });
       }
 
-      const { name, contactName, phone, email, trade, notes, address, city, state, zip } = req.body;
-      if (!name || !email || !phone || !address) {
-        return res.status(400).json({ error: 'Business name, email, phone, and address are required' });
+      const parsed = parseSchema(schemas.applyVendor, req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error });
       }
+      const { name, contactName, phone, email, trade, notes, address, city, state, zip } = parsed.data;
 
       if (trade && !isValidTrade(trade)) {
         return res.status(400).json({ error: 'Invalid trade value' });
@@ -93,6 +97,21 @@ router.post(
       });
       if (existing) {
         return res.status(409).json({ error: 'A vendor with this email already exists for this organization' });
+      }
+
+      const coiFile = req.files?.coi?.[0];
+      if (coiFile && coiFile.mimetype === 'application/pdf') {
+        if (!hasPdfMagic(coiFile.buffer)) {
+          return res.status(400).json({ error: 'File is not a valid PDF' });
+        }
+        try {
+          await assertExtractAllowed(org.id, coiFile.buffer.length);
+        } catch (err) {
+          if (isExtractLimitError(err)) {
+            return res.status(err.status).json({ error: err.message, code: err.code });
+          }
+          throw err;
+        }
       }
 
       let w9Path = null;
@@ -121,15 +140,19 @@ router.post(
         data: { uploadToken: generateUploadToken(vendor.id) },
       });
 
-      const coiFile = req.files?.coi?.[0];
       if (coiFile) {
         const key = `${uuidv4()}${path.extname(coiFile.originalname) || ''}`;
         const pdfPath = await uploadFile(coiFile.buffer, key, coiFile.mimetype, 'cois');
 
         let extracted = null;
         if (coiFile.mimetype === 'application/pdf') {
-          try { extracted = await extractCoiData(coiFile.buffer); }
-          catch (e) { console.error('Apply COI extract failed:', e.message); }
+          try { extracted = await extractCoiData(coiFile.buffer, { orgId: org.id }); }
+          catch (e) {
+            if (isExtractLimitError(e)) {
+              return res.status(e.status).json({ error: e.message, code: e.code });
+            }
+            console.error('Apply COI extract failed:', e.message);
+          }
         }
         const complianceFlags = (org.settings && extracted)
           ? checkCompliance(extracted, org.settings, org.name) : null;

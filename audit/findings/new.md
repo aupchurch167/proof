@@ -29,3 +29,12 @@
 - Cron is still in-process. Advisory lock prevents double-send across processes; a missed 08:00 tick still waits until the next scheduled run (expiration windows catch up; token refresh does not).
 - SIGTERM stops cron timers but does not wait for an in-flight sweep before the 10s HTTP/Prisma shutdown fuse.
 - Restore rehearsal / Neon PITR (A3-01) remains owner-owned.
+
+# Notes from B04 (extras / residuals)
+
+- A4-09 Railway CORS origin `https://proof.up.railway.app` is **owner-confirmed keep**. CSP `'unsafe-inline'` styles and unauthenticated `/api/health` `{db}` detail were part of the same Low finding and were not changed.
+- Extract daily cap is counted in `AuditLog` (`action=extract`, `entity=ai`) so no migration was added. Concurrent extracts can theoretically overshoot by a small amount (count-then-insert). Failed Anthropic calls after `getClient()` consume a slot.
+- Webhook inbound still accepts a PDF-mimetype attachment without `%PDF-` (stores it, skips extract) so Resend is not failed. Admin/portal/apply COI uploads reject those with 400.
+- Vendor PUT zod accepts `notes` (the SPA sends it) but the handler still does not persist `notes` (pre-existing).
+- `EXTRACT_DAILY_CAP` / `EXTRACT_MAX_BYTES` are optional with defaults (10 / 4MB) and are not boot-validated.
+- A4-06 residual: `npm audit --omit=dev` still reports 3 highs for `deepmerge-ts` via Prisma CLI (`prisma` → `@prisma/config`). Not on the request path. `qs` (Express) and `uuid` via `gaxios` remain moderate. Client `react-router` 6.x moderates need a v7 major (`npm audit fix --force`) — not taken.

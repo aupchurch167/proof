@@ -1,19 +1,18 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate } = require('../middleware/auth');
+const { parseLimit, parseOffset } = require('../http/respond');
 
 const router = express.Router();
 
 // GET /api/notifications
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { limit = 50, offset = 0 } = req.query;
-
     const notifications = await prisma.notificationLog.findMany({
       where: { orgId: req.user.orgId },
       orderBy: { sentAt: 'desc' },
-      take: parseInt(limit),
-      skip: parseInt(offset),
+      take: parseLimit(req.query.limit),
+      skip: parseOffset(req.query.offset),
       include: {
         vendor: { select: { id: true, name: true } },
         coi: { select: { id: true, status: true } },
