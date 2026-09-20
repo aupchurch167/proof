@@ -13,3 +13,5 @@ Audit files live on `cursor/audit-pre-launch-30f7` (PR #9) and were not on `main
 | A6-04 | **Fixed — pending verification** — `start*Cron` return job handles; `startCronJobs` / `stopCronJobs`; SIGTERM/SIGINT call `job.stop()` before `server.close`. Residual: shutdown does not wait for an in-flight sweep to finish (10s force-exit remains). |
 
 **Prompt F: Fixed — pending verification.** Do not merge until Prompt V.
+
+Official `npm test` (this branch): **23 suites, 271 tests, passed.** Client `vite build`: passed.
