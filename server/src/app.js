@@ -54,6 +54,7 @@ app.use(
 );
 const allowedOrigins = [
   'https://app.proofcoi.com',
+  // A4-09: owner-confirmed keep (2026-09-20). Do not remove.
   'https://proof.up.railway.app',
   'http://localhost:5173',
   ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) : []),

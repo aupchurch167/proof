@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
+const { validate } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -22,7 +23,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // PUT /api/settings
-router.put('/', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/', authenticate, authorize('ADMIN'), validate('updateSettings'), async (req, res) => {
   try {
     const {
       minGeneralLiability,

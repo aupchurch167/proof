@@ -3,7 +3,7 @@ const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { updateVendorStatus, checkCompliance } = require('../services/compliance');
 const { getSignedUrl, deleteFile, downloadFile } = require('../services/storage');
-const { extractCoiData } = require('../services/coiExtractor');
+const { extractCoiData, isExtractLimitError } = require('../services/coiExtractor');
 const { z } = require('zod');
 const { logAudit } = require('../services/audit');
 
@@ -230,8 +230,11 @@ router.post('/:id/reanalyze', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEW
     let extractedData = null;
     let extractionError = null;
     try {
-      extractedData = await extractCoiData(buffer);
+      extractedData = await extractCoiData(buffer, { orgId: coi.orgId });
     } catch (err) {
+      if (isExtractLimitError(err)) {
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
       extractionError = err.message;
       console.error('Reanalyze extraction failed:', err);
     }

@@ -1,4 +1,81 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const prisma = require('../lib/prisma');
+
+const DEFAULT_EXTRACT_MAX_BYTES = 4 * 1024 * 1024;
+const DEFAULT_EXTRACT_DAILY_CAP = 10;
+const EXTRACT_AUDIT_ACTION = 'extract';
+const EXTRACT_AUDIT_ENTITY = 'ai';
+
+class ExtractLimitError extends Error {
+  constructor(message, { status, code } = {}) {
+    super(message);
+    this.name = 'ExtractLimitError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function isExtractLimitError(err) {
+  return Boolean(
+    err && (err.name === 'ExtractLimitError'
+      || err.code === 'EXTRACT_DAILY_CAP'
+      || err.code === 'EXTRACT_BYTE_LIMIT')
+  );
+}
+
+function getExtractMaxBytes() {
+  const n = parseInt(process.env.EXTRACT_MAX_BYTES, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_EXTRACT_MAX_BYTES;
+}
+
+function getExtractDailyCap() {
+  const n = parseInt(process.env.EXTRACT_DAILY_CAP, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_EXTRACT_DAILY_CAP;
+}
+
+function utcDayStart(d = new Date()) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+async function assertExtractAllowed(orgId, byteLength) {
+  const maxBytes = getExtractMaxBytes();
+  if (byteLength > maxBytes) {
+    throw new ExtractLimitError(
+      `PDF exceeds the AI extract size limit (${maxBytes} bytes)`,
+      { status: 413, code: 'EXTRACT_BYTE_LIMIT' }
+    );
+  }
+
+  if (!orgId) return;
+
+  const cap = getExtractDailyCap();
+  const count = await prisma.auditLog.count({
+    where: {
+      orgId,
+      action: EXTRACT_AUDIT_ACTION,
+      entity: EXTRACT_AUDIT_ENTITY,
+      createdAt: { gte: utcDayStart() },
+    },
+  });
+  if (count >= cap) {
+    throw new ExtractLimitError(
+      `Daily AI extract limit reached (${cap} per organization)`,
+      { status: 429, code: 'EXTRACT_DAILY_CAP' }
+    );
+  }
+}
+
+async function recordExtract(orgId, byteLength) {
+  if (!orgId) return;
+  await prisma.auditLog.create({
+    data: {
+      orgId,
+      action: EXTRACT_AUDIT_ACTION,
+      entity: EXTRACT_AUDIT_ENTITY,
+      details: { bytes: byteLength },
+    },
+  });
+}
 
 // Construct lazily so a missing key produces a clear, surfaced error at call
 // time rather than a silent failure (the SDK defers the key check to the first
@@ -17,8 +94,9 @@ function getClient() {
 /**
  * Extract COI data from a PDF.
  * @param {Buffer|string} pdfInput - PDF buffer or file path (legacy support for migration)
+ * @param {{ orgId?: string }} [opts] - orgId enables the per-org daily spend cap
  */
-async function extractCoiData(pdfInput) {
+async function extractCoiData(pdfInput, opts = {}) {
   let pdfBuffer;
   if (Buffer.isBuffer(pdfInput)) {
     pdfBuffer = pdfInput;
@@ -27,9 +105,16 @@ async function extractCoiData(pdfInput) {
     const fs = require('fs');
     pdfBuffer = fs.readFileSync(pdfInput);
   }
+
+  const orgId = opts.orgId || null;
+  await assertExtractAllowed(orgId, pdfBuffer.length);
+
+  const anthropic = getClient();
+  await recordExtract(orgId, pdfBuffer.length);
+
   const base64Pdf = pdfBuffer.toString('base64');
 
-  const response = await getClient().messages.create({
+  const response = await anthropic.messages.create({
     model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
     max_tokens: 4096,
     messages: [
@@ -141,4 +226,14 @@ function inferCoverageType(data) {
   return 'OTHER';
 }
 
-module.exports = { extractCoiData, inferCoverageType };
+module.exports = {
+  extractCoiData,
+  inferCoverageType,
+  assertExtractAllowed,
+  isExtractLimitError,
+  ExtractLimitError,
+  getExtractMaxBytes,
+  getExtractDailyCap,
+  EXTRACT_AUDIT_ACTION,
+  EXTRACT_AUDIT_ENTITY,
+};

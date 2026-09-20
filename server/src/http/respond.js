@@ -37,6 +37,12 @@ function parseLimit(raw) {
   return Math.min(n, MAX_LIMIT);
 }
 
+function parseOffset(raw) {
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n) || n < 0) return 0;
+  return n;
+}
+
 // Opaque cursor = base64url(JSON). Callers treat it as a blob; we keep the
 // encoding internal so the keyset shape can change without breaking consumers.
 function encodeCursor(obj) {
@@ -61,6 +67,7 @@ module.exports = {
   error,
   errors,
   parseLimit,
+  parseOffset,
   encodeCursor,
   decodeCursor,
 };

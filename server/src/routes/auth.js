@@ -164,12 +164,9 @@ router.post('/login', validate('login'), async (req, res) => {
 });
 
 // POST /api/auth/google — sign in / sign up with a Google ID token
-router.post('/google', async (req, res) => {
+router.post('/google', validate('google'), async (req, res) => {
   try {
     const { credential, orgName } = req.body;
-    if (!credential) {
-      return res.status(400).json({ error: 'Google credential is required' });
-    }
 
     let profile;
     try {
@@ -461,12 +458,9 @@ router.put('/me', authenticate, validate('updateProfile'), async (req, res) => {
 });
 
 // POST /api/auth/forgot-password
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', validate('forgotPassword'), async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
 
     // Always return 200 to prevent email enumeration
     const user = await prisma.user.findUnique({ where: { email } });
