@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useUsage } from '../contexts/UsageContext';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import EmailTagInput from '../components/EmailTagInput';
 import { CANONICAL_TRADES } from '../constants/trades';
@@ -160,6 +161,7 @@ function AddVendorDrawer({ open, onClose, onCreated }) {
 export default function Vendors() {
   const { user } = useAuth();
   const toast = useToast();
+  const { refreshUsage } = useUsage();
   const [searchParams, setSearchParams] = useSearchParams();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -269,6 +271,7 @@ export default function Vendors() {
       setSelected(new Set());
       setShowDeleteModal(false);
       fetchVendors();
+      refreshUsage();
     } finally {
       setDeleting(false);
     }
@@ -412,7 +415,14 @@ export default function Vendors() {
         </div>
       </Card>
 
-      <AddVendorDrawer open={showAdd} onClose={() => setShowAdd(false)} onCreated={fetchVendors} />
+      <AddVendorDrawer
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        onCreated={() => {
+          fetchVendors();
+          refreshUsage();
+        }}
+      />
 
       <DeleteConfirmationModal
         isOpen={showDeleteModal}

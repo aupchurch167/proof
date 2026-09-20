@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useUsage } from '../contexts/UsageContext';
 import { api } from '../utils/api';
 import EmailVerificationBanner from './EmailVerificationBanner';
 
@@ -38,15 +39,14 @@ function initials(first, last) {
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
+  const { usage } = useUsage();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [counts, setCounts] = useState({ gaps: 0, review: 0 });
-  const [plan, setPlan] = useState(null);
-  const [portalToken, setPortalToken] = useState(null);
 
-  // Badges and the plan meter are ambient — a failure here must never take the
-  // shell down with it. They load once and refresh on a slow timer rather than
-  // on every navigation, which would otherwise add two requests to every click.
+  // Badges are ambient — a failure here must never take the shell down.
+  // Plan usage lives in UsageContext so vendor mutations can refresh the
+  // sidebar immediately; this effect only keeps compliance badges current.
   useEffect(() => {
     let cancelled = false;
 
@@ -55,13 +55,6 @@ export default function Layout({ children }) {
         .then((s) => {
           if (cancelled) return;
           setCounts({ gaps: (s.nonCompliant || 0) + (s.expired || 0), review: s.pending || 0 });
-        })
-        .catch(() => {});
-      api.get('/organization/usage')
-        .then((u) => {
-          if (cancelled) return;
-          setPlan(u);
-          setPortalToken(u.portalPreviewToken);
         })
         .catch(() => {});
     };
@@ -120,9 +113,9 @@ export default function Layout({ children }) {
               </Link>
             );
           })}
-          {portalToken && (
+          {usage?.portalPreviewToken && (
             <a
-              href={`/portal/${portalToken}`}
+              href={`/portal/${usage.portalPreviewToken}`}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 px-3 py-[9px] rounded-control text-sm font-medium
@@ -134,18 +127,18 @@ export default function Layout({ children }) {
         </nav>
 
         <div className="px-5 py-3.5 border-t border-white/10 flex flex-col gap-2">
-          {plan && (
+          {usage && (
             <>
               <div className="flex justify-between items-center text-xs whitespace-nowrap">
-                <span className="text-on-navy-3">{plan.planLabel} plan</span>
+                <span className="text-on-navy-3">{usage.planLabel} plan</span>
                 <span className="text-on-navy-4">
-                  {plan.vendors.used} / {plan.vendors.limit ?? '∞'} vendors
+                  {usage.vendors.used} / {usage.vendors.limit ?? '∞'} vendors
                 </span>
               </div>
               <div className="h-1 rounded-sm bg-white/[.12]">
                 <div
                   className="h-full rounded-sm bg-amber transition-[width] duration-300"
-                  style={{ width: `${Math.min(100, plan.vendors.percent || 0)}%` }}
+                  style={{ width: `${Math.min(100, usage.vendors.percent || 0)}%` }}
                 />
               </div>
             </>
