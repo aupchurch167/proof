@@ -6,6 +6,7 @@ const { generateToken, hashToken, tokenPrefix } = require('../lib/apiTokens');
 const { ALL_SCOPES } = require('../middleware/apiAuth');
 const { EVENTS } = require('../services/webhookDispatcher');
 const { logAudit } = require('../services/audit');
+const { assertPublicHttpsUrl } = require('../lib/safeUrl');
 
 const router = express.Router();
 
@@ -138,8 +139,13 @@ router.post('/webhooks', async (req, res) => {
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
-    if (!url || typeof url !== 'string' || !/^https?:\/\/.+/i.test(url)) {
-      return res.status(400).json({ error: 'A valid http(s) URL is required' });
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: 'A valid public https URL is required' });
+    }
+    try {
+      await assertPublicHttpsUrl(url);
+    } catch {
+      return res.status(400).json({ error: 'A valid public https URL is required' });
     }
 
     let finalEvents = [EVENTS.COI_UPDATED];

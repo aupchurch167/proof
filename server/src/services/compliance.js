@@ -141,9 +141,9 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
   const updated = await prisma.vendor.update({
     where: { id: vendorId },
     data: { coiStatus: status },
-    select: { coreId: true },
+    select: { coreId: true, orgId: true },
   });
-  mirrorComplianceStatusToCore(updated.coreId, status);
+  mirrorComplianceStatusToCore(updated.coreId, status, updated);
 
   // A valid COI resolves any outstanding COI request so "is a request open?"
   // stays accurate for API consumers.
@@ -162,10 +162,11 @@ async function updateVendorStatus(prisma, vendorId, orgId) {
   }
 }
 
-async function mirrorComplianceStatusToCore(coreId, coiStatus) {
+async function mirrorComplianceStatusToCore(coreId, coiStatus, vendor) {
   if (!core.isEnabled() || !coreId) return;
+  if (vendor && !(await core.shouldMirror(vendor))) return;
   try {
-    await core.updateVendor(coreId, { complianceStatus: core.mapComplianceStatus(coiStatus) });
+    await core.updateVendor(coreId, { complianceStatus: core.mapComplianceStatus(coiStatus) }, vendor);
   } catch (err) {
     console.error('[Core] Failed to mirror compliance status:', core.formatError(err));
   }

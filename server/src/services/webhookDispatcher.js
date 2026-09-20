@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { mapCoiStatus, earliestExpiration } = require('../http/serializers');
+const { parseHttpsUrl } = require('../lib/safeUrl');
 
 // Outbound webhook events Proof emits. Consumers subscribe per endpoint.
 const EVENTS = {
@@ -16,6 +17,17 @@ function sign(secret, rawBody) {
 }
 
 async function deliver(endpoint, rawBody, event) {
+  try {
+    parseHttpsUrl(endpoint.url);
+  } catch (err) {
+    const status = 'failed:blocked-url';
+    console.warn(`[Webhook] ${event} -> ${endpoint.url} blocked: ${err.message}`);
+    await prisma.webhookEndpoint
+      .update({ where: { id: endpoint.id }, data: { lastDeliveryAt: new Date(), lastDeliveryStatus: status } })
+      .catch(() => {});
+    return status;
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
   let status;

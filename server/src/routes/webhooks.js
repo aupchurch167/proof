@@ -6,6 +6,8 @@ const prisma = require('../lib/prisma');
 const { uploadFile, getSignedUrl } = require('../services/storage');
 const { extractCoiData } = require('../services/coiExtractor');
 const { updateVendorStatus } = require('../services/compliance');
+const { fetchWithTimeout } = require('../lib/fetchWithTimeout');
+const { assertSafeAttachmentUrl } = require('../lib/safeUrl');
 
 const router = express.Router();
 
@@ -95,7 +97,8 @@ async function materializeAttachment(att) {
       ? Buffer.from(att.data, 'base64')
       : Buffer.from(att.data);
   } else if (att.url) {
-    const res = await fetch(att.url);
+    assertSafeAttachmentUrl(att.url);
+    const res = await fetchWithTimeout(att.url, { redirect: 'error' }, 5000);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     buf = Buffer.from(await res.arrayBuffer());
   } else {
@@ -183,9 +186,15 @@ async function processAttachment(att, vendor) {
 // Subscribe email.received (inbound replies), email.bounced, email.failed.
 router.post('/resend-inbound', async (req, res) => {
   try {
-    if (process.env.RESEND_WEBHOOK_SECRET && !verifySvixSignature(req, process.env.RESEND_WEBHOOK_SECRET)) {
-      console.warn('[Webhook] Resend signature verification FAILED');
-      return res.status(401).json({ error: 'Invalid signature' });
+    const secret = process.env.RESEND_WEBHOOK_SECRET;
+    if (secret) {
+      if (!verifySvixSignature(req, secret)) {
+        console.warn('[Webhook] Resend signature verification FAILED');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      console.error('[Webhook] RESEND_WEBHOOK_SECRET is not configured');
+      return res.status(503).json({ error: 'Webhook secret not configured' });
     }
 
     const { type, data } = req.body || {};
@@ -229,45 +238,83 @@ async function handleInbound(req, res, data) {
     console.log('[Webhook] inbound payload (truncated):', JSON.stringify(data).slice(0, 1500));
   }
 
-  const matches = await prisma.vendor.findMany({
-    where: { email: fromEmail, deletedAt: null },
-    select: { id: true, orgId: true, name: true },
-  });
+  for (const att of attachments) {
+    if (att.url && !att.content && !att.data) {
+      try {
+        assertSafeAttachmentUrl(att.url);
+      } catch (err) {
+        console.warn(`[Webhook] Rejected attachment URL: ${err.message}`);
+        return res.status(400).json({ error: 'Invalid attachment URL' });
+      }
+    }
+  }
 
-  if (matches.length === 0) {
-    console.log(`[Webhook] No matching vendor for "${fromEmail}"`);
+  const vendor = await correlateInboundVendor(fromEmail);
+  if (!vendor) {
+    console.log(`[Webhook] No safe org correlation for inbound from "${fromEmail}"; skipping`);
     return res.json({ received: true, matched: 0, attachments: attachments.length });
   }
 
-  for (const v of matches) {
-    const processed = [];
-    for (const att of attachments) {
-      try {
-        processed.push(await processAttachment(att, v));
-      } catch (err) {
-        console.error(`[Webhook] Failed to process attachment ${att?.filename || '(unknown)'}: ${err.message}`);
-        processed.push({ filename: att?.filename || null, error: err.message });
-      }
+  const processed = [];
+  for (const att of attachments) {
+    try {
+      processed.push(await processAttachment(att, vendor));
+    } catch (err) {
+      console.error(`[Webhook] Failed to process attachment ${att?.filename || '(unknown)'}: ${err.message}`);
+      processed.push({ filename: att?.filename || null, error: err.message });
     }
-
-    await prisma.auditLog.create({
-      data: {
-        orgId: v.orgId,
-        action: 'vendor_reply',
-        entity: 'vendor',
-        entityId: v.id,
-        details: {
-          from: fromEmail,
-          subject,
-          preview: body.slice(0, 1000),
-          receivedAt: new Date().toISOString(),
-          attachments: processed,
-        },
-      },
-    });
-    console.log(`[Webhook] Reply recorded: ${fromEmail} -> vendor ${v.id} (${v.name}); attachments=${processed.length}`);
   }
-  res.json({ received: true, matched: matches.length, attachments: attachments.length });
+
+  await prisma.auditLog.create({
+    data: {
+      orgId: vendor.orgId,
+      action: 'vendor_reply',
+      entity: 'vendor',
+      entityId: vendor.id,
+      details: {
+        from: fromEmail,
+        subject,
+        preview: body.slice(0, 1000),
+        receivedAt: new Date().toISOString(),
+        attachments: processed,
+      },
+    },
+  });
+  console.log(`[Webhook] Reply recorded: ${fromEmail} -> vendor ${vendor.id} (${vendor.name}); attachments=${processed.length}`);
+  res.json({ received: true, matched: 1, attachments: attachments.length });
+}
+
+async function correlateInboundVendor(fromEmail) {
+  const recent = await prisma.notificationLog.findFirst({
+    where: {
+      recipientEmail: fromEmail,
+      type: 'UPLOAD_REQUEST',
+      status: 'SENT',
+      sentAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
+    },
+    orderBy: { sentAt: 'desc' },
+    select: { orgId: true, vendorId: true },
+  });
+  if (!recent) return null;
+
+  if (recent.vendorId) {
+    const byId = await prisma.vendor.findFirst({
+      where: { id: recent.vendorId, orgId: recent.orgId, deletedAt: null },
+      select: { id: true, orgId: true, name: true, email: true, additionalEmails: true },
+    });
+    if (byId && (byId.email === fromEmail || byId.additionalEmails?.includes(fromEmail))) {
+      return { id: byId.id, orgId: byId.orgId, name: byId.name };
+    }
+  }
+
+  return prisma.vendor.findFirst({
+    where: {
+      orgId: recent.orgId,
+      deletedAt: null,
+      OR: [{ email: fromEmail }, { additionalEmails: { has: fromEmail } }],
+    },
+    select: { id: true, orgId: true, name: true },
+  });
 }
 
 async function handleFailure(req, res, type, data) {
@@ -283,17 +330,8 @@ async function handleFailure(req, res, type, data) {
 
   if (!recipient) return res.json({ received: true });
 
-  // Update the most recent SENT NotificationLog for this recipient (within the
-  // last 7 days) to FAILED.
-  const recent = await prisma.notificationLog.findFirst({
-    where: {
-      recipientEmail: recipient,
-      status: 'SENT',
-      sentAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-    },
-    orderBy: { sentAt: 'desc' },
-    include: { vendor: { select: { id: true, orgId: true, name: true } } },
-  });
+  const emailId = data?.email_id || data?.emailId || data?.email?.id || null;
+  const recent = await correlateFailureLog(recipient, emailId);
 
   if (recent) {
     await prisma.notificationLog.update({
@@ -317,6 +355,37 @@ async function handleFailure(req, res, type, data) {
   }
 
   res.json({ received: true });
+}
+
+async function correlateFailureLog(recipient, emailId) {
+  if (emailId) {
+    const byId = await prisma.notificationLog.findFirst({
+      where: {
+        recipientEmail: recipient,
+        status: 'SENT',
+        meta: { path: ['emailId'], equals: emailId },
+      },
+      include: { vendor: { select: { id: true, orgId: true, name: true } } },
+    });
+    if (byId) return byId;
+  }
+
+  const recent = await prisma.notificationLog.findMany({
+    where: {
+      recipientEmail: recipient,
+      status: 'SENT',
+      sentAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+    },
+    orderBy: { sentAt: 'desc' },
+    include: { vendor: { select: { id: true, orgId: true, name: true } } },
+  });
+
+  const orgIds = new Set(recent.map((row) => row.orgId));
+  if (orgIds.size !== 1) {
+    console.warn(`[Webhook] No safe org correlation for delivery failure to ${recipient}; skipping`);
+    return null;
+  }
+  return recent[0];
 }
 
 module.exports = router;
