@@ -4,7 +4,7 @@ const PLAN_LIMITS = {
     maxCois: 100,
   },
   STARTER: {
-    maxVendors: 100,
+    maxVendors: 50,
     maxCois: 500,
   },
   UNLIMITED: {
