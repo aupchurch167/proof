@@ -12,9 +12,20 @@ Audit files live on `cursor/audit-pre-launch-30f7` (PR #9) and were not on `main
 
 No migrations. New optional env (not required at boot): `SENTRY_DSN`, `SENTRY_RELEASE`, `SENTRY_ENVIRONMENT`, `VITE_SENTRY_DSN`, `VITE_SENTRY_RELEASE`, `VITE_SENTRY_ENVIRONMENT`. Tests require `PROOF_TEST_DB=1` or a `_test` database URL.
 
+## Local verification (this branch)
+
+- Workflow YAML parses (`python3` PyYAML). Job name `Test`, service `postgres:16`, server step `npm test`.
+- Disposable DB `postgresql://proof:proof@localhost:5432/proof_test` + `PROOF_TEST_DB=1` + `prisma migrate deploy`.
+- **Server `npm test`:** 26 suites, **291 passed** (B04 baseline 283 + C-02 + 4 cleanup-guard + 3 Sentry).
+- **`npm run test:friday`:** 11 suites, **144 passed** (Friday file list + inbound + B02 isolation).
+- **Client `npm run build`:** vite production build succeeded with `VITE_SENTRY_DSN` unset.
+- Broken expect demo (`expect(1).toBe(2)` in a throwaway Jest file): **exit 1**.
+- `require('./src/app')` with no `SENTRY_DSN`: boots.
+- `cleanupTestData` against `.../proof` without `PROOF_TEST_DB`: throws the refuse message; `keep-me` org survives in the dedicated test.
+
 ## How a broken expect fails CI
 
-`server` script is `jest --runInBand --forceExit --detectOpenHandles`. Jest exits non-zero on any failed assertion. The GitHub Actions step `Server tests` uses the default `set -e` behavior, so a red suite fails the workflow and blocks merge once the owner requires this check.
+`server` script is `jest --runInBand --forceExit --detectOpenHandles`. Jest exits non-zero on any failed assertion (locally reproduced: exit 1). The GitHub Actions step `Server tests` uses the default `set -e` behavior, so a red suite fails the workflow and blocks merge once the owner requires this check.
 
 Out of scope: B06 legal; making the GitHub check required (owner); full tenant-isolation matrix.
 
