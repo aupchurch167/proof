@@ -30,4 +30,8 @@ Audit files live on `cursor/audit-pre-launch-30f7` (PR #9) and were not on `main
 
 ## Local verification (fix author)
 
-Pending in this turn: full server suite + client build after migrate.
+- Disposable DB `postgresql://proof:proof@localhost:5432/proof_test` + `PROOF_TEST_DB=1` + `prisma migrate deploy` (19 migrations including `20260921000000_add_legal_acceptance`).
+- **Server `npm test`:** 27 suites, **301 passed** (B05 baseline 26 / 291 + B06 legal/product + Google acceptTerms).
+- **Client `npm run build`:** vite production build succeeded with `VITE_SENTRY_DSN` unset.
+- Official cases: signup without / with `acceptTerms: false` → 400; accept → versions stored; apply `w9` file/field → 400 `W9_NOT_ACCEPTED`; apply without w9 → 201 and existing `w9Path` kept; GET vendor with W-9 writes `w9:download` audit; `/terms` and `/privacy` 200 with DRAFT + subprocessors.
+- Browser (Vite): signup checkbox required; `/terms` + `/privacy` DRAFT once; apply shows W-9 note and no file input; Settings billing invoiced / not self-serve; Requirements “New template · Coming soon” and coverage toggles labeled not-enforced.

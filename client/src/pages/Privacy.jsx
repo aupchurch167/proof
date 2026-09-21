@@ -11,7 +11,7 @@ export default function Privacy() {
           <Link to="/terms" className="text-navy hover:underline">Terms</Link>
         </p>
         <div className="bg-warn-bg border border-amber text-warn-text px-4 py-3 rounded-control text-sm mb-6">
-          <strong>DRAFT — not counsel-approved.</strong> {DRAFT_BANNER}
+          {DRAFT_BANNER}
         </div>
         <h1 className="text-3xl font-bold mb-2">Privacy Policy</h1>
         <p className="text-sm text-muted mb-8">Document version: {PRIVACY_VERSION}</p>
