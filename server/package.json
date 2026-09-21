@@ -9,13 +9,15 @@
     "db:generate": "npx prisma generate",
     "db:seed": "node prisma/seed.js",
     "postinstall": "prisma generate",
-    "test": "jest --runInBand --forceExit --detectOpenHandles"
+    "test": "jest --runInBand --forceExit --detectOpenHandles",
+    "test:friday": "jest --runInBand --forceExit --detectOpenHandles tests/auth.test.js tests/google-auth.test.js tests/vendors.test.js tests/cois.test.js tests/compliance.test.js tests/integrations.test.js tests/api-v1.test.js tests/webhook-dispatch.test.js tests/portal.test.js tests/webhooks-inbound.test.js tests/b02-auth-portal.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@aws-sdk/client-s3": "^3.1014.0",
     "@aws-sdk/s3-request-presigner": "^3.1014.0",
     "@prisma/client": "^6.3.0",
+    "@sentry/node": "^10.75.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "cron": "^3.1.7",

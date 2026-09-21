@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('./instrument');
 const { validateEnv } = require('./config/env');
 
 try {

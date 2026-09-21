@@ -1,3 +1,4 @@
+import { initClientSentry } from './sentry';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
@@ -6,6 +7,8 @@ import { ToastProvider } from './contexts/ToastContext';
 import { UsageProvider } from './contexts/UsageContext';
 import App from './App';
 import './index.css';
+
+initClientSentry();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

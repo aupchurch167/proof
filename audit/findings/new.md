@@ -30,6 +30,14 @@
 - SIGTERM stops cron timers but does not wait for an in-flight sweep before the 10s HTTP/Prisma shutdown fuse.
 - Restore rehearsal / Neon PITR (A3-01) remains owner-owned.
 
+# Notes from B05 (extras / residuals)
+
+- Branch protection / required CI check on `main` is an owner action. The workflow file is in-repo; GitHub must be told to require the `Server suite + client build` check before merge.
+- Sentry projects and DSNs are owner-created after merge. `SENTRY_DSN` (API) and `VITE_SENTRY_DSN` (SPA build) are optional; the app boots and CI builds without them. Until they are set, 500s still only go to `console.error` / morgan.
+- Sentry `beforeSend` redacts emails and auth/cookie headers. Request bodies that do not look like email/token keys are not fully stripped.
+- Friday-deploy matrix beyond the named cases (WH-1, V-01, C-02, O-03, L-02) plus the existing Friday file list is still out of scope. Full `/audit/tenant-isolation-tests.md` remains open.
+- `cleanupTestData` still truncates every table once the guard passes. A developer who sets `PROOF_TEST_DB=1` against a shared DB can still wipe it.
+
 # Notes from B04 (extras / residuals)
 
 - A4-09 Railway CORS origin `https://proof.up.railway.app` is **owner-confirmed keep**. CSP `'unsafe-inline'` styles and unauthenticated `/api/health` `{db}` detail were part of the same Low finding and were not changed.
