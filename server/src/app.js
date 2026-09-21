@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { attachSentry } = require('./lib/sentry');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -42,7 +43,15 @@ app.use(
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
         'script-src': ["'self'", `${gsi}client`],
-        'connect-src': ["'self'", gsi],
+        // Browser Sentry (VITE_SENTRY_DSN) posts to ingest hosts when the SPA
+        // is served from this origin. Harmless when no DSN is configured.
+        'connect-src': [
+          "'self'",
+          gsi,
+          'https://*.ingest.sentry.io',
+          'https://*.ingest.us.sentry.io',
+          'https://*.sentry.io',
+        ],
         'frame-src': ["'self'", gsi],
         // Manrope is the brand typeface; without these two the UI silently
         // falls back to system-ui in production.
@@ -166,6 +175,9 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
   });
 }
+
+// Sentry first (no-op without SENTRY_DSN), then the JSON error body.
+attachSentry(app);
 
 // Error handler
 app.use((err, req, res, next) => {

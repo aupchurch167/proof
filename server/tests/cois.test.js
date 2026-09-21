@@ -92,6 +92,21 @@ describe('GET /api/cois/:id', () => {
 
     expect(res.status).toBe(404);
   });
+
+  it('C-02: returns 404 for another org COI and never leaks the body', async () => {
+    const orgB = await createTestOrg({ name: 'Org B C-02', slug: `c02-b-${Date.now()}` });
+    const vendorB = await createTestVendor(orgB.id, { email: `c02-b-${Date.now()}@test.com` });
+    const coiB = await createTestCoi(vendorB.id, orgB.id, { pdfPath: 'test/c02-b.pdf' });
+
+    const res = await request(app)
+      .get(`/api/cois/${coiB.id}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).not.toHaveProperty('id', coiB.id);
+    expect(res.body).not.toHaveProperty('pdfPath', 'test/c02-b.pdf');
+    expect(JSON.stringify(res.body)).not.toContain(orgB.id);
+  });
 });
 
 describe('DELETE /api/cois/:id', () => {

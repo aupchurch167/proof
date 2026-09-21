@@ -106,8 +106,21 @@ function getAuthToken(user) {
   return generateAccessToken(user);
 }
 
+const UNSAFE_CLEANUP_MESSAGE =
+  'cleanupTestData refused: set PROOF_TEST_DB=1 or use a DATABASE_URL containing _test';
+
+function isSafeTestDatabase(env = process.env) {
+  if (env.PROOF_TEST_DB === '1') return true;
+  const url = env.DATABASE_URL || '';
+  return url.includes('_test');
+}
+
 async function cleanupTestData() {
-  // Delete in dependency order
+  if (!isSafeTestDatabase()) {
+    throw new Error(UNSAFE_CLEANUP_MESSAGE);
+  }
+
+  // Delete in dependency order — only after the test-DB guard above.
   await prisma.session.deleteMany({});
   await prisma.auditLog.deleteMany({});
   await prisma.coiRequest.deleteMany({});
@@ -133,4 +146,6 @@ module.exports = {
   daysFromNow,
   getAuthToken,
   cleanupTestData,
+  isSafeTestDatabase,
+  UNSAFE_CLEANUP_MESSAGE,
 };
