@@ -2,6 +2,8 @@
 
 Proof uses Prisma Migrate. Apply pending migrations with:
 
+B06 (`20260921000000_add_legal_acceptance`) is additive: four nullable columns on `User` (`termsAcceptedAt`, `termsVersion`, `privacyAcceptedAt`, `privacyVersion`). Existing rows stay null.
+
 ```bash
 cd server && npx prisma migrate deploy
 ```

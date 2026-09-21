@@ -14,6 +14,7 @@ const {
 } = require('../lib/sessions');
 const { hashToken } = require('../lib/apiTokens');
 const { verifyAccessToken } = require('../utils/tokens');
+const { acceptedLegal, legalAcceptanceFields } = require('../legal/documents');
 
 const router = express.Router();
 
@@ -101,6 +102,7 @@ router.post('/signup', validate('signup'), async (req, res) => {
           lastName,
           role: 'ADMIN',
           emailVerifyToken,
+          ...legalAcceptanceFields(),
         },
       });
 
@@ -224,6 +226,11 @@ router.post('/google', validate('google'), async (req, res) => {
     }
 
     if (!user) {
+      if (!acceptedLegal(req.body.acceptTerms)) {
+        return res.status(400).json({
+          error: 'You must accept the Terms of Service and Privacy Policy to create an account.',
+        });
+      }
       const created = await prisma.$transaction(async (tx) => {
         const org = await tx.organization.create({
           data: {
@@ -245,6 +252,7 @@ router.post('/google', validate('google'), async (req, res) => {
             lastName: profile.lastName || '',
             role: 'ADMIN',
             emailVerified: true,
+            ...legalAcceptanceFields(),
           },
           include: { organization: true },
         });

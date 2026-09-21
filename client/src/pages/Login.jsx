@@ -69,6 +69,11 @@ export default function Login() {
           <p className="text-center mt-4 text-sm text-muted">
             Don't have an account? <Link to="/signup" className="text-navy hover:underline">Sign up</Link>
           </p>
+          <p className="text-center mt-2 text-xs text-faint">
+            <Link to="/terms" className="hover:underline">Terms</Link>
+            {' · '}
+            <Link to="/privacy" className="hover:underline">Privacy</Link>
+          </p>
         </form>
       </div>
     </div>

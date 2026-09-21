@@ -69,6 +69,16 @@ router.post(
       const org = await findOrgBySlug(req.params.slug, { include: { settings: true } });
       if (!org) return res.status(404).json({ error: 'Not found' });
 
+      // A10-02: public apply must not collect W-9 / TIN until a DPA path exists.
+      // Keep the multer field so we can reject it with a clear 400. Existing
+      // stored W-9s are left in place.
+      if (req.files?.w9?.length || Object.prototype.hasOwnProperty.call(req.body || {}, 'w9')) {
+        return res.status(400).json({
+          error: 'W-9 uploads are not accepted on the public apply form until a DPA is in place.',
+          code: 'W9_NOT_ACCEPTED',
+        });
+      }
+
       const limit = await evaluatePlanLimit(org.id, 'vendor');
       if (!limit.ok) {
         return res.status(403).json({
@@ -114,13 +124,6 @@ router.post(
         }
       }
 
-      let w9Path = null;
-      const w9File = req.files?.w9?.[0];
-      if (w9File) {
-        const key = `${uuidv4()}${path.extname(w9File.originalname) || ''}`;
-        w9Path = await uploadFile(w9File.buffer, key, w9File.mimetype, 'w9s');
-      }
-
       const vendor = await prisma.vendor.create({
         data: {
           orgId: org.id,
@@ -131,7 +134,6 @@ router.post(
           address: composedAddress,
           trade: trade || null,
           notes: notes || null,
-          w9Path,
           uploadToken: undefined, // placeholder, replaced below with a signed JWT
         },
       });

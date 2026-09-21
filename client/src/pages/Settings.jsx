@@ -203,10 +203,16 @@ export default function Settings() {
 
           {tab === 'Plan & billing' && (
             <Card className="p-[22px] flex flex-col gap-3">
-              <span className="text-[15px] font-bold text-navy">Plan & billing</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[15px] font-bold text-navy">Plan & billing</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted bg-card-alt border border-line px-2 py-0.5 rounded-chip">
+                  Invoiced · not self-serve
+                </span>
+              </div>
               <p className="text-[13px] text-ink-2 leading-[1.55]">
                 You're on the <b className="text-navy">{usage?.planLabel}</b> plan.
-                Billing is not yet self-serve — to change plans, contact us and we'll move you over.
+                There is no checkout or in-app upgrade. Plan is set on the organization
+                in the database; contact us and we'll invoice and move you over.
               </p>
               {isAdmin && (
                 <Button as={Link} to="/settings/integrations" className="self-start">
@@ -315,9 +321,9 @@ export default function Settings() {
               <Meter label="Vendors" used={usage.vendors.used} limit={usage.vendors.limit} />
               <Meter label="Certificates read" used={usage.cois.used} limit={usage.cois.limit} />
               {usage.plan !== 'UNLIMITED' && (
-                <button className="mt-1 py-2.5 rounded-control bg-white text-navy text-[13px] font-semibold hover:bg-amber-light transition-colors duration-150">
-                  Upgrade to Unlimited
-                </button>
+                <p className="mt-1 text-[13px] text-on-navy-2 leading-[1.5]">
+                  No self-serve upgrade. Contact us to change plans — we'll invoice you.
+                </p>
               )}
             </div>
           )}

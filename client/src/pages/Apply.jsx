@@ -14,7 +14,6 @@ export default function Apply() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [form, setForm] = useState(blankForm);
-  const [w9, setW9] = useState(null);
   const [coi, setCoi] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -37,7 +36,6 @@ export default function Apply() {
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v); });
-      if (w9) fd.append('w9', w9);
       if (coi) fd.append('coi', coi);
       const res = await fetch(`${API_BASE}/apply/${slug}`, { method: 'POST', body: fd });
       if (!res.ok) {
@@ -116,12 +114,12 @@ export default function Apply() {
             className={inputClass + ' resize-y'}
             placeholder="Add more information about your work" />
         </div>
-        <div>
-          <label className={labelClass}>W9</label>
-          <p className="text-xs text-muted mb-1">
-            Blank form: <a href="https://www.irs.gov/pub/irs-pdf/fw9.pdf" target="_blank" rel="noopener noreferrer" className="text-navy hover:underline">irs.gov/pub/irs-pdf/fw9.pdf</a>
+        <div className="bg-card-alt border border-line rounded-control px-3 py-3">
+          <p className="text-sm font-medium text-ink-2">W-9 / tax documents</p>
+          <p className="text-xs text-muted mt-1 leading-relaxed">
+            Not collected on this public form. {org.name} can request a W-9 later
+            through Proof after they have a data-processing agreement in place.
           </p>
-          <input type="file" accept="application/pdf,image/*" onChange={(e) => setW9(e.target.files?.[0] || null)} className={fileClass} />
         </div>
         <div>
           <label className={labelClass}>Certificate of Insurance</label>

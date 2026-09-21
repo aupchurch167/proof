@@ -32,6 +32,7 @@ const ACTION_EVENT = {
   'settings:update': 'Edited',
   'user:change_role': 'Edited',
   'user:remove': 'Status',
+  'w9:download': 'Edited',
 };
 
 const NOTIFICATION_EVENT = {
@@ -66,6 +67,7 @@ const PHRASE = {
   'settings:update': 'requirement template changed',
   'user:change_role': 'role changed',
   'user:remove': 'removed from the team',
+  'w9:download': 'W-9 signed download link created',
 };
 
 function phraseFor(entity, action) {

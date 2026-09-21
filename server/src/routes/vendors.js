@@ -224,6 +224,18 @@ router.get('/:id', authenticate, async (req, res) => {
       }),
     ]);
 
+    if (w9Url) {
+      logAudit({
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        action: 'download',
+        entity: 'w9',
+        entityId: vendor.id,
+        details: { source: 'signed_url' },
+        ipAddress: req.ip,
+      });
+    }
+
     const settings = await prisma.organizationSettings.findUnique({
       where: { orgId: req.user.orgId },
     });

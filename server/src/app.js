@@ -27,6 +27,13 @@ const repliesRoutes = require('./routes/replies');
 const integrationsRoutes = require('./routes/integrations');
 const v1Routes = require('./routes/v1');
 const { hashToken } = require('./lib/apiTokens');
+const {
+  TERMS_VERSION,
+  PRIVACY_VERSION,
+  TERMS_SECTIONS,
+  PRIVACY_SECTIONS,
+  wrapLegalPage,
+} = require('./legal/documents');
 
 const app = express();
 
@@ -157,6 +164,19 @@ app.use('/api/integrations', integrationsRoutes);
 
 // Versioned, org-scoped public API for service-to-service integrations.
 app.use('/api/v1/orgs/:orgSlug', v1Routes);
+
+// Public draft legal pages (A10-01). Served as HTML so /terms and /privacy
+// return 200 without the SPA build (tests + crawlers). Counsel swaps the body.
+app.get('/terms', (_req, res) => {
+  res
+    .type('html')
+    .send(wrapLegalPage({ title: 'Terms of Service', version: TERMS_VERSION, sections: TERMS_SECTIONS }));
+});
+app.get('/privacy', (_req, res) => {
+  res
+    .type('html')
+    .send(wrapLegalPage({ title: 'Privacy Policy', version: PRIVACY_VERSION, sections: PRIVACY_SECTIONS }));
+});
 
 // Health check
 app.get('/api/health', async (req, res) => {
