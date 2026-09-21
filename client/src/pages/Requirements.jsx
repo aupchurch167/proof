@@ -140,9 +140,9 @@ export default function Requirements() {
         <Button
           variant="navy"
           disabled={!data.multiTemplateSupported}
-          title={data.multiTemplateSupported ? undefined : 'Per-trade templates need the RequirementTemplate model'}
+          title={data.multiTemplateSupported ? undefined : 'Coming soon — per-trade templates are not built yet'}
         >
-          New template
+          New template · Coming soon
         </Button>
       </div>
 
@@ -160,8 +160,8 @@ export default function Requirements() {
           ))}
           {!data.multiTemplateSupported && (
             <p className="px-[18px] py-3 text-xs text-muted border-t border-line-divider leading-relaxed">
-              Every vendor uses this one template today. Per-trade templates need the
-              RequirementTemplate model, which isn't built yet.
+              Coming soon: per-trade templates. Every vendor uses this one default
+              template today. The server does not store additional templates.
             </p>
           )}
         </Card>
@@ -306,17 +306,20 @@ export default function Requirements() {
             </div>
 
             {[
-              ['warnInPeriod', <>Warn me when a sub's certificate will expire <b>inside</b> the coverage period</>],
-              ['retainForPeriod', <>Keep expired certificates on file for the whole period (needed to prove past coverage)</>],
-            ].map(([key, label]) => (
-              <label key={key} className="flex items-center gap-3 text-[13px]">
+              ['warnInPeriod', <>Warn me when a sub's certificate will expire <b>inside</b> the coverage period</>, 'Saved on the coverage period only. Expiration emails still use Reminder settings — this toggle is not enforced.'],
+              ['retainForPeriod', <>Keep expired certificates on file for the whole period (needed to prove past coverage)</>, 'Saved on the coverage period only. Soft-delete still follows the product delete path — this toggle does not retain or purge files.'],
+            ].map(([key, label, hint]) => (
+              <label key={key} className="flex items-start gap-3 text-[13px]">
                 <Toggle
                   checked={Boolean(period?.[key])}
                   disabled={!isAdmin}
                   label={key}
                   onChange={(v) => savePeriod({ [key]: v })}
                 />
-                <span className="text-ink">{label}</span>
+                <span className="text-ink flex flex-col gap-0.5">
+                  <span>{label}</span>
+                  <span className="text-xs text-muted">{hint}</span>
+                </span>
               </label>
             ))}
           </div>

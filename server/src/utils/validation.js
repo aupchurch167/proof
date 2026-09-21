@@ -23,6 +23,10 @@ const schemas = {
     password: passwordSchema,
     firstName: z.string().min(1, 'First name is required'),
     lastName: z.string().min(1, 'Last name is required'),
+    acceptTerms: z.any().refine(
+      (v) => v === true || v === 'true',
+      'You must accept the Terms of Service and Privacy Policy'
+    ),
   }),
 
   acceptInvite: z.object({
@@ -80,6 +84,7 @@ const schemas = {
   google: z.object({
     credential: z.string().min(1, 'Google credential is required'),
     orgName: z.string().min(1).optional(),
+    acceptTerms: z.any().optional(),
   }),
 
   forgotPassword: z.object({

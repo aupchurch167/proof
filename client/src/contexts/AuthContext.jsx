@@ -42,8 +42,12 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  const loginWithGoogle = async (credential, orgName) => {
-    const data = await api.post('/auth/google', { credential, orgName });
+  const loginWithGoogle = async (credential, orgName, extra = {}) => {
+    const data = await api.post('/auth/google', {
+      credential,
+      orgName,
+      ...(extra.acceptTerms ? { acceptTerms: true } : {}),
+    });
     storeSession(data);
     return data.user;
   };

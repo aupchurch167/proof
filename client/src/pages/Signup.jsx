@@ -5,6 +5,7 @@ import GoogleSignInButton from '../components/GoogleSignInButton';
 
 export default function Signup() {
   const [form, setForm] = useState({ orgName: '', email: '', password: '', firstName: '', lastName: '' });
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -18,7 +19,12 @@ export default function Signup() {
     setError('');
     setLoading(true);
     try {
-      const data = await signup(form);
+      if (!acceptTerms) {
+        setError('You must accept the Terms of Service and Privacy Policy');
+        setLoading(false);
+        return;
+      }
+      const data = await signup({ ...form, acceptTerms: true });
       if (data.accessToken) {
         navigate('/');
       } else {
@@ -34,8 +40,12 @@ export default function Signup() {
 
   const handleGoogle = async (credential) => {
     setError('');
+    if (!acceptTerms) {
+      setError('You must accept the Terms of Service and Privacy Policy');
+      return;
+    }
     try {
-      await loginWithGoogle(credential, form.orgName);
+      await loginWithGoogle(credential, form.orgName, { acceptTerms: true });
       navigate('/');
     } catch (err) {
       setError(err.message);
@@ -80,11 +90,28 @@ export default function Signup() {
             <input name="email" type="email" value={form.email} onChange={handleChange} required
               className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
           </div>
-          <div className="mb-6">
+          <div className="mb-4">
             <label className="block text-sm font-medium text-ink-2 mb-1">Password</label>
             <input name="password" type="password" value={form.password} onChange={handleChange} required minLength={8}
               className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
           </div>
+          <label className="flex items-start gap-2 mb-6 text-sm text-ink-2">
+            <input
+              type="checkbox"
+              checked={acceptTerms}
+              onChange={(e) => setAcceptTerms(e.target.checked)}
+              className="mt-1"
+              required
+            />
+            <span>
+              I accept the{' '}
+              <Link to="/terms" target="_blank" className="text-navy hover:underline">Terms of Service</Link>
+              {' '}and{' '}
+              <Link to="/privacy" target="_blank" className="text-navy hover:underline">Privacy Policy</Link>
+              {' '}
+              <span className="text-muted">(draft — not counsel-approved)</span>.
+            </span>
+          </label>
           <button type="submit" disabled={loading}
             className="w-full bg-amber text-white py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 font-medium">
             {loading ? 'Creating account...' : 'Create account'}
@@ -92,6 +119,11 @@ export default function Signup() {
           <GoogleSignInButton onCredential={handleGoogle} onError={(err) => setError(err.message)} text="signup_with" />
           <p className="text-center mt-4 text-sm text-muted">
             Already have an account? <Link to="/login" className="text-navy hover:underline">Sign in</Link>
+          </p>
+          <p className="text-center mt-2 text-xs text-faint">
+            <Link to="/terms" className="hover:underline">Terms</Link>
+            {' · '}
+            <Link to="/privacy" className="hover:underline">Privacy</Link>
           </p>
         </form>
       </div>

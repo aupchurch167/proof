@@ -66,6 +66,7 @@ describe('A1-02 requireVerified', () => {
       password: 'StrongPass1',
       firstName: 'Una',
       lastName: 'Verified',
+      acceptTerms: true,
     });
     expect(signup.status).toBe(201);
     expect(signup.body.accessToken).toBeTruthy();
@@ -104,6 +105,7 @@ describe('A1-06 generic signup', () => {
       password: 'StrongPass1',
       firstName: 'Dup',
       lastName: 'User',
+      acceptTerms: true,
     });
     expect(res.status).toBe(201);
     expect(res.body.accessToken).toBeUndefined();
