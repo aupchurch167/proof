@@ -23,6 +23,10 @@ No migrations. New optional env (not required at boot): `SENTRY_DSN`, `SENTRY_RE
 - `require('./src/app')` with no `SENTRY_DSN`: boots.
 - `cleanupTestData` against `.../proof` without `PROOF_TEST_DB`: throws the refuse message; `keep-me` org survives in the dedicated test.
 
+## GitHub Actions
+
+**Green** on `326963b` — [Test / Server suite + client build](https://github.com/aupchurch167/proof/actions/runs/35548161696/job/106177781380) (PR #19). A9-01 is live: a failing expect on this workflow would have failed the check.
+
 ## How a broken expect fails CI
 
 `server` script is `jest --runInBand --forceExit --detectOpenHandles`. Jest exits non-zero on any failed assertion (locally reproduced: exit 1). The GitHub Actions step `Server tests` uses the default `set -e` behavior, so a red suite fails the workflow and blocks merge once the owner requires this check.
