@@ -1,3 +1,7 @@
+# Notes from B01–B06 (residuals)
+
+**Release gate (2026-09-21): [NO-GO](../release-gate.md)** — do not charge customers until the hard-requirement checklist there is closed. Residuals below are known risk, not a GO.
+
 # Notes from B01 (not fixed in this batch)
 
 - Cron, v1 COI-request, rejection, chase, and reminder `NotificationLog` rows still do not persist Resend `email_id` in `meta`. Inbound bounce correlation therefore depends on `email_id` only when `/api/vendors/:id/request-coi` stored it, or on a single-org SENT match. Residual of A2-08.
