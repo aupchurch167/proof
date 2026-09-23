@@ -14,6 +14,52 @@ function getClient() {
   return client;
 }
 
+const nullableString = (description) => ({ type: ['string', 'null'], description });
+const nullableCents = (description) => ({ type: ['integer', 'null'], description });
+
+// Enforced server-side via output_config.format, so the model cannot return
+// prose, markdown fences, or a field we don't expect. Structured outputs
+// requires every property to be listed in `required`; optional values are
+// expressed as nullable types rather than by omission.
+const COI_SCHEMA = {
+  type: 'object',
+  properties: {
+    coverageType: {
+      type: 'string',
+      enum: ['GENERAL_LIABILITY', 'WORKERS_COMP', 'UMBRELLA', 'AUTO', 'OTHER'],
+      description: 'Primary coverage type of the certificate.',
+    },
+    glPolicyNumber: nullableString('General liability policy number.'),
+    glCoverageAmount: nullableCents('GL per-occurrence limit in cents (e.g. $1,000,000 = 100000000).'),
+    glExpirationDate: nullableString('GL expiration date as YYYY-MM-DD.'),
+    wcPolicyNumber: nullableString('Workers comp policy number.'),
+    wcCoverageAmount: nullableCents('WC limit in cents.'),
+    wcExpirationDate: nullableString('WC expiration date as YYYY-MM-DD.'),
+    umbPolicyNumber: nullableString('Umbrella / excess liability policy number.'),
+    umbCoverageAmount: nullableCents('Umbrella limit in cents.'),
+    umbExpirationDate: nullableString('Umbrella expiration date as YYYY-MM-DD.'),
+    autoPolicyNumber: nullableString('Automobile liability policy number.'),
+    autoCoverageAmount: nullableCents('Auto limit in cents.'),
+    autoExpirationDate: nullableString('Auto expiration date as YYYY-MM-DD.'),
+    agentName: nullableString('Producer / agent name.'),
+    agentEmail: nullableString('Producer / agent email.'),
+    agentPhone: nullableString('Producer / agent phone.'),
+    insuranceCompany: nullableString('Carrier providing the coverage.'),
+    certificateHolderName: nullableString('Entity named in the CERTIFICATE HOLDER section.'),
+    certificateHolderAddress: nullableString('Full address from the certificate holder section.'),
+  },
+  required: [
+    'coverageType',
+    'glPolicyNumber', 'glCoverageAmount', 'glExpirationDate',
+    'wcPolicyNumber', 'wcCoverageAmount', 'wcExpirationDate',
+    'umbPolicyNumber', 'umbCoverageAmount', 'umbExpirationDate',
+    'autoPolicyNumber', 'autoCoverageAmount', 'autoExpirationDate',
+    'agentName', 'agentEmail', 'agentPhone', 'insuranceCompany',
+    'certificateHolderName', 'certificateHolderAddress',
+  ],
+  additionalProperties: false,
+};
+
 /**
  * Extract COI data from a PDF.
  * @param {Buffer|string} pdfInput - PDF buffer or file path (legacy support for migration)
@@ -30,8 +76,11 @@ async function extractCoiData(pdfInput) {
   const base64Pdf = pdfBuffer.toString('base64');
 
   const response = await getClient().messages.create({
-    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+    model: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5',
     max_tokens: 4096,
+    output_config: {
+      format: { type: 'json_schema', schema: COI_SCHEMA },
+    },
     messages: [
       {
         role: 'user',
@@ -46,31 +95,9 @@ async function extractCoiData(pdfInput) {
           },
           {
             type: 'text',
-            text: `Extract the following information from this Certificate of Insurance (COI) PDF. Return ONLY a valid JSON object with these fields. For coverage amounts, convert to cents (e.g., $1,000,000 = 100000000). For dates, use ISO 8601 format (YYYY-MM-DD).
+            text: `Extract the insurance details from this Certificate of Insurance (COI) PDF. For coverage amounts, convert to cents (e.g., $1,000,000 = 100000000). For dates, use ISO 8601 format (YYYY-MM-DD). Use null for anything the certificate does not state.
 
-This PDF may have multiple pages. The first page is often a cover sheet, transmittal letter, or only contains vendor / insured-party information with no policy data. Scan EVERY page and extract the insurance details from whichever page(s) actually contain the ACORD 25 (or similar) form with policy numbers, coverage limits, and expiration dates. Ignore blank, cover, or non-COI pages. If multiple pages contain COI data, consolidate it into one JSON object.
-
-{
-  "coverageType": "GENERAL_LIABILITY | WORKERS_COMP | UMBRELLA | AUTO | OTHER",
-  "glPolicyNumber": "string or null",
-  "glCoverageAmount": "integer in cents or null",
-  "glExpirationDate": "YYYY-MM-DD or null",
-  "wcPolicyNumber": "string or null",
-  "wcCoverageAmount": "integer in cents or null",
-  "wcExpirationDate": "YYYY-MM-DD or null",
-  "umbPolicyNumber": "string or null",
-  "umbCoverageAmount": "integer in cents or null",
-  "umbExpirationDate": "YYYY-MM-DD or null",
-  "autoPolicyNumber": "string or null",
-  "autoCoverageAmount": "integer in cents or null",
-  "autoExpirationDate": "YYYY-MM-DD or null",
-  "agentName": "string or null",
-  "agentEmail": "string or null",
-  "agentPhone": "string or null",
-  "insuranceCompany": "string or null",
-  "certificateHolderName": "string or null",
-  "certificateHolderAddress": "string or null"
-}
+This PDF may have multiple pages. The first page is often a cover sheet, transmittal letter, or only contains vendor / insured-party information with no policy data. Scan EVERY page and extract the insurance details from whichever page(s) actually contain the ACORD 25 (or similar) form with policy numbers, coverage limits, and expiration dates. Ignore blank, cover, or non-COI pages. If multiple pages contain COI data, consolidate it into one result.
 
 Important:
 - If the first page has no policy information, do not stop there — continue to subsequent pages until you find the actual certificate data, then extract from there.
@@ -88,8 +115,7 @@ Important:
 - Extract the per-occurrence limit for General Liability, not the aggregate
 - Extract each coverage section's expiration date independently
 - For certificateHolderName, look for the "CERTIFICATE HOLDER" section (usually bottom-left of ACORD forms) and extract the company/entity name
-- For certificateHolderAddress, extract the full address from the certificate holder section
-- Return ONLY the JSON, no markdown formatting or explanation`,
+- For certificateHolderAddress, extract the full address from the certificate holder section`,
           },
         ],
       },
@@ -101,15 +127,8 @@ Important:
   if (!textBlock || !textBlock.text) {
     throw new Error('Model returned no text content');
   }
-  const text = textBlock.text.trim();
-
-  // Parse the JSON, handling potential markdown code blocks
-  let jsonStr = text;
-  if (jsonStr.startsWith('```')) {
-    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  }
-
-  const data = JSON.parse(jsonStr);
+  // output_config.format guarantees this block is schema-valid JSON.
+  const data = JSON.parse(textBlock.text);
 
   // Validate coverageType is a known enum value, fall back to inference
   const validTypes = ['GENERAL_LIABILITY', 'WORKERS_COMP', 'UMBRELLA', 'AUTO', 'OTHER'];
