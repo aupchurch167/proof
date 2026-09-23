@@ -98,7 +98,7 @@ router.post('/impact', authenticate, async (req, res) => {
       select: {
         id: true, name: true,
         cois: {
-          where: { status: 'APPROVED' },
+          where: { status: 'APPROVED', deletedAt: null },
           orderBy: { submittedAt: 'desc' },
           take: 1,
         },

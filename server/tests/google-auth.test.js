@@ -52,6 +52,24 @@ describe('POST /api/auth/google', () => {
     expect(res.body).toHaveProperty('error');
   });
 
+  it('refuses to create a first-time Google user without acceptTerms', async () => {
+    const email = `gnoaccept-${Date.now()}@test.com`;
+    verifyGoogleIdToken.mockResolvedValue({
+      googleId: `google-noaccept-${Date.now()}`,
+      email,
+      firstName: 'No',
+      lastName: 'Accept',
+    });
+
+    const res = await request(app)
+      .post('/api/auth/google')
+      .send({ credential: 'valid-token', orgName: 'No Accept Co' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/terms|privacy/i);
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  });
+
   it('creates a new org and admin user for a first-time Google user', async () => {
     const email = `gnew-${Date.now()}@test.com`;
     verifyGoogleIdToken.mockResolvedValue({
@@ -63,7 +81,7 @@ describe('POST /api/auth/google', () => {
 
     const res = await request(app)
       .post('/api/auth/google')
-      .send({ credential: 'valid-token', orgName: 'Hopper Co' });
+      .send({ credential: 'valid-token', orgName: 'Hopper Co', acceptTerms: true });
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('accessToken');

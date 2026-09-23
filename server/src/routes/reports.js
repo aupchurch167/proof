@@ -95,7 +95,7 @@ router.get('/coverage', authenticate, async (req, res) => {
 router.get('/cois', authenticate, async (req, res) => {
   try {
     const { startDate, endDate, status, vendorId, filterBy } = req.query;
-    const where = { orgId: req.user.orgId };
+    const where = { orgId: req.user.orgId, deletedAt: null };
 
     if (status) where.status = status;
     if (vendorId) where.vendorId = vendorId;
@@ -192,6 +192,7 @@ router.get('/expiring', authenticate, async (req, res) => {
     const cois = await prisma.coi.findMany({
       where: {
         orgId: req.user.orgId,
+        deletedAt: null,
         status: 'APPROVED',
         OR: [
           { glExpirationDate: { lte: futureDate, gte: new Date() } },
@@ -219,6 +220,9 @@ router.post('/export-pdfs', authenticate, async (req, res) => {
 
     if (!Array.isArray(coiIds) || coiIds.length === 0) {
       return res.status(400).json({ error: 'No COI IDs provided' });
+    }
+    if (coiIds.length > 50) {
+      return res.status(400).json({ error: 'At most 50 COI IDs can be exported at once' });
     }
 
     const cois = await prisma.coi.findMany({

@@ -5,6 +5,8 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = require('../lib/prisma');
 const { uploadFile, getSignedUrl } = require('../services/storage');
 const { extractCoiData } = require('../services/coiExtractor');
+const { isExtractLimitError } = require('../lib/extractErrors');
+const { hasPdfMagic } = require('../utils/uploadFilters');
 const { updateVendorStatus } = require('../services/compliance');
 const { fetchWithTimeout } = require('../lib/fetchWithTimeout');
 const { assertSafeAttachmentUrl } = require('../lib/safeUrl');
@@ -131,9 +133,15 @@ async function processAttachment(att, vendor) {
   result.savedAs = await uploadFile(buf, key, mimetype, 'reply-attachments');
 
   let extracted = null;
-  if (isPdf) {
-    try { extracted = await extractCoiData(buf); }
-    catch (e) { console.warn(`[Webhook] AI extract failed on ${filename}: ${e.message}`); }
+  if (isPdf && hasPdfMagic(buf)) {
+    try { extracted = await extractCoiData(buf, { orgId: vendor.orgId }); }
+    catch (e) {
+      if (isExtractLimitError(e)) {
+        console.warn(`[Webhook] extract capped on ${filename}: ${e.code}`);
+      } else {
+        console.warn(`[Webhook] AI extract failed on ${filename}: ${e.message}`);
+      }
+    }
   }
 
   if (looksLikeCoi(extracted)) {

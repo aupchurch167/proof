@@ -20,7 +20,10 @@ export default function EmailVerificationBanner() {
 
   return (
     <div className="bg-warn-bg border-b border-amber px-4 py-2.5 text-sm text-warn-text flex items-center justify-between gap-3">
-      <span>Please verify your email address to unlock all features.</span>
+      <span>
+        Verify your email to use Proof. Unverified accounts are blocked from the product.
+        This does not unlock billing or per-trade templates — those are not self-serve yet.
+      </span>
       <button
         onClick={handleResend}
         disabled={sending}

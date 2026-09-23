@@ -36,6 +36,7 @@ async function buildComplianceOverview(
         trade: true,
         coiStatus: true,
         cois: {
+          where: { deletedAt: null },
           orderBy: { submittedAt: 'desc' },
           select: {
             id: true,

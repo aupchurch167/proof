@@ -4,6 +4,7 @@ const { authenticateVerified: authenticate, authorize } = require('../middleware
 const { updateVendorStatus, checkCompliance } = require('../services/compliance');
 const { getSignedUrl, deleteFile, downloadFile } = require('../services/storage');
 const { extractCoiData } = require('../services/coiExtractor');
+const { isExtractLimitError } = require('../lib/extractErrors');
 const { z } = require('zod');
 const { logAudit } = require('../services/audit');
 
@@ -36,6 +37,13 @@ function extractedToCoiData(extractedData) {
 
 const router = express.Router();
 
+function coiAccessWhere(req, extra = {}) {
+  const where = { orgId: req.user.orgId, ...extra };
+  const includeDeleted = req.query.includeDeleted === 'true' && req.user.role === 'ADMIN';
+  if (!includeDeleted) where.deletedAt = null;
+  return where;
+}
+
 // Not `.strict()`: the client sends the whole COI object back (including id,
 // vendor, etc.), so unknown keys are stripped rather than rejected. Only the
 // whitelisted `allowedFields` below are ever written. `coverageType` and the
@@ -67,7 +75,7 @@ const coiUpdateSchema = z.object({
 router.get('/', authenticate, async (req, res) => {
   try {
     const { status, vendorId, startDate, endDate } = req.query;
-    const where = { orgId: req.user.orgId };
+    const where = coiAccessWhere(req);
 
     if (status) where.status = status;
     if (vendorId) where.vendorId = vendorId;
@@ -96,7 +104,7 @@ router.get('/', authenticate, async (req, res) => {
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
-      where: { id: req.params.id, orgId: req.user.orgId },
+      where: coiAccessWhere(req, { id: req.params.id }),
       include: {
         vendor: true,
         organization: { select: { name: true } },
@@ -128,7 +136,7 @@ router.get('/:id', authenticate, async (req, res) => {
 router.get('/:id/pdf', authenticate, async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
-      where: { id: req.params.id, orgId: req.user.orgId },
+      where: coiAccessWhere(req, { id: req.params.id }),
       select: { pdfPath: true },
     });
 
@@ -154,7 +162,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
     }
 
     const coi = await prisma.coi.findFirst({
-      where: { id: req.params.id, orgId: req.user.orgId },
+      where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
     });
 
     if (!coi) {
@@ -201,7 +209,7 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
 router.post('/:id/reanalyze', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
-      where: { id: req.params.id, orgId: req.user.orgId },
+      where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
       include: { organization: { include: { settings: true } } },
     });
 
@@ -223,8 +231,11 @@ router.post('/:id/reanalyze', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEW
     let extractedData = null;
     let extractionError = null;
     try {
-      extractedData = await extractCoiData(buffer);
+      extractedData = await extractCoiData(buffer, { orgId: coi.orgId });
     } catch (err) {
+      if (isExtractLimitError(err)) {
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
       extractionError = err.message;
       console.error('Reanalyze extraction failed:', err);
     }
@@ -265,7 +276,7 @@ router.post('/:id/reanalyze', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEW
 router.post('/:id/approve', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
-      where: { id: req.params.id, orgId: req.user.orgId },
+      where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
     });
 
     if (!coi) {
@@ -296,7 +307,7 @@ router.post('/:id/approve', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER
 router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
-      where: { id: req.params.id, orgId: req.user.orgId },
+      where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
       include: { vendor: true },
     });
 
@@ -332,7 +343,7 @@ router.post('/:id/reject', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'
     }
 
     const coi = await prisma.coi.findFirst({
-      where: { id: req.params.id, orgId: req.user.orgId },
+      where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
       include: { vendor: true },
     });
 

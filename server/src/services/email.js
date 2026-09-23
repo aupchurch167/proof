@@ -2,6 +2,17 @@ const { Resend } = require('resend');
 
 let resend = null;
 
+// Escape user-controlled strings before interpolating them into HTML email
+// bodies (A4-03). Subjects stay plain text.
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function init() {
   if (!resend && process.env.RESEND_API_KEY) {
     resend = new Resend(process.env.RESEND_API_KEY);
@@ -45,9 +56,12 @@ async function sendEmail(to, subject, html, cc) {
 }
 
 async function sendUploadRequestEmail(to, vendorName, portalUrl, org, cc) {
-  const orgName = org?.name || 'our company';
-  const orgEmail = org?.email || '';
-  const orgAddress = org?.address || '';
+  const rawOrgName = org?.name || 'our company';
+  const orgName = escapeHtml(rawOrgName);
+  const orgEmail = escapeHtml(org?.email || '');
+  const orgAddress = escapeHtml(org?.address || '');
+  const safeVendorName = escapeHtml(vendorName);
+  const safePortalUrl = escapeHtml(portalUrl);
 
   const contactBlock = [
     `<p style="margin:0;font-weight:600;">${orgName}</p>`,
@@ -57,11 +71,11 @@ async function sendUploadRequestEmail(to, vendorName, portalUrl, org, cc) {
 
   return sendEmail(
     to,
-    `Certificate of Insurance Request from ${orgName}`,
+    `Certificate of Insurance Request from ${rawOrgName}`,
     `<h2>COI Upload Request</h2>
-     <p>Hello ${vendorName},</p>
+     <p>Hello ${safeVendorName},</p>
      <p><strong>${orgName}</strong> needs your current Certificate of Insurance (COI) on file. Please upload it using the secure link below:</p>
-     <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload COI</a></p>
+     <p><a href="${safePortalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload COI</a></p>
      <p>This link is unique to your company. No login required.</p>
      <div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
        <p style="margin:0 0 8px;font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Requesting Company</p>
@@ -81,23 +95,26 @@ async function sendUploadRequestEmail(to, vendorName, portalUrl, org, cc) {
 // Follow-up for a vendor who never acted on the original upload request. The
 // copy escalates with each step so the third nudge doesn't read like the first.
 async function sendChaseEmail(to, vendorName, portalUrl, org, daysSinceRequest, cc) {
-  const orgName = org?.name || 'our company';
-  const orgEmail = org?.email || '';
+  const rawOrgName = org?.name || 'our company';
+  const orgName = escapeHtml(rawOrgName);
+  const orgEmail = escapeHtml(org?.email || '');
+  const safeVendorName = escapeHtml(vendorName);
+  const safePortalUrl = escapeHtml(portalUrl);
 
   const tone = daysSinceRequest >= 14
     ? {
-        subject: `Final reminder: Certificate of Insurance still outstanding — ${orgName}`,
+        subject: `Final reminder: Certificate of Insurance still outstanding — ${rawOrgName}`,
         heading: 'Final Reminder: COI Still Outstanding',
         lead: `We've reached out a few times about your Certificate of Insurance and haven't received it yet. Without a current COI on file, <strong>${orgName}</strong> cannot approve new work or release payment.`,
       }
     : daysSinceRequest >= 7
       ? {
-          subject: `Second reminder: Certificate of Insurance needed — ${orgName}`,
+          subject: `Second reminder: Certificate of Insurance needed — ${rawOrgName}`,
           heading: 'Second Reminder: COI Needed',
           lead: `We still haven't received your Certificate of Insurance. Please upload it as soon as you can so your records with <strong>${orgName}</strong> stay current.`,
         }
       : {
-          subject: `Reminder: Certificate of Insurance needed — ${orgName}`,
+          subject: `Reminder: Certificate of Insurance needed — ${rawOrgName}`,
           heading: 'Reminder: COI Needed',
           lead: `Just following up on our request for your Certificate of Insurance. It only takes a minute to upload.`,
         };
@@ -107,11 +124,11 @@ async function sendChaseEmail(to, vendorName, portalUrl, org, daysSinceRequest, 
     tone.subject,
     `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;">
        <h2 style="margin:0 0 16px;color:#111827;">${tone.heading}</h2>
-       <p style="color:#374151;font-size:14px;line-height:1.6;">Hello ${vendorName},</p>
+       <p style="color:#374151;font-size:14px;line-height:1.6;">Hello ${safeVendorName},</p>
        <p style="color:#374151;font-size:14px;line-height:1.6;">${tone.lead}</p>
        <p style="color:#6b7280;font-size:13px;">We first requested it ${daysSinceRequest} day(s) ago.</p>
        <div style="text-align:center;margin:32px 0;">
-         <a href="${portalUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
+         <a href="${safePortalUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
            Upload COI
          </a>
        </div>
@@ -129,43 +146,51 @@ async function sendChaseEmail(to, vendorName, portalUrl, org, daysSinceRequest, 
 }
 
 async function sendUploadNotificationEmail(to, vendorName) {
+  const safeVendorName = escapeHtml(vendorName);
+  const safeAppUrl = escapeHtml(process.env.APP_URL);
   await sendEmail(
     to,
     `New COI Uploaded - ${vendorName}`,
     `<h2>New COI Upload</h2>
-     <p>${vendorName} has uploaded a new Certificate of Insurance that requires your review.</p>
-     <p><a href="${process.env.APP_URL}/cois" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Review COIs</a></p>`
+     <p>${safeVendorName} has uploaded a new Certificate of Insurance that requires your review.</p>
+     <p><a href="${safeAppUrl}/cois" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Review COIs</a></p>`
   );
 }
 
 async function sendRejectionEmail(to, vendorName, reason, portalUrl, cc) {
+  const safeVendorName = escapeHtml(vendorName);
+  const safeReason = escapeHtml(reason);
+  const safePortalUrl = escapeHtml(portalUrl);
   await sendEmail(
     to,
     'COI Rejected - Action Required',
     `<h2>COI Rejected</h2>
-     <p>Hello ${vendorName},</p>
+     <p>Hello ${safeVendorName},</p>
      <p>Your Certificate of Insurance has been rejected for the following reason:</p>
-     <blockquote style="border-left:4px solid #ef4444;padding:8px 16px;margin:16px 0;background:#fef2f2;">${reason}</blockquote>
+     <blockquote style="border-left:4px solid #ef4444;padding:8px 16px;margin:16px 0;background:#fef2f2;">${safeReason}</blockquote>
      <p>Please upload a corrected COI using the link below:</p>
-     <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload New COI</a></p>`,
+     <p><a href="${safePortalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload New COI</a></p>`,
     cc
   );
 }
 
 async function sendExpirationReminderEmail(to, vendorName, daysUntil, portalUrl, cc) {
   const urgency = daysUntil <= 0 ? 'has expired' : `expires in ${daysUntil} day(s)`;
+  const safeVendorName = escapeHtml(vendorName);
+  const safePortalUrl = escapeHtml(portalUrl);
   await sendEmail(
     to,
     `COI ${urgency} - ${vendorName}`,
     `<h2>COI Expiration Notice</h2>
-     <p>Hello ${vendorName},</p>
+     <p>Hello ${safeVendorName},</p>
      <p>Your Certificate of Insurance ${urgency}. Please upload an updated COI.</p>
-     <p><a href="${portalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload Updated COI</a></p>`,
+     <p><a href="${safePortalUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Upload Updated COI</a></p>`,
     cc
   );
 }
 
 async function sendWeeklySummaryEmail(to, orgName, summary) {
+  const safeOrgName = escapeHtml(orgName);
   const {
     totalVendors,
     compliant,
@@ -182,7 +207,7 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
       : `Expires in ${v.daysUntil} day(s)`;
     return `
       <tr>
-        <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;">${v.name}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;">${escapeHtml(v.name)}</td>
         <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;">
           ${v.expirationDate ? new Date(v.expirationDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
         </td>
@@ -216,7 +241,7 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
     `Your Weekly COI Compliance Summary — ${orgName}`,
     `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;">
        <h2 style="margin:0 0 8px;color:#111827;">Weekly Compliance Summary</h2>
-       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">Here's your COI compliance overview for ${orgName}.</p>
+       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">Here's your COI compliance overview for ${safeOrgName}.</p>
 
        <div style="display:flex;gap:12px;margin-bottom:24px;">
          <table style="width:100%;border-collapse:separate;border-spacing:12px 0;">
@@ -272,13 +297,15 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
 }
 
 async function sendInviteEmail(to, orgName, inviteUrl) {
+  const safeOrgName = escapeHtml(orgName);
+  const safeInviteUrl = escapeHtml(inviteUrl);
   await sendEmail(
     to,
     `You've been invited to join ${orgName} on Proof`,
     `<h2>You're Invited!</h2>
-     <p>You've been invited to join <strong>${orgName}</strong> on Proof, a COI management platform.</p>
+     <p>You've been invited to join <strong>${safeOrgName}</strong> on Proof, a COI management platform.</p>
      <p>Click the link below to set up your account:</p>
-     <p><a href="${inviteUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Accept Invitation</a></p>
+     <p><a href="${safeInviteUrl}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Accept Invitation</a></p>
      <p>This link is unique to you. If you didn't expect this invitation, you can safely ignore this email.</p>
      <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 16px;" />
      <p style="font-size:12px;color:#9ca3af;text-align:center;">
@@ -288,6 +315,7 @@ async function sendInviteEmail(to, orgName, inviteUrl) {
 }
 
 async function sendPasswordResetEmail(to, resetUrl) {
+  const safeResetUrl = escapeHtml(resetUrl);
   await sendEmail(
     to,
     'Reset your Proof password',
@@ -297,7 +325,7 @@ async function sendPasswordResetEmail(to, resetUrl) {
          We received a request to reset the password for your Proof account. Click the button below to set a new password:
        </p>
        <div style="text-align:center;margin:32px 0;">
-         <a href="${resetUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
+         <a href="${safeResetUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
            Reset Password
          </a>
        </div>
@@ -314,6 +342,7 @@ async function sendPasswordResetEmail(to, resetUrl) {
 }
 
 async function sendEmailVerificationEmail(to, verifyUrl) {
+  const safeVerifyUrl = escapeHtml(verifyUrl);
   await sendEmail(
     to,
     'Verify your Proof email address',
@@ -323,7 +352,7 @@ async function sendEmailVerificationEmail(to, verifyUrl) {
          Thanks for signing up for Proof! Please verify your email address by clicking the button below:
        </p>
        <div style="text-align:center;margin:32px 0;">
-         <a href="${verifyUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
+         <a href="${safeVerifyUrl}" style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600;font-size:14px;">
            Verify Email
          </a>
        </div>
@@ -340,6 +369,7 @@ async function sendEmailVerificationEmail(to, verifyUrl) {
 }
 
 module.exports = {
+  escapeHtml,
   sendEmail,
   sendUploadRequestEmail,
   sendChaseEmail,

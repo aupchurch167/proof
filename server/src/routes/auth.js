@@ -14,6 +14,7 @@ const {
 } = require('../lib/sessions');
 const { hashToken } = require('../lib/apiTokens');
 const { verifyAccessToken } = require('../utils/tokens');
+const { acceptedLegal, legalAcceptanceFields } = require('../legal/documents');
 
 const router = express.Router();
 
@@ -101,6 +102,7 @@ router.post('/signup', validate('signup'), async (req, res) => {
           lastName,
           role: 'ADMIN',
           emailVerifyToken,
+          ...legalAcceptanceFields(),
         },
       });
 
@@ -164,12 +166,9 @@ router.post('/login', validate('login'), async (req, res) => {
 });
 
 // POST /api/auth/google — sign in / sign up with a Google ID token
-router.post('/google', async (req, res) => {
+router.post('/google', validate('google'), async (req, res) => {
   try {
     const { credential, orgName } = req.body;
-    if (!credential) {
-      return res.status(400).json({ error: 'Google credential is required' });
-    }
 
     let profile;
     try {
@@ -227,6 +226,11 @@ router.post('/google', async (req, res) => {
     }
 
     if (!user) {
+      if (!acceptedLegal(req.body.acceptTerms)) {
+        return res.status(400).json({
+          error: 'You must accept the Terms of Service and Privacy Policy to create an account.',
+        });
+      }
       const created = await prisma.$transaction(async (tx) => {
         const org = await tx.organization.create({
           data: {
@@ -248,6 +252,7 @@ router.post('/google', async (req, res) => {
             lastName: profile.lastName || '',
             role: 'ADMIN',
             emailVerified: true,
+            ...legalAcceptanceFields(),
           },
           include: { organization: true },
         });
@@ -461,12 +466,9 @@ router.put('/me', authenticate, validate('updateProfile'), async (req, res) => {
 });
 
 // POST /api/auth/forgot-password
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', validate('forgotPassword'), async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
 
     // Always return 200 to prevent email enumeration
     const user = await prisma.user.findUnique({ where: { email } });

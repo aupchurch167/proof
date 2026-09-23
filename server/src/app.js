@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { attachSentry } = require('./lib/sentry');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -26,6 +27,13 @@ const repliesRoutes = require('./routes/replies');
 const integrationsRoutes = require('./routes/integrations');
 const v1Routes = require('./routes/v1');
 const { hashToken } = require('./lib/apiTokens');
+const {
+  TERMS_VERSION,
+  PRIVACY_VERSION,
+  TERMS_SECTIONS,
+  PRIVACY_SECTIONS,
+  wrapLegalPage,
+} = require('./legal/documents');
 
 const app = express();
 
@@ -42,7 +50,15 @@ app.use(
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
         'script-src': ["'self'", `${gsi}client`],
-        'connect-src': ["'self'", gsi],
+        // Browser Sentry (VITE_SENTRY_DSN) posts to ingest hosts when the SPA
+        // is served from this origin. Harmless when no DSN is configured.
+        'connect-src': [
+          "'self'",
+          gsi,
+          'https://*.ingest.sentry.io',
+          'https://*.ingest.us.sentry.io',
+          'https://*.sentry.io',
+        ],
         'frame-src': ["'self'", gsi],
         // Manrope is the brand typeface; without these two the UI silently
         // falls back to system-ui in production.
@@ -54,6 +70,7 @@ app.use(
 );
 const allowedOrigins = [
   'https://app.proofcoi.com',
+  // A4-09: owner-confirmed keep (2026-09-20). Do not remove.
   'https://proof.up.railway.app',
   'http://localhost:5173',
   ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) : []),
@@ -148,6 +165,19 @@ app.use('/api/integrations', integrationsRoutes);
 // Versioned, org-scoped public API for service-to-service integrations.
 app.use('/api/v1/orgs/:orgSlug', v1Routes);
 
+// Public draft legal pages (A10-01). Served as HTML so /terms and /privacy
+// return 200 without the SPA build (tests + crawlers). Counsel swaps the body.
+app.get('/terms', (_req, res) => {
+  res
+    .type('html')
+    .send(wrapLegalPage({ title: 'Terms of Service', version: TERMS_VERSION, sections: TERMS_SECTIONS }));
+});
+app.get('/privacy', (_req, res) => {
+  res
+    .type('html')
+    .send(wrapLegalPage({ title: 'Privacy Policy', version: PRIVACY_VERSION, sections: PRIVACY_SECTIONS }));
+});
+
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
@@ -165,6 +195,9 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
   });
 }
+
+// Sentry first (no-op without SENTRY_DSN), then the JSON error body.
+attachSentry(app);
 
 // Error handler
 app.use((err, req, res, next) => {

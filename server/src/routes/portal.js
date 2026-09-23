@@ -5,6 +5,8 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = require('../lib/prisma');
 const { coverageFor } = require('../services/coverage');
 const { extractCoiData } = require('../services/coiExtractor');
+const { isExtractLimitError } = require('../lib/extractErrors');
+const { rejectUnlessPdfMagic } = require('../utils/uploadFilters');
 const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
@@ -60,7 +62,7 @@ router.get('/:uploadToken', async (req, res) => {
           select: { id: true, name: true, email: true, address: true, additionalInsuredNote: true },
         },
         cois: {
-          where: { status: 'APPROVED' },
+          where: { status: 'APPROVED', deletedAt: null },
           orderBy: { submittedAt: 'desc' },
           take: 1,
         },
@@ -127,6 +129,7 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: 'PDF file required' });
     }
+    if (!rejectUnlessPdfMagic(req, res)) return;
 
     // Check COI plan limit
     const plan = vendor.organization.plan || 'FREE';
@@ -148,8 +151,11 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
     // Extract data with Claude AI
     let extractedData = null;
     try {
-      extractedData = await extractCoiData(req.file.buffer);
+      extractedData = await extractCoiData(req.file.buffer, { orgId: vendor.orgId });
     } catch (extractErr) {
+      if (isExtractLimitError(extractErr)) {
+        return res.status(extractErr.status).json({ error: extractErr.message, code: extractErr.code });
+      }
       console.error('AI extraction failed:', extractErr);
     }
 

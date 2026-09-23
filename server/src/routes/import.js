@@ -7,6 +7,8 @@ const { checkCompliance } = require('../services/compliance');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
 const core = require('../lib/core');
 const { mapTradeToCanonical } = require('../constants/trades');
+const { generateUploadToken } = require('../utils/tokens');
+const { isVendorEmailConflict } = require('../lib/prismaErrors');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -156,11 +158,18 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
             trade: trade || null,
           },
         });
+        await prisma.vendor.update({
+          where: { id: created.id },
+          data: { uploadToken: generateUploadToken(created.id) },
+        });
         vendorCount++;
         results.created++;
         mirrorImportedVendorToCore(created);
       } catch (err) {
-        results.errors.push({ row: i + 2, message: err.message });
+        const message = isVendorEmailConflict(err)
+          ? `Vendor with email ${email} already exists`
+          : err.message;
+        results.errors.push({ row: i + 2, message });
         results.skipped++;
       }
     }

@@ -74,6 +74,7 @@ describe('POST /api/auth/signup', () => {
         password: 'StrongPass1',
         firstName: 'Jane',
         lastName: 'Doe',
+        acceptTerms: true,
       });
 
     expect(res.status).toBe(201);
@@ -91,6 +92,7 @@ describe('POST /api/auth/signup', () => {
         password: 'weakpass1',
         firstName: 'Jane',
         lastName: 'Doe',
+        acceptTerms: true,
       });
 
     expect(res.status).toBe(400);
@@ -106,6 +108,7 @@ describe('POST /api/auth/signup', () => {
         password: 'WeakPassword',
         firstName: 'Jane',
         lastName: 'Doe',
+        acceptTerms: true,
       });
 
     expect(res.status).toBe(400);
@@ -121,6 +124,7 @@ describe('POST /api/auth/signup', () => {
         password: 'Ab1',
         firstName: 'Jane',
         lastName: 'Doe',
+        acceptTerms: true,
       });
 
     expect(res.status).toBe(400);

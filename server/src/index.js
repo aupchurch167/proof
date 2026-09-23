@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('./instrument');
 const { validateEnv } = require('./config/env');
 
 try {
@@ -10,25 +11,19 @@ try {
 
 const prisma = require('./lib/prisma');
 const app = require('./app');
-const {
-  startExpirationCron,
-  startChaseCron,
-  startTokenRefreshCron,
-  startWeeklySummaryCron,
-} = require('./services/cron');
+const { startCronJobs, stopCronJobs } = require('./services/cron');
 
 const PORT = process.env.PORT || 4000;
+const cronJobs = [];
 
 const server = app.listen(PORT, () => {
   console.log(`Proof server running on port ${PORT}`);
-  startExpirationCron(prisma);
-  startChaseCron(prisma);
-  startTokenRefreshCron(prisma);
-  startWeeklySummaryCron(prisma);
+  cronJobs.push(...startCronJobs(prisma));
 });
 
 function shutdown(signal) {
   console.log(`${signal} received. Shutting down gracefully...`);
+  stopCronJobs(cronJobs);
   server.close(async () => {
     console.log('HTTP server closed');
     await prisma.$disconnect();
