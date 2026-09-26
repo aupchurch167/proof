@@ -1,15 +1,66 @@
 # L01 verification (Prompt V)
 
-**Verdict: PASS WITH NOTES**
+**Final verdict: PASS WITH NOTES**
 
-**Implementation under test:** [PR #25](https://github.com/aupchurch167/proof/pull/25), commit `0d71571`, branch `cursor/l01-requirement-compliance-6c4e`.
+**Implementation under test:** [PR #25](https://github.com/aupchurch167/proof/pull/25), commit `2ad214c` (follow-up on top of `0d71571`), branch `cursor/l01-requirement-compliance-6c4e`.
 **Spec:** `audit/launch-batches.md`, section L01.
 **Checked against:** `origin/main` at `6b87de5`.
 **Product code changed by this verification:** none.
 
-The badge a contractor sees on the dashboard tiles, the vendor list, and the vendor page follows the requirements switches. Optional lines, the holder switch, the warn window (including 0), and the certificate cap all behave the way L01 describes. The notes below are real disagreements on a few other screens, plus a holder-name rule that will move a lot of badges the first time it runs. Read those before running `server/scripts/recompute-vendor-status.js`.
+The follow-up fixes the three notes from the first pass. Holder names that differ only by punctuation or suffix spelling now match, and a bare suffix or a short fragment does not. The Monday email and the dashboard queue use the same pass/fail result as the badge. Partner API coverage lines skip optional lines and mark a short required limit the same way the public badge does. Server tests: 27 suites, 328 passed. Client production build passed.
 
-## Plain-language summary for the owner
+One thing still worth knowing before the one-time script: the legal suffix has to be on both the company name and the certificate. "Acme Construction, LLC" matches "Acme Construction LLC". It does not match "Acme Construction". Distinct companies that share a root name do not match. Details are in the re-verify section. The first-pass write-up below is kept as the record of `0d71571`.
+
+## Re-verify (commit `2ad214c`)
+
+Follow-up commit `2ad214c` ("L01 follow-up: align holder names, weekly email, queue, and API lines"). Re-checked on that commit. No product code was changed by this review.
+
+### What was run
+
+- `npm test` in `server`: **27 suites, 328 tests, passed** (14.5s). Six tests were added since `0d71571`.
+- `npm run build` (`vite build`): **passed**.
+- A direct probe of `holderMatches`, `evaluateCompliance`, and `coveragesFromCoi` for suffix variants, shared roots, blank holders, optional lines, and short limits.
+- A two-company HTTP save: only the saving company's vendors were recomputed, webhooks went only to that company's endpoint, and saving the same settings again sent nothing.
+- Usage meter with one removed certificate and one still on file: `cois.used` was 1.
+- `node scripts/recompute-vendor-status.js` twice: certificate count stayed 5, file paths and `deletedAt` were unchanged. `server/src/index.js` still does not reference the script. The follow-up diff does not touch `planLimits.js`, `requirements.js`, `webhooks.js`, `cois.js`, or the recompute script.
+
+### The three notes
+
+**1. Holder normalization — fixed, with a deliberate strict edge.** `normalizePartyName` and `holderMatches` in `server/src/services/complianceRules.js:70-112`.
+
+Punctuation, case, repeated spaces, `&` versus "and", and suffix spelling match: "Acme Construction, LLC" matches "Acme Construction LLC" and "Acme Construction, L.L.C."; "Acme, Inc." matches "Acme Incorporated"; "Smith & Sons" matches "Smith and Sons"; "Baker Co" matches "Baker Company"; "Best Corp." matches "Best Corporation".
+
+A blank holder still fails while the switch is on, and passes when it is off. "LLC", "Inc.", and "A" do not match a longer company name. "Acme" does not match "Acme Construction". "Smith Plumbing" does not match "Smith Plumbing LLC" or "Smith Plumbing Inc", and "Smith Plumbing LLC" does not match "Smith Plumbing Inc". "Baker Co" does not match "Baker Corp". Those shared-root pairs are not false positives.
+
+The suffix stays part of the name (`complianceRules.js:52-53`). Their test locks this in (`server/tests/compliance.test.js:405`): "Acme Construction, LLC" versus "Acme Construction" is a non-match. A company that stores its name without the legal suffix, while every certificate includes ", LLC", will come back non-compliant. That is the remaining false negative that will show up in real data. Extra words also fail: a street address, "ISAOA/ATIMA", or "d/b/a" on the holder line does not match the bare company name. The extractor is told to put the entity name and the address in separate fields (`server/src/services/coiExtractor.js:195-196`), so this is safe when extraction follows that split.
+
+Smaller leftovers, not enough to reject the rule:
+
+- "Ltd" does not match "Limited", and "PLLC" does not match "LLC" (`complianceRules.js:54-62` only folds llc/inc/incorporated/co/company/corp/corporation).
+- A name of one or two characters never matches, including an exact "GE" versus "GE" (`isBareOrFragment`, `complianceRules.js:102-104`). "IBM" does match.
+- The word "company" is rewritten wherever it sits, not only as a trailing suffix, so "Company Store" matches "Co Store".
+
+**2. Weekly email and the attention queue — fixed.** `runWeeklySummary` calls `evaluateCompliance` (`server/src/services/cron.js:460`) and counts a holder mismatch or a short limit as `nonCompliant`, not covered. The email adds a "Not compliant" row and prints that reason (`server/src/services/email.js`). The dashboard queue lists `overview.buckets.nonCompliant` first, with `statusReason` from `complianceIssue` (`client/src/pages/Dashboard.jsx:102-109`, `server/src/services/complianceOverview.js:163-170`). A covered vendor with a far-off date stays out of that list. The new tests in `server/tests/compliance.test.js` ("counts a holder mismatch and a short limit as non-compliant") passed.
+
+**3. Partner API lines — fixed for the case that was asked.** `coveragesFromCoi` (`server/src/http/serializers.js:90-120`) uses `verdictForLine`. A $0 minimum is omitted, including when that line expires soon. A required amount under the minimum is `expired`, which is the same public word `mapCoiStatus` uses for `NON_COMPLIANT`. `expiresAt` on the vendor and on historical certificates uses the earliest required line, not an optional one (`coverageExpiresAt`, `serializers.js:123-126`). The new API test passed.
+
+A required line with no amount, no date, and no policy is still left out of `coverages[]` (`serializers.js:97`) rather than listed as not acceptable. The vendor-level status still follows the badge. That is a smaller gap than a short limit being called compliant.
+
+### Spot-check of the earlier checks
+
+On this commit, saving requirements for company A with the holder switch on marked A's blank-holder vendor `NON_COMPLIANT`, left A's matching vendor `COMPLIANT`, and did not recompute company B. Two `coi.updated` posts went to A's endpoint only (one per vendor whose badge changed from the default). A second identical save sent nothing. The usage meter ignored the soft-deleted certificate. The recompute script did not delete rows or change file paths.
+
+Unchanged from the first pass, and not part of this follow-up: inbound email can still create a certificate without the cap check (`server/src/routes/webhooks.js:148`); `DELETE /api/cois/:id` still hard-deletes a row and its file (`server/src/routes/cois.js:318-325`, L10); the reports table still colors dates at 30 days (`client/src/pages/Reports.jsx:19`); CSV import still omits the holder when it flags a row (`server/src/routes/import.js:316-327`); the vendor page reason still comes from coverage chips, so a holder-only failure can show "Non-compliant" with no explanation there (`server/src/routes/vendors.js:98` and `:251`) even though the dashboard queue now explains it; webhook `expiresAt` still uses the earliest date on any line (`server/src/services/webhookDispatcher.js:97`).
+
+### Recommendation
+
+Merge PR #25. Before the one-time script, store each company name the way it appears on the certificate, including LLC / Inc / Corp. A missing suffix is a mismatch on purpose. Blank holders still fail while the switch is on.
+
+## First pass (commit `0d71571`)
+
+The sections below were written against `0d71571`, before the follow-up. Findings 1 through 3 in that pass are addressed by `2ad214c`. They are not the current result.
+
+## Plain-language summary for the owner (first pass)
 
 The switches on the Requirements page now actually change who looks covered.
 
@@ -253,6 +304,6 @@ Saving requirements re-checks `where: { orgId: req.user.orgId }` only (`server/s
 - Soft-deleted certificates are excluded from the cap helper, portal upload, apply, import, staff upload, and the usage meter. No product route sets `deletedAt` back to null.
 - L01 does not delete certificate rows or files. `git diff 6b87de5..0d71571` does not touch `deleteFile` or `prisma.coi.delete`. The existing `DELETE /api/cois/:id` still hard-deletes the row and the file (`server/src/routes/cois.js:318-325`). That behavior is unchanged and belongs to L10, not this batch.
 
-## Recommendation
+## Recommendation (first pass, superseded)
 
-Merge PR #25. Before the one-time script in production, turn holder matching off for any company that has not reviewed how their name is stored, or expect blank holders and ", LLC" versus "LLC" to become gaps. Treat the vendor badge and the Gaps tile as the compliance answer. Treat the Monday email's covered count as a date count until it calls `evaluateCompliance`.
+This recommendation applied to `0d71571` only. The follow-up at `2ad214c` is what to merge. See the re-verify section above.
