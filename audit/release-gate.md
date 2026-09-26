@@ -231,3 +231,9 @@ Original prefix: `proof-2026-09-20`. Next planned full pass: **2026-12-21** (or 
 - Did **not** invent owner completions.
 
 Application code was not changed in this review.
+
+---
+
+## 10. Product launch batches (does not open this gate)
+
+Market-readiness follow-on, written 2026-09-26: [audit/launch-batches.md](launch-batches.md) (L01–L14). Security work remains B01–B06. L-series is product work (compliance switches, terms acceptance mechanism, billing, then support, exports, roles, offboarding, mail reliability, help, per-trade templates). L14 (agent portal / referrals) is post-launch. Owner/ops items in that file stay outside those PRs. **This gate stays NO-GO** until section 7 is met. Shipping an L batch is not a GO.

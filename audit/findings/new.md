@@ -2,6 +2,8 @@
 
 **Release gate (2026-09-21): [NO-GO](../release-gate.md)** — do not charge customers until the hard-requirement checklist there is closed. Residuals below are known risk, not a GO.
 
+Product work after B06 is the L-series in [launch-batches.md](../launch-batches.md) (L01+). That plan does not close the gate. The export/offboarding item this file and B06 called “B07+” is **L09**, not a new B number.
+
 # Notes from B01 (not fixed in this batch)
 
 - Cron, v1 COI-request, rejection, chase, and reminder `NotificationLog` rows still do not persist Resend `email_id` in `meta`. Inbound bounce correlation therefore depends on `email_id` only when `/api/vendors/:id/request-coi` stored it, or on a single-org SENT match. Residual of A2-08.
