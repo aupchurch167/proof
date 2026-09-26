@@ -2,16 +2,104 @@
 
 **Final verdict: PASS WITH NOTES**
 
-**Implementation under test:** [PR #25](https://github.com/aupchurch167/proof/pull/25), commit `2ad214c` (follow-up on top of `0d71571`), branch `cursor/l01-requirement-compliance-6c4e`.
+**Implementation under test:** [PR #25](https://github.com/aupchurch167/proof/pull/25), commit `8fcd64a` (second follow-up, on top of `2ad214c` and `0d71571`), branch `cursor/l01-requirement-compliance-6c4e`.
 **Spec:** `audit/launch-batches.md`, section L01.
 **Checked against:** `origin/main` at `6b87de5`.
 **Product code changed by this verification:** none.
 
-The follow-up fixes the three notes from the first pass. Holder names that differ only by punctuation or suffix spelling now match, and a bare suffix or a short fragment does not. The Monday email and the dashboard queue use the same pass/fail result as the badge. Partner API coverage lines skip optional lines and mark a short required limit the same way the public badge does. Server tests: 27 suites, 328 passed. Client production build passed.
+The second follow-up makes a legal suffix optional and ignores the usual certificate boilerplate after the company name. "Acme Construction, LLC" matches "Acme Construction". Ltd matches Limited. A street number, ISAOA/ATIMA, "d/b/a", or "its subsidiaries" after the name is ignored, including when the name is on a later line of the holder block. "Acme Construction Services" does not match "Acme Construction", and "Smith Plumbing Supply" does not match "Smith Plumbing". A name in the middle of a line, or tucked inside another word, does not match. The vendor page now says why a holder failed, and it escapes that text. Server tests: 27 suites, 329 passed. Client production build passed.
 
-One thing still worth knowing before the one-time script: the legal suffix has to be on both the company name and the certificate. "Acme Construction, LLC" matches "Acme Construction LLC". It does not match "Acme Construction". Distinct companies that share a root name do not match. Details are in the re-verify section. The first-pass write-up below is kept as the record of `0d71571`.
+One clause still fails on real certificates: "AND/OR ISAOA/ATIMA" written on the company-name line. A few address words ("floor", "FL", "suite", "unit") also cut the comparison short, so a longer different name that starts with those words can match. Details are in the second re-verify section. The sections below it are the record of `2ad214c` and `0d71571`.
+
+## Re-verify (commit `8fcd64a`)
+
+Follow-up commit `8fcd64a` ("L01 follow-up: loosen holder matching and explain it on the vendor page"). Re-checked on that commit. No product code was changed by this review. The diff is five files: `complianceRules.js`, `coverage.js`, `vendors.js`, `VendorDetail.jsx`, and `compliance.test.js`.
+
+### What was run
+
+- `npm test` in `server`: **27 suites, 329 tests, passed** (15.3s). One test was added since `2ad214c` ("shows the holder text and other failures on the vendor page").
+- `npm run build` (`vite build`): **passed** (`dist/assets/index-CDwMtk2y.js`).
+- A direct probe of `holderMatches`, `holderDetailReason`, and `evaluateCompliance`: about 100 holder strings, including shared prefixes, mid-line names, a match that exists only on a later line, names of one to three characters, Ltd/Limited, and ACORD 25 holder blocks.
+- React `renderToStaticMarkup` of the vendor-page paragraph with a holder that contains `<img onerror>` and `<script>`.
+- The follow-up diff does not touch `planLimits.js`, `requirements.js`, `webhooks.js`, `cois.js`, `webhookDispatcher.js`, `import.js`, or `server/scripts/recompute-vendor-status.js`. `server/src/index.js` still starts cron only and does not load the script. The full suite, which covers caps, tenant-scoped requirement saves, and webhook delivery, passed on this commit.
+
+### Holder matching
+
+`holderMatches` (`server/src/services/complianceRules.js:147-152`) splits the holder on newlines and accepts the certificate when any line starts with the company's name. Trailing legal suffixes are removed from the company name before that comparison (`stripTrailingSuffixes`, lines 109-112). After the name, `remainderIsExtra` (lines 125-132) allows another suffix, a token that starts with a digit, a word in `TRAILING_STARTERS` (lines 68-71), or the words "and its".
+
+Checked pairs that must stay apart, and did:
+
+- "Acme Construction Services" versus "Acme Construction", with or without LLC / Inc on either side.
+- "Smith Plumbing Supply" versus "Smith Plumbing", including "Smith Plumbing Supply Co".
+- "Acme Constructional", "AcmeConstruction LLC", and "Holdings of Acme Construction LLC" versus "Acme Construction".
+- "Additional Insured: Acme Construction LLC" and "Jones Electric and Acme Construction LLC" (same line) versus "Acme Construction".
+- "Company Store" versus "Co Store". The old rewrite of "company" in the middle of a name is gone.
+- "The Acme Construction LLC" and "The Home Depot" versus the name without "The".
+- A shorter holder versus a longer company: "Smith Plumbing" versus "Smith Plumbing Supply", "Acme" versus "Acme Construction".
+
+Checked pairs that should match, and did:
+
+- Suffix optional on either side: "Acme Construction, LLC" matches "Acme Construction", and the reverse.
+- Ltd and Limited, Inc and Incorporated, Co and Company, Corp and Corporation, "L.L.C.", "&" and "and", apostrophes, "A.B.C." and "ABC".
+- A later line only: "Jones Electric LLC\\nAcme Construction LLC" matches "Acme Construction". It also matches "Jones Electric", because each line is tried on its own. A certificate that names two companies, one per line, satisfies either of those companies.
+- A label on its own line, then the name: "CERTIFICATE HOLDER\\nAcme Construction, LLC" and "Additional Insured\\nAcme Construction, LLC\\n123 Main".
+- Realistic blocks with the name on its own line: "PROOF CONSTRUCTION, LLC" / "ISAOA/ATIMA" / "100 Congress Ave, Suite 200" / "Austin, TX 78701" matches "Proof Construction". The same shape with "PO Box", "P.O. Box", "Suite", "Attn:", "d/b/a Ace Builders", and "its subsidiaries and affiliates" matches. "d/b/a Ace Builders" does not match "Ace Builders".
+- A blank holder, whitespace, or null still fails while the switch is on (`NON_COMPLIANT`). The same blank holder passes when the switch is off (`COMPLIANT`).
+
+### Findings
+
+**1. Medium — "AND/OR ISAOA/ATIMA" on the name line does not match.** `remainderIsExtra` (`complianceRules.js:131`) treats "and" as boilerplate only when the next word is "its". "and/or" becomes the tokens "and" and "or", so the line fails.
+
+Reproduce with `holderMatches` (both return false, and `evaluateCompliance` returns `NON_COMPLIANT` when General Liability is otherwise ample):
+
+- Holder `Acme Construction, LLC and/or ISAOA/ATIMA`, company `Acme Construction`.
+- Holder `ACME CONSTRUCTION LLC AND/OR` on the first line, then `ISAOA/ATIMA` and `123 MAIN STREET`, company `Acme Construction`.
+- The same failure for "and/or its subsidiaries".
+
+A name line with nothing after it, and ISAOA on the next line, matches. So does "Acme Construction LLC ISAOA/ATIMA" with no "and/or", and "Acme Construction, LLC, its subsidiaries and affiliates". The miss is the "and/or" conjunction, which is a common way the certificate-holder box is filled in.
+
+**2. Low — A few boilerplate words end the comparison immediately, so a different company can match.** `TRAILING_STARTERS` (`complianceRules.js:68-71`) includes `floor`, `fl`, `suite`, `unit`, `ste`, `apt`, `its`, `po`, and `attn`. Line 130 returns a match as soon as one of those words appears, and ignores everything after it.
+
+Reproduce (`holderMatches` true, status `COMPLIANT` with an ample limit):
+
+- "Acme Construction Floor Care LLC" versus "Acme Construction".
+- "Acme Construction FL LLC" and "Smith Plumbing FL" versus the name without "FL".
+- "North Suite LLC" versus "North". "Smith Floor Designs" versus "Smith".
+
+"Acme Construction Flooring LLC" does not match, because the token is "flooring", not "floor". "Acme Construction Florida LLC" does not match. The shared-prefix cases in the request ("Services", "Supply") do not match.
+
+**3. Low — The same words with a different legal suffix match.** Suffixes are stripped from both sides (`SUFFIX_OF`, `complianceRules.js:54-64`). That is what makes "Acme Construction, LLC" match "Acme Construction". It also makes "Acme Construction, Inc." match "Acme Construction LLC", "Acme Ltd" match "Acme LLC", and "Baker Co" match "Baker Inc". Those are different entities. PLLC, LP, LLP, and PC are not in the suffix list, so "Acme Construction LP" still fails against "Acme Construction".
+
+**4. Low — A company core shorter than three characters never matches.** `isBareOrFragment` (`complianceRules.js:115-119`). Exact "GE" versus "GE", "G.E." versus "GE", "3M" versus "3M", and "3M Company" versus "3M Company" are all non-matches. Stripping the trailing word "Company" leaves "3m", which is still too short. "IBM" and "ABC" match. "AA Plumbing" matches "AA Plumbing".
+
+**5. Low — A few realistic tails are still a mismatch.** Same function, lines 125-132.
+
+- "subsidiaries" or "and subsidiaries" without the word "its" fails. "its subsidiaries" and "and its subsidiaries" match.
+- "Acme Construction c/o Risk Management" fails. "c/o" collapses to the token "co", which is eaten as a suffix, and "Risk" is then treated as a different company.
+- "Acme Construction, Austin, TX 78701" on one line fails, because "Austin" is not an address marker. The same city on the next line matches, because the name line itself is exact. "One Congress Avenue" on the same line as the name fails; a line break before "One Congress Avenue" matches.
+- "(a Texas limited liability company)" after the name fails.
+
+The extractor is still told to put the entity name and the address in separate fields (`server/src/services/coiExtractor.js:195-196`). These tails matter when the model leaves them in `certificateHolderName`.
+
+### Vendor page reason
+
+`GET /api/vendors/:id` builds `statusReason` from `holderDetailReason` plus every failed coverage line (`server/src/routes/vendors.js:247-259`). A mismatch reads `Certificate holder doesn't match your company name (found: …)`, with newlines in the holder collapsed to ` / ` (`complianceRules.js:297-310`). A blank holder reads `Certificate holder name is missing`. The new test stores "Somebody Else LLC" and a short general-liability limit and expects both phrases in the response. That test passed.
+
+The page renders that string as a text child of a paragraph (`client/src/pages/VendorDetail.jsx:186-187`). There is no `dangerouslySetInnerHTML` on this page. Rendering the same paragraph with React's server renderer, using a holder of `Acme <img src=x onerror=alert(1)>` plus a `<script>` tag, produced `&lt;img` and `&lt;script`. The raw tags were not in the HTML. Quotes became `&quot;` and `&` became `&amp;`.
+
+The vendor list still copies only the first coverage-chip sentence (`vendors.js:99`). A holder-only failure can show "Non-compliant" in the list with an empty reason. The dashboard queue still uses the shorter `complianceIssue` text ("Certificate holder does not match") and does not include the holder body. Any reason on the detail page, including an expiring line, uses the red `text-bad-text` class.
+
+### Spot-check
+
+Caps still count `deletedAt: null` (`server/src/middleware/planLimits.js:39`). `DELETE /api/cois/:id` still hard-deletes the row and the file (`server/src/routes/cois.js:320-323`); that path is unchanged and is L10. The recompute script is still absent from boot. Unchanged residuals from the earlier passes: inbound email can create a certificate without the cap check; the reports table still colors dates at 30 days; CSV import still omits the holder; webhook `expiresAt` still uses the earliest date on any line; a required line with no amount, date, or policy is still omitted from partner-API `coverages[]` while the vendor badge follows the shared rule.
+
+### Recommendation
+
+Merge PR #25. The prefix cases that were likely to mark the wrong company compliant do not. Before the one-time script, know that a holder line ending in "and/or ISAOA/ATIMA" will come back non-compliant even when the company name is right, and that "Floor", "FL", "Suite", or "Unit" immediately after the name will be treated as boilerplate.
 
 ## Re-verify (commit `2ad214c`)
+
+This section is the record of `2ad214c`. The suffix-on-both-sides warning in it is superseded by the `8fcd64a` re-verify above.
 
 Follow-up commit `2ad214c` ("L01 follow-up: align holder names, weekly email, queue, and API lines"). Re-checked on that commit. No product code was changed by this review.
 
@@ -52,9 +140,9 @@ On this commit, saving requirements for company A with the holder switch on mark
 
 Unchanged from the first pass, and not part of this follow-up: inbound email can still create a certificate without the cap check (`server/src/routes/webhooks.js:148`); `DELETE /api/cois/:id` still hard-deletes a row and its file (`server/src/routes/cois.js:318-325`, L10); the reports table still colors dates at 30 days (`client/src/pages/Reports.jsx:19`); CSV import still omits the holder when it flags a row (`server/src/routes/import.js:316-327`); the vendor page reason still comes from coverage chips, so a holder-only failure can show "Non-compliant" with no explanation there (`server/src/routes/vendors.js:98` and `:251`) even though the dashboard queue now explains it; webhook `expiresAt` still uses the earliest date on any line (`server/src/services/webhookDispatcher.js:97`).
 
-### Recommendation
+### Recommendation (commit `2ad214c`, superseded)
 
-Merge PR #25. Before the one-time script, store each company name the way it appears on the certificate, including LLC / Inc / Corp. A missing suffix is a mismatch on purpose. Blank holders still fail while the switch is on.
+This recommendation applied to `2ad214c` only. The current recommendation is in the `8fcd64a` re-verify above. At this commit, the advice was: store each company name the way it appears on the certificate, including LLC / Inc / Corp, because a missing suffix was a mismatch on purpose. Blank holders still failed while the switch was on.
 
 ## First pass (commit `0d71571`)
 
