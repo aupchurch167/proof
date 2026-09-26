@@ -212,35 +212,45 @@ export default function Requirements() {
           ))}
 
           <div className="px-[22px] py-4 flex flex-col gap-3 border-t border-line-divider">
-            <label className="flex items-center gap-3 text-[13px]">
+            <label className="flex items-start gap-3 text-[13px]">
               <Toggle
                 checked={template.requireHolderMatch}
                 disabled={!isAdmin}
                 label="Certificate holder must match"
                 onChange={(v) => setTemplate({ ...template, requireHolderMatch: v })}
               />
-              <span className="text-ink">
-                Certificate holder must match <b>{data.orgName}</b> (additional insured)
+              <span className="text-ink flex flex-col gap-0.5">
+                <span>
+                  Certificate holder must match <b>{data.orgName}</b> (additional insured)
+                </span>
+                <span className="text-xs text-muted">
+                  Enforced. On: a missing holder or a name that does not match {data.orgName} marks the vendor non-compliant. Off: the holder name is not checked.
+                </span>
               </span>
             </label>
-            <label className="flex items-center gap-3 text-[13px]">
+            <label className="flex items-start gap-3 text-[13px]">
               <Toggle
                 checked={template.expiringWindowDays > 0}
                 disabled={!isAdmin}
                 label="Treat coverage as expiring"
                 onChange={(v) => setTemplate({ ...template, expiringWindowDays: v ? 30 : 0 })}
               />
-              <span className="text-ink">
-                Treat coverage expiring within{' '}
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  disabled={!isAdmin}
-                  value={template.expiringWindowDays}
-                  onChange={(e) => setTemplate({ ...template, expiringWindowDays: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 })}
-                  className="w-12 px-1.5 py-0.5 mx-0.5 text-center rounded-chip border border-line-strong text-[13px] font-bold focus:outline-none focus:border-navy"
-                />{' '}
-                days as "Expiring"
+              <span className="text-ink flex flex-col gap-0.5">
+                <span>
+                  Treat coverage expiring within{' '}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    disabled={!isAdmin}
+                    value={template.expiringWindowDays}
+                    onChange={(e) => setTemplate({ ...template, expiringWindowDays: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 })}
+                    className="w-12 px-1.5 py-0.5 mx-0.5 text-center rounded-chip border border-line-strong text-[13px] font-bold focus:outline-none focus:border-navy"
+                  />{' '}
+                  days as "Expiring"
+                </span>
+                <span className="text-xs text-muted">
+                  Enforced on the Expiring badge, coverage chips, the dashboard, API coverage status, and the weekly summary. 0 turns Expiring off; a date already past is still Expired. Reminder emails still use Reminder settings.
+                </span>
               </span>
             </label>
           </div>

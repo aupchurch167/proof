@@ -1,11 +1,18 @@
-const { daysUntil, daysSince, earliestExpiration } = require('./reminders');
+const { daysSince } = require('./reminders');
 const { isPlaceholderEmail } = require('../utils/email');
+const {
+  DEFAULT_EXPIRING_WINDOW_DAYS,
+  daysUntil,
+  expiringWindowDays,
+  isExpiringSoon,
+  earliestRequiredExpiration,
+} = require('./complianceRules');
 
 // A request is "ignored" once it's this old with nothing back from the vendor.
 const IGNORED_AFTER_DAYS = 7;
 
-// Anything expiring inside this window is worth chasing today.
-const EXPIRING_SOON_DAYS = 30;
+// Default only. The live window is OrganizationSettings.expiringWindowDays.
+const EXPIRING_SOON_DAYS = DEFAULT_EXPIRING_WINDOW_DAYS;
 
 function lastOf(list) {
   return list.length > 0 ? list[list.length - 1] : null;
@@ -24,7 +31,8 @@ async function buildComplianceOverview(
   orgId,
   { now = new Date(), ignoredAfterDays = IGNORED_AFTER_DAYS } = {}
 ) {
-  const [vendors, logs, escalations] = await Promise.all([
+  const [settings, vendors, logs, escalations] = await Promise.all([
+    prisma.organizationSettings.findUnique({ where: { orgId } }),
     prisma.vendor.findMany({
       where: { orgId, deletedAt: null },
       select: {
@@ -66,6 +74,8 @@ async function buildComplianceOverview(
     }),
   ]);
 
+  const windowDays = expiringWindowDays(settings);
+
   const logsByVendor = new Map();
   for (const log of logs) {
     if (!logsByVendor.has(log.vendorId)) logsByVendor.set(log.vendorId, []);
@@ -90,7 +100,7 @@ async function buildComplianceOverview(
     const oldestPending = [...vendor.cois].reverse().find((c) => c.status === 'PENDING_REVIEW') || null;
     const latestSubmission = vendor.cois[0] || null;
 
-    const expiration = earliestExpiration(latestApproved);
+    const expiration = earliestRequiredExpiration(latestApproved, settings);
     const daysUntilExpiration = expiration ? daysUntil(expiration, now) : null;
 
     const vendorLogs = logsByVendor.get(vendor.id) || [];
@@ -137,7 +147,7 @@ async function buildComplianceOverview(
 
     if (latestApproved && daysUntilExpiration !== null) {
       if (daysUntilExpiration < 0) buckets.expired.push(entry);
-      else if (daysUntilExpiration <= EXPIRING_SOON_DAYS) buckets.expiringSoon.push(entry);
+      else if (isExpiringSoon(expiration, windowDays, now)) buckets.expiringSoon.push(entry);
     }
 
     // Ignored: we asked, it's been a week or more, nothing came back, and
@@ -177,7 +187,7 @@ async function buildComplianceOverview(
   return {
     generatedAt: now,
     ignoredAfterDays,
-    expiringSoonDays: EXPIRING_SOON_DAYS,
+    expiringSoonDays: windowDays,
     totalVendors: vendors.length,
     badEmails: vendors.filter((v) => isPlaceholderEmail(v.email)).length,
     counts,

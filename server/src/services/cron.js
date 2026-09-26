@@ -5,6 +5,12 @@ const {
   sendChaseEmail,
 } = require('./email');
 const { updateVendorStatus } = require('./compliance');
+const {
+  expiringWindowDays,
+  isExpiringSoon,
+  earliestRequiredExpiration,
+  daysUntil: complianceDaysUntil,
+} = require('./complianceRules');
 const { generateUploadToken } = require('../utils/tokens');
 const { isPlaceholderEmail, placeholderReason } = require('../utils/email');
 const {
@@ -382,6 +388,7 @@ async function runWeeklySummary(prisma) {
   const lock = await withAdvisoryLock(LOCK_KEYS.weeklySummary, async () => {
     const orgs = await prisma.organization.findMany({
       include: {
+        settings: true,
         users: {
           where: { role: 'ADMIN' },
           select: { email: true, firstName: true },
@@ -413,6 +420,7 @@ async function runWeeklySummary(prisma) {
       }
 
       const now = new Date();
+      const windowDays = expiringWindowDays(org.settings);
       let compliant = 0;
       let expiringSoon = 0;
       let expired = 0;
@@ -421,19 +429,23 @@ async function runWeeklySummary(prisma) {
 
       for (const vendor of vendors) {
         const latestCoi = vendor.cois[0];
-        const earliestExpirationDate = earliestExpiration(latestCoi);
+        // Required lines only, so an optional coverage date does not land in
+        // the expiring bucket. No settings row keeps the previous all-dates view.
+        const earliestExpirationDate = org.settings
+          ? earliestRequiredExpiration(latestCoi, org.settings)
+          : earliestExpiration(latestCoi);
 
-        if (!earliestExpirationDate) {
+        if (!latestCoi || !earliestExpirationDate) {
           noCoi++;
           continue;
         }
 
-        const days = daysUntil(earliestExpirationDate, now);
+        const days = complianceDaysUntil(earliestExpirationDate, now);
 
         if (days < 0) {
           expired++;
           urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
-        } else if (days <= 30) {
+        } else if (isExpiringSoon(earliestExpirationDate, windowDays, now)) {
           expiringSoon++;
           urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
         } else {
@@ -451,6 +463,7 @@ async function runWeeklySummary(prisma) {
         expired,
         noCoi,
         urgentVendors,
+        expiringWindowDays: windowDays,
       };
 
       try {

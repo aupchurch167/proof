@@ -2,6 +2,7 @@ const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { COVERAGE_LINES, coverageFor } = require('../services/coverage');
+const { updateVendorStatus } = require('../services/compliance');
 const { logAudit } = require('../services/audit');
 
 const router = express.Router();
@@ -161,8 +162,9 @@ router.put('/:templateId', authenticate, authorize('ADMIN'), async (req, res) =>
     if (requireHolderMatch !== undefined) data.requireHolderMatch = Boolean(requireHolderMatch);
     if (expiringWindowDays !== undefined) {
       const days = parseInt(expiringWindowDays, 10);
-      if (!Number.isFinite(days) || days < 1 || days > 365) {
-        return res.status(400).json({ error: 'expiringWindowDays must be between 1 and 365' });
+      // 0 turns the Expiring badge off. A date already past is still Expired.
+      if (!Number.isFinite(days) || days < 0 || days > 365) {
+        return res.status(400).json({ error: 'expiringWindowDays must be between 0 and 365' });
       }
       data.expiringWindowDays = days;
     }
@@ -182,8 +184,14 @@ router.put('/:templateId', authenticate, authorize('ADMIN'), async (req, res) =>
       ipAddress: req.ip,
     });
 
-    const vendorCount = await prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } });
-    res.json(toTemplate(settings, vendorCount));
+    const vendors = await prisma.vendor.findMany({
+      where: { orgId: req.user.orgId, deletedAt: null },
+      select: { id: true },
+    });
+    for (const vendor of vendors) {
+      await updateVendorStatus(prisma, vendor.id, req.user.orgId);
+    }
+    res.json(toTemplate(settings, vendors.length));
   } catch (err) {
     console.error('Requirements update error:', err);
     res.status(500).json({ error: 'Failed to save template' });

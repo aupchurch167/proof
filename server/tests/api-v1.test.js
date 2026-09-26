@@ -185,6 +185,27 @@ describe('GET /vendors/:id', () => {
     expect(auto.status).toBe('expiring_soon');
   });
 
+  it('uses the saved expiring window for per-coverage status', async () => {
+    await prisma.organizationSettings.update({
+      where: { orgId: orgA.id },
+      data: { expiringWindowDays: 5 },
+    });
+    try {
+      const res = await request(app)
+        .get(`/api/v1/orgs/${orgA.slug}/vendors/${vendorWithCoi.id}`)
+        .set(auth(tokenA));
+      expect(res.status).toBe(200);
+      const auto = res.body.data.coi.coverages.find((c) => c.type === 'auto');
+      // Auto expires in 10 days. A 5-day window must not call that expiring soon.
+      expect(auto.status).toBe('compliant');
+    } finally {
+      await prisma.organizationSettings.update({
+        where: { orgId: orgA.id },
+        data: { expiringWindowDays: 30 },
+      });
+    }
+  });
+
   it('404 for a vendor not in this org', async () => {
     const res = await request(app).get(`/api/v1/orgs/${orgA.slug}/vendors/00000000-0000-0000-0000-000000000000`).set(auth(tokenA));
     expect(res.status).toBe(404);
@@ -560,6 +581,7 @@ describe('COI request auto-resolves when the vendor becomes compliant', () => {
     // COMPLIANT, and recompute status.
     await createTestCoi(vendorNoCoi.id, orgA.id, {
       status: 'APPROVED',
+      certificateHolderName: orgA.name,
       glCoverageAmount: 200000000,
       glExpirationDate: new Date(Date.now() + 120 * DAY),
       wcCoverageAmount: 100000000,

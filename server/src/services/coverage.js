@@ -1,11 +1,12 @@
-// Per-coverage verdicts — the single definition behind the coverage chips on
-// the vendor list, the coverage cards on vendor detail, and the review pane.
-//
-// checkCompliance() answers "is this COI acceptable overall". The UI needs a
-// finer answer: for each of the four coverage lines, does it meet the org's
-// requirement, is it about to lapse, is it short, or is it not required at all.
+// Per-coverage verdicts for the chips on the vendor list, vendor detail, and
+// the review pane. Pass/fail goes through complianceRules so the chips and the
+// vendor badge share one rule.
 
-const EXPIRING_SOON_DAYS = 30;
+const { DEFAULT_EXPIRING_WINDOW_DAYS, expiringWindowDays, verdictForLine } = require('./complianceRules');
+
+// Default warn window when the org has not saved one. The live window is
+// OrganizationSettings.expiringWindowDays (0 turns the Expiring verdict off).
+const EXPIRING_SOON_DAYS = DEFAULT_EXPIRING_WINDOW_DAYS;
 
 // The four lines, with the COI column names and the settings key that carries
 // each one's required minimum.
@@ -21,41 +22,19 @@ function centsToDollars(cents) {
   return cents == null ? null : Math.round(cents / 100);
 }
 
-function daysUntil(date, now) {
-  return Math.ceil((new Date(date).getTime() - now.getTime()) / 86400000);
-}
-
 /**
- * Verdict for one coverage line.
- *
- * A required line with no amount on file is `missing`; one below the org's
- * minimum is `under`. An expired line reads `expired` regardless of its limit,
- * because the limit is moot once the policy has lapsed. A line the org doesn't
- * require is `skipped` and never counts against the vendor.
+ * Verdict for one coverage line. Same rule as evaluateCompliance: a minimum
+ * of 0 is not required, and the expiring verdict uses the saved warn window.
  */
 function verdictFor(line, coi, settings, now) {
-  const required = settings ? settings[line.setting] : null;
-  if (!required || required <= 0) {
-    return { verdict: 'skipped', required: null };
-  }
-  if (!coi) return { verdict: 'missing', required };
-
-  const amount = coi[line.amount];
-  const expiration = coi[line.expiration];
-
-  if (amount == null && !expiration && !coi[line.policy]) {
-    return { verdict: 'missing', required };
-  }
-  if (expiration && daysUntil(expiration, now) < 0) {
-    return { verdict: 'expired', required };
-  }
-  if (amount == null || amount < required) {
-    return { verdict: 'under', required };
-  }
-  if (expiration && daysUntil(expiration, now) <= EXPIRING_SOON_DAYS) {
-    return { verdict: 'expiring', required };
-  }
-  return { verdict: 'meets', required };
+  return verdictForLine({
+    amount: coi ? coi[line.amount] : null,
+    expiration: coi ? coi[line.expiration] : null,
+    policy: coi ? coi[line.policy] : null,
+    minimum: settings ? settings[line.setting] : null,
+    windowDays: expiringWindowDays(settings),
+    now,
+  });
 }
 
 // Verdict -> the chip/pill tone the UI paints it with.

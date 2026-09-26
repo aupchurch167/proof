@@ -255,6 +255,62 @@ describe('Requirements', () => {
 
     expect(res.status).toBe(400);
   });
+
+  it('saves the holder switch and a zero-day expiring window', async () => {
+    const res = await request(app)
+      .put('/api/requirements/default')
+      .set(auth())
+      .send({ requireHolderMatch: false, expiringWindowDays: 0 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.requireHolderMatch).toBe(false);
+    expect(res.body.expiringWindowDays).toBe(0);
+  });
+
+  it('rejects an expiring window outside 0 to 365', async () => {
+    const res = await request(app)
+      .put('/api/requirements/default')
+      .set(auth())
+      .send({ expiringWindowDays: 400 });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('recomputes the vendor badge when a required line is switched off', async () => {
+    const vendor = await createTestVendor(org.id, { name: 'Optional After Save' });
+    await createTestCoi(vendor.id, org.id, {
+      status: 'APPROVED',
+      certificateHolderName: org.name,
+      glCoverageAmount: 200000000,
+      glExpirationDate: daysFromNow(200),
+      wcCoverageAmount: 100000000,
+      wcExpirationDate: daysFromNow(200),
+      autoCoverageAmount: 200000000,
+      autoExpirationDate: daysFromNow(200),
+    });
+
+    const required = await request(app)
+      .put('/api/requirements/default')
+      .set(auth())
+      .send({
+        coverages: [{ key: 'umb', required: true, minLimit: 1000000 }],
+        requireHolderMatch: true,
+        expiringWindowDays: 30,
+      });
+    expect(required.status).toBe(200);
+    expect((await prisma.vendor.findUnique({ where: { id: vendor.id } })).coiStatus).toBe('NON_COMPLIANT');
+
+    const optional = await request(app)
+      .put('/api/requirements/default')
+      .set(auth())
+      .send({
+        coverages: [{ key: 'umb', required: false }],
+        requireHolderMatch: true,
+        expiringWindowDays: 30,
+      });
+    expect(optional.status).toBe(200);
+    expect((await prisma.vendor.findUnique({ where: { id: vendor.id } })).coiStatus).toBe('COMPLIANT');
+  });
 });
 
 describe('GET /api/audit', () => {

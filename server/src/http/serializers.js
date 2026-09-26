@@ -3,14 +3,20 @@
 // formatting have a single, testable definition every endpoint shares.
 
 const path = require('path');
+const {
+  DEFAULT_EXPIRING_WINDOW_DAYS,
+  expiringWindowDays,
+  isExpiredDate,
+  isExpiringSoon,
+} = require('../services/complianceRules');
 
 // Matches getSignedUrl()'s default TTL so the envelope's expiresInSeconds /
 // expiresAt describe the URL we actually issued.
 const SIGNED_URL_EXPIRES_IN = 900;
 
-// Number of days before expiry at which a still-valid policy is "expiring soon".
-// Mirrors the window used in services/compliance.js.
-const EXPIRING_SOON_DAYS = 30;
+// Default warn window when the caller does not pass org settings.
+// Live responses use OrganizationSettings.expiringWindowDays.
+const EXPIRING_SOON_DAYS = DEFAULT_EXPIRING_WINDOW_DAYS;
 
 // Internal CoiStatus enum -> public status enum.
 // NON_COMPLIANT (has a COI but coverage is insufficient) has no dedicated public
@@ -59,18 +65,16 @@ function centsToDollars(cents) {
   return cents == null ? null : Math.round(cents / 100);
 }
 
-function coverageStatus(expiration) {
+function coverageStatus(expiration, windowDays, now) {
   if (!expiration) return 'compliant'; // present, no known expiry
-  const now = Date.now();
-  const exp = new Date(expiration).getTime();
-  if (exp < now) return 'expired';
-  const days = (exp - now) / (1000 * 60 * 60 * 24);
-  return days <= EXPIRING_SOON_DAYS ? 'expiring_soon' : 'compliant';
+  if (isExpiredDate(expiration, now)) return 'expired';
+  if (isExpiringSoon(expiration, windowDays, now)) return 'expiring_soon';
+  return 'compliant';
 }
 
 // Build the coverages[] array from a COI row, including only coverage lines that
 // actually carry data (a limit, an expiration, or a policy number).
-function coveragesFromCoi(coi) {
+function coveragesFromCoi(coi, { windowDays = EXPIRING_SOON_DAYS, now = new Date() } = {}) {
   if (!coi) return [];
   const lines = [
     { type: 'general_liability', amount: coi.glCoverageAmount, exp: coi.glExpirationDate, policy: coi.glPolicyNumber },
@@ -82,7 +86,7 @@ function coveragesFromCoi(coi) {
     .filter((l) => l.amount != null || l.exp != null || l.policy)
     .map((l) => ({
       type: l.type,
-      status: coverageStatus(l.exp),
+      status: coverageStatus(l.exp, windowDays, now),
       expiresAt: isoDate(l.exp),
       limit: centsToDollars(l.amount),
     }));
@@ -106,14 +110,15 @@ function earliestExpiration(coi) {
  * @param {Date|null}   opts.lastRequestedAt    When a COI was last requested.
  * @param {boolean}     opts.detail             Include the coverages[] array.
  */
-function serializeVendor(vendor, { latestApprovedCoi = null, lastRequestedAt = null, detail = false } = {}) {
+function serializeVendor(vendor, { latestApprovedCoi = null, lastRequestedAt = null, detail = false, settings = null, now = new Date() } = {}) {
+  const windowDays = expiringWindowDays(settings);
   const coi = {
     status: mapCoiStatus(vendor.coiStatus),
     expiresAt: earliestExpiration(latestApprovedCoi),
     lastRequestedAt: isoDateTime(lastRequestedAt),
   };
   if (detail) {
-    coi.coverages = coveragesFromCoi(latestApprovedCoi);
+    coi.coverages = coveragesFromCoi(latestApprovedCoi, { windowDays, now });
   }
   return {
     id: vendor.id,
@@ -159,7 +164,8 @@ function serializeSignedDocument(pdfPath, url) {
  * coverage expiration (YYYY-MM-DD) or null — we do not substitute submittedAt
  * here; that fallback is only used for the overlap filter.
  */
-function serializeHistoricalCoi(coi, document) {
+function serializeHistoricalCoi(coi, document, { settings = null, now = new Date() } = {}) {
+  const windowDays = expiringWindowDays(settings);
   return {
     id: coi.id,
     vendorId: coi.vendorId,
@@ -167,7 +173,7 @@ function serializeHistoricalCoi(coi, document) {
     submittedAt: isoDateTime(coi.submittedAt),
     expiresAt: earliestExpiration(coi),
     document,
-    coverages: coveragesFromCoi(coi),
+    coverages: coveragesFromCoi(coi, { windowDays, now }),
     agentName: coi.agentName || null,
     agentEmail: coi.agentEmail || null,
     agentPhone: coi.agentPhone || null,

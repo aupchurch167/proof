@@ -244,3 +244,43 @@ describe('Free plan vendor limit', () => {
     expect(res.body.code).toBe('PLAN_LIMIT_EXCEEDED');
   });
 });
+
+describe('COI plan cap ignores soft-deleted certificates', () => {
+  const TINY_PDF = Buffer.from('%PDF-1.4\n%EOF\n');
+
+  it('allows an upload when the only certificate on file is soft-deleted, then blocks the next one', async () => {
+    const plans = require('../src/config/plans');
+    const spy = jest.spyOn(plans, 'getPlanLimits').mockReturnValue({ maxVendors: 20, maxCois: 1 });
+    try {
+      const capOrg = await createTestOrg({ name: 'Upload Cap Org', plan: 'FREE' });
+      const capUser = await createTestUser(capOrg.id, { email: `capuser-${Date.now()}@test.com` });
+      const capToken = getAuthToken(capUser);
+      const vendor = await createTestVendor(capOrg.id, { email: `coicap-${Date.now()}@test.com` });
+      await prisma.coi.create({
+        data: {
+          vendorId: vendor.id,
+          orgId: capOrg.id,
+          pdfPath: 'test/deleted.pdf',
+          status: 'APPROVED',
+          deletedAt: new Date(),
+        },
+      });
+
+      const allowed = await request(app)
+        .post(`/api/vendors/${vendor.id}/coi/upload`)
+        .set('Authorization', `Bearer ${capToken}`)
+        .attach('pdf', TINY_PDF, 'coi.pdf');
+      expect(allowed.status).toBe(201);
+
+      const blocked = await request(app)
+        .post(`/api/vendors/${vendor.id}/coi/upload`)
+        .set('Authorization', `Bearer ${capToken}`)
+        .attach('pdf', TINY_PDF, 'coi.pdf');
+      expect(blocked.status).toBe(403);
+      expect(blocked.body.code).toBe('PLAN_LIMIT_EXCEEDED');
+      expect(blocked.body.current).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

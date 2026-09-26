@@ -124,6 +124,16 @@ router.post(
         }
       }
 
+      if (coiFile) {
+        const coiLimit = await evaluatePlanLimit(org.id, 'coi');
+        if (!coiLimit.ok) {
+          return res.status(403).json({
+            ...coiLimit.body,
+            error: 'This organization has reached its COI limit. Please contact them to resolve this.',
+          });
+        }
+      }
+
       const vendor = await prisma.vendor.create({
         data: {
           orgId: org.id,

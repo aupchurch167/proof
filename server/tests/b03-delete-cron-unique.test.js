@@ -288,3 +288,30 @@ describe('A3-10 plan limit fail-closed', () => {
     expect(after).toBe(before);
   });
 });
+
+describe('L01 soft-deleted certificates and the COI cap', () => {
+  it('does not count a soft-deleted certificate toward maxCois', async () => {
+    const plans = require('../src/config/plans');
+    const { evaluatePlanLimit } = require('../src/middleware/planLimits');
+    const spy = jest.spyOn(plans, 'getPlanLimits').mockReturnValue({ maxVendors: 20, maxCois: 1 });
+    try {
+      const capOrg = await createTestOrg({ name: 'Soft Cap Org', plan: 'FREE' });
+      const vendor = await createTestVendor(capOrg.id, { email: `softcap-${Date.now()}@test.com` });
+      const deleted = await createTestCoi(vendor.id, capOrg.id, { status: 'APPROVED' });
+      await prisma.coi.update({ where: { id: deleted.id }, data: { deletedAt: new Date() } });
+
+      const under = await evaluatePlanLimit(capOrg.id, 'coi');
+      expect(under.ok).toBe(true);
+      expect(under.current).toBe(0);
+
+      await createTestCoi(vendor.id, capOrg.id, { status: 'APPROVED' });
+      const atCap = await evaluatePlanLimit(capOrg.id, 'coi');
+      expect(atCap.ok).toBe(false);
+      expect(atCap.body.code).toBe('PLAN_LIMIT_EXCEEDED');
+      expect(atCap.body.current).toBe(1);
+      expect(atCap.body.limit).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

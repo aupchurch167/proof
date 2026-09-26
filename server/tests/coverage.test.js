@@ -48,6 +48,19 @@ describe('coverage verdicts', () => {
     expect(verdicts({}).umb).toBe('skipped');
   });
 
+  it('uses the saved warn window, including the exact boundary', () => {
+    const onWindow = { glCoverageAmount: 200000000, glExpirationDate: at('2026-10-03') }; // 14 days
+    expect(verdicts(onWindow, { ...SETTINGS, expiringWindowDays: 14 }).gl).toBe('expiring');
+    expect(verdicts(onWindow, { ...SETTINGS, expiringWindowDays: 13 }).gl).toBe('meets');
+  });
+
+  it('a window of 0 does not mark a future date expiring and still marks a past date expired', () => {
+    const soon = { glCoverageAmount: 200000000, glExpirationDate: at('2026-09-24') };
+    const past = { glCoverageAmount: 200000000, glExpirationDate: at('2026-08-01') };
+    expect(verdicts(soon, { ...SETTINGS, expiringWindowDays: 0 }).gl).toBe('meets');
+    expect(verdicts(past, { ...SETTINGS, expiringWindowDays: 0 }).gl).toBe('expired');
+  });
+
   it('summarizes the first real problem for the status pill', () => {
     const coverages = coverageFor(
       { glCoverageAmount: 200000000, glExpirationDate: at('2027-03-01'), autoCoverageAmount: 100000000, autoExpirationDate: at('2027-03-01') },

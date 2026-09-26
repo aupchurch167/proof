@@ -18,6 +18,7 @@ jest.mock('../src/services/email', () => ({
 const request = require('supertest');
 const app = require('../src/app');
 const { buildComplianceOverview } = require('../src/services/complianceOverview');
+const { checkCompliance, evaluateCompliance, updateVendorStatus } = require('../src/services/compliance');
 const {
   prisma,
   createTestOrg,
@@ -318,5 +319,205 @@ describe('POST /api/compliance/vendors/:id/contacted', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe('requirement switches', () => {
+  const baseSettings = {
+    minGeneralLiability: 100000000,
+    minWorkersComp: 50000000,
+    minUmbrella: 0,
+    minAutomobile: 100000000,
+    requireHolderMatch: true,
+    expiringWindowDays: 30,
+  };
+
+  function certificate(overrides = {}) {
+    return {
+      certificateHolderName: 'Test Org',
+      glCoverageAmount: 200000000,
+      glExpirationDate: daysFromNow(90, NOW),
+      wcCoverageAmount: 100000000,
+      wcExpirationDate: daysFromNow(90, NOW),
+      autoCoverageAmount: 200000000,
+      autoExpirationDate: daysFromNow(90, NOW),
+      ...overrides,
+    };
+  }
+
+  function evaluated(coi, settings) {
+    return evaluateCompliance(coi, settings, 'Test Org', { now: NOW });
+  }
+
+  it('does not fail a vendor for an optional line that is blank', () => {
+    const result = evaluated(certificate(), baseSettings);
+    expect(result.lines.find((line) => line.key === 'umb').verdict).toBe('skipped');
+    expect(result.flags.some((flag) => flag.field === 'umbCoverageAmount')).toBe(false);
+    expect(result.status).toBe('COMPLIANT');
+  });
+
+  it('still fails a required line that is missing or short', () => {
+    const missing = evaluated(certificate({ wcCoverageAmount: null, wcExpirationDate: null }), baseSettings);
+    expect(missing.flags.some((flag) => flag.type === 'MISSING' && flag.field === 'wcCoverageAmount')).toBe(true);
+    expect(missing.status).toBe('NON_COMPLIANT');
+
+    const short = evaluated(certificate({ glCoverageAmount: 100 }), baseSettings);
+    expect(short.flags.some((flag) => flag.type === 'INSUFFICIENT' && flag.field === 'glCoverageAmount')).toBe(true);
+    expect(short.status).toBe('NON_COMPLIANT');
+  });
+
+  it('fails a holder mismatch or a blank holder only when the switch is on', () => {
+    const mismatchOn = evaluated(certificate({ certificateHolderName: 'Other Co' }), baseSettings);
+    expect(mismatchOn.flags.some((flag) => flag.type === 'ADDITIONALLY_INSURED_MISMATCH')).toBe(true);
+    expect(mismatchOn.status).toBe('NON_COMPLIANT');
+
+    const blankOn = evaluated(certificate({ certificateHolderName: '  ' }), baseSettings);
+    expect(blankOn.flags.some((flag) => flag.type === 'MISSING' && flag.field === 'certificateHolderName')).toBe(true);
+    expect(blankOn.status).toBe('NON_COMPLIANT');
+
+    const off = { ...baseSettings, requireHolderMatch: false };
+    const mismatchOff = evaluated(certificate({ certificateHolderName: 'Other Co' }), off);
+    expect(mismatchOff.flags.some((flag) => flag.field === 'certificateHolderName')).toBe(false);
+    expect(mismatchOff.status).toBe('COMPLIANT');
+
+    const blankOff = evaluated(certificate({ certificateHolderName: null }), off);
+    expect(blankOff.status).toBe('COMPLIANT');
+    expect(checkCompliance(certificate({ certificateHolderName: null }), off, 'Test Org', { now: NOW }))
+      .toEqual(blankOff.flags);
+  });
+
+  it('uses a 14-day window and a 45-day window to decide EXPIRING_SOON', () => {
+    const coi = certificate({
+      glExpirationDate: daysFromNow(20, NOW),
+      wcExpirationDate: daysFromNow(20, NOW),
+      autoExpirationDate: daysFromNow(20, NOW),
+    });
+    expect(evaluated(coi, { ...baseSettings, expiringWindowDays: 14 }).status).toBe('COMPLIANT');
+    expect(evaluated(coi, { ...baseSettings, expiringWindowDays: 45 }).status).toBe('EXPIRING_SOON');
+  });
+
+  it('treats the warn-window boundary as expiring and the next day as not', () => {
+    const onWindow = certificate({
+      glExpirationDate: daysFromNow(14, NOW),
+      wcExpirationDate: daysFromNow(14, NOW),
+      autoExpirationDate: daysFromNow(14, NOW),
+    });
+    const outside = certificate({
+      glExpirationDate: daysFromNow(15, NOW),
+      wcExpirationDate: daysFromNow(15, NOW),
+      autoExpirationDate: daysFromNow(15, NOW),
+    });
+    const settings = { ...baseSettings, expiringWindowDays: 14 };
+    expect(evaluated(onWindow, settings).status).toBe('EXPIRING_SOON');
+    expect(evaluated(outside, settings).status).toBe('COMPLIANT');
+  });
+
+  it('does not use EXPIRING_SOON when the window is 0, and a past date is still EXPIRED', () => {
+    const soon = certificate({
+      glExpirationDate: daysFromNow(10, NOW),
+      wcExpirationDate: daysFromNow(10, NOW),
+      autoExpirationDate: daysFromNow(10, NOW),
+    });
+    const past = certificate({
+      glExpirationDate: daysFromNow(-3, NOW),
+      wcExpirationDate: daysFromNow(-3, NOW),
+      autoExpirationDate: daysFromNow(-3, NOW),
+    });
+    const settings = { ...baseSettings, expiringWindowDays: 0 };
+    expect(evaluated(soon, settings).status).toBe('COMPLIANT');
+    expect(evaluated(past, settings).status).toBe('EXPIRED');
+  });
+
+  it('persists COMPLIANT when the only blank line is optional', async () => {
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { minUmbrella: 0, requireHolderMatch: true, expiringWindowDays: 30 },
+    });
+    const vendor = await createTestVendor(org.id, { name: 'No Umbrella Needed' });
+    await createTestCoi(vendor.id, org.id, {
+      status: 'APPROVED',
+      certificateHolderName: org.name,
+      glCoverageAmount: 200000000,
+      glExpirationDate: daysFromNow(90, NOW),
+      wcCoverageAmount: 100000000,
+      wcExpirationDate: daysFromNow(90, NOW),
+      autoCoverageAmount: 200000000,
+      autoExpirationDate: daysFromNow(90, NOW),
+    });
+
+    await updateVendorStatus(prisma, vendor.id, org.id, { now: NOW });
+    const row = await prisma.vendor.findUnique({ where: { id: vendor.id } });
+    expect(row.coiStatus).toBe('COMPLIANT');
+  });
+});
+
+describe('overview warn window', () => {
+  it('a window of 14 vs 45 changes who is expiring soon', async () => {
+    const inside = await createTestVendor(org.id, { name: 'Inside Fourteen' });
+    const middle = await createTestVendor(org.id, { name: 'Between Windows' });
+    await approvedCoi(inside, 10);
+    await approvedCoi(middle, 20);
+
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { expiringWindowDays: 14 },
+    });
+    expect(namesIn((await overview()).buckets.expiringSoon)).toEqual(['Inside Fourteen']);
+
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { expiringWindowDays: 45 },
+    });
+    expect(namesIn((await overview()).buckets.expiringSoon)).toEqual([
+      'Inside Fourteen',
+      'Between Windows',
+    ]);
+  });
+
+  it('counts the saved window boundary as expiring and the next day as not', async () => {
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { expiringWindowDays: 14 },
+    });
+    const edge = await createTestVendor(org.id, { name: 'On The Window' });
+    const outside = await createTestVendor(org.id, { name: 'Just Outside Window' });
+    await approvedCoi(edge, 14);
+    await approvedCoi(outside, 15);
+
+    const { buckets, expiringSoonDays } = await overview();
+    expect(expiringSoonDays).toBe(14);
+    expect(namesIn(buckets.expiringSoon)).toEqual(['On The Window']);
+  });
+
+  it('a window of 0 does not mark anyone expiring soon, and a past date stays expired', async () => {
+    const soon = await createTestVendor(org.id, { name: 'Would Have Been Soon' });
+    const gone = await createTestVendor(org.id, { name: 'Already Expired' });
+    await approvedCoi(soon, 10);
+    await approvedCoi(gone, -2);
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { expiringWindowDays: 0 },
+    });
+
+    const { buckets } = await overview();
+    expect(buckets.expiringSoon).toHaveLength(0);
+    expect(namesIn(buckets.expired)).toEqual(['Already Expired']);
+  });
+
+  it('ignores an expiration that sits only on a line the org switched off', async () => {
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { minUmbrella: 0, expiringWindowDays: 30 },
+    });
+    const vendor = await createTestVendor(org.id, { name: 'Optional Only' });
+    await createTestCoi(vendor.id, org.id, {
+      status: 'APPROVED',
+      submittedAt: daysAgo(30, NOW),
+      umbExpirationDate: daysFromNow(5, NOW),
+    });
+
+    const { buckets } = await overview();
+    expect(namesIn(buckets.expiringSoon)).not.toContain('Optional Only');
+    expect(namesIn(buckets.expired)).not.toContain('Optional Only');
   });
 });

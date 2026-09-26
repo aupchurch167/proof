@@ -5,6 +5,12 @@ const { authenticateVerified: authenticate } = require('../middleware/auth');
 const { downloadFile } = require('../services/storage');
 const { buildTimeline } = require('../services/coverageTimeline');
 const { COVERAGE_LINES } = require('../services/coverage');
+const {
+  COVERAGE_CHECKS,
+  expiringWindowDays,
+  lineIsRequired,
+  isExpiringSoon,
+} = require('../services/complianceRules');
 
 const router = express.Router();
 
@@ -183,23 +189,40 @@ router.get('/cois', authenticate, async (req, res) => {
 });
 
 // GET /api/reports/expiring
+// With no `days` query, the window is the org's expiringWindowDays (0 returns
+// nothing). An explicit `days` value is a one-off range and still ignores
+// coverage lines the org has switched off.
 router.get('/expiring', authenticate, async (req, res) => {
   try {
-    const daysAhead = parseInt(req.query.days) || 30;
-    const futureDate = new Date();
-    futureDate.setDate(futureDate.getDate() + daysAhead);
+    const settings = await prisma.organizationSettings.findUnique({
+      where: { orgId: req.user.orgId },
+    });
+    let daysAhead;
+    if (req.query.days !== undefined && req.query.days !== '') {
+      daysAhead = parseInt(req.query.days, 10);
+      if (!Number.isFinite(daysAhead) || daysAhead < 0) {
+        return res.status(400).json({ error: 'days must be a non-negative integer' });
+      }
+    } else {
+      daysAhead = expiringWindowDays(settings);
+    }
+    if (!(daysAhead > 0)) return res.json([]);
+
+    const requiredFields = COVERAGE_CHECKS
+      .filter((check) => lineIsRequired(settings?.[check.setting]))
+      .map((check) => check.expiration);
+    if (requiredFields.length === 0) return res.json([]);
+
+    const now = new Date();
+    const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const until = new Date(now.getTime() + (daysAhead + 1) * 24 * 60 * 60 * 1000);
 
     const cois = await prisma.coi.findMany({
       where: {
         orgId: req.user.orgId,
         deletedAt: null,
         status: 'APPROVED',
-        OR: [
-          { glExpirationDate: { lte: futureDate, gte: new Date() } },
-          { wcExpirationDate: { lte: futureDate, gte: new Date() } },
-          { umbExpirationDate: { lte: futureDate, gte: new Date() } },
-          { autoExpirationDate: { lte: futureDate, gte: new Date() } },
-        ],
+        OR: requiredFields.map((field) => ({ [field]: { gte: since, lte: until } })),
       },
       include: {
         vendor: { select: { id: true, name: true, email: true } },
@@ -207,7 +230,10 @@ router.get('/expiring', authenticate, async (req, res) => {
       orderBy: { glExpirationDate: 'asc' },
     });
 
-    res.json(cois);
+    const expiring = cois.filter((coi) =>
+      requiredFields.some((field) => isExpiringSoon(coi[field], daysAhead, now)));
+
+    res.json(expiring);
   } catch (err) {
     res.status(500).json({ error: 'Failed to get expiring COIs' });
   }

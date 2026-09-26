@@ -36,12 +36,17 @@ const VENDOR_INCLUDE = {
   },
 };
 
-function toSerializerOpts(vendor, detail) {
+function toSerializerOpts(vendor, detail, settings) {
   return {
     latestApprovedCoi: vendor.cois?.[0] || null,
     lastRequestedAt: vendor.notifications?.[0]?.sentAt || null,
     detail,
+    settings,
   };
+}
+
+function loadSettings(orgId) {
+  return prisma.organizationSettings.findUnique({ where: { orgId } });
 }
 
 // GET /api/v1/orgs/:orgSlug/vendors — list/search vendors (bid-package picker).
@@ -99,10 +104,11 @@ router.get('/', requireScope(SCOPES.VENDORS_READ), async (req, res) => {
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
     const nextCursor = hasMore && last ? encodeCursor({ name: last.name, id: last.id }) : null;
+    const settings = await loadSettings(req.org.id);
 
     return paginated(
       res,
-      page.map((v) => serializeVendor(v, toSerializerOpts(v, false))),
+      page.map((v) => serializeVendor(v, toSerializerOpts(v, false, settings))),
       nextCursor,
       hasMore
     );
@@ -121,7 +127,8 @@ router.get('/:vendorId', requireScope(SCOPES.VENDORS_READ), async (req, res) => 
     });
     if (!vendor) return errors.notFound(res, 'vendor_not_found', 'Vendor not found');
 
-    return data(res, serializeVendor(vendor, toSerializerOpts(vendor, true)));
+    const settings = await loadSettings(req.org.id);
+    return data(res, serializeVendor(vendor, toSerializerOpts(vendor, true, settings)));
   } catch (err) {
     console.error('[API v1] get vendor error:', err);
     return errors.server(res);

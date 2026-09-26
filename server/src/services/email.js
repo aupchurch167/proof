@@ -198,7 +198,10 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
     expired,
     noCoi,
     urgentVendors,
+    expiringWindowDays,
   } = summary;
+  const windowDays = Number.isFinite(Number(expiringWindowDays)) ? Math.trunc(Number(expiringWindowDays)) : 30;
+  const expiringLabel = windowDays > 0 ? `Expiring within ${windowDays} days` : 'Expiring soon';
 
   const urgentRows = urgentVendors.map((v) => {
     const statusColor = v.daysUntil <= 0 ? '#dc2626' : '#d97706';
@@ -265,7 +268,7 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
        <div style="background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;padding:16px;margin-bottom:24px;">
          <table style="width:100%;font-size:14px;border-collapse:collapse;">
            <tr>
-             <td style="padding:6px 0;color:#374151;">Expiring within 30 days</td>
+             <td style="padding:6px 0;color:#374151;">${expiringLabel}</td>
              <td style="padding:6px 0;text-align:right;font-weight:600;color:${expiringSoon > 0 ? '#d97706' : '#6b7280'};">${expiringSoon}</td>
            </tr>
            <tr>

@@ -8,6 +8,7 @@ const {
   createTestOrg,
   createTestUser,
   createTestVendor,
+  createTestCoi,
   getAuthToken,
   cleanupTestData,
 } = require('./setup');
@@ -352,6 +353,49 @@ describe('A2-05 / L-02 apply slug only + plan limit', () => {
       .field('address', '1 Main');
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('PLAN_LIMIT_EXCEEDED');
+  });
+
+  it('POST /api/apply/:slug at the COI cap returns PLAN_LIMIT_EXCEEDED', async () => {
+    const plans = require('../src/config/plans');
+    const spy = jest.spyOn(plans, 'getPlanLimits').mockReturnValue({ maxVendors: 50, maxCois: 1 });
+    try {
+      const org = await createTestOrg({ name: 'Coi Capped', slug: `coicap-${Date.now()}`, plan: 'FREE' });
+      const vendor = await createTestVendor(org.id, { email: `keep-${Date.now()}@test.com` });
+      await createTestCoi(vendor.id, org.id);
+      const before = await prisma.vendor.count({ where: { orgId: org.id } });
+
+      const res = await request(app)
+        .post(`/api/apply/${org.slug}`)
+        .field('name', 'Blocked Apply')
+        .field('email', `blocked-${Date.now()}@test.com`)
+        .field('phone', '555-0100')
+        .field('address', '1 Main')
+        .attach('coi', Buffer.from('%PDF-1.4\n%EOF\n'), 'coi.pdf');
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('PLAN_LIMIT_EXCEEDED');
+      expect(await prisma.vendor.count({ where: { orgId: org.id } })).toBe(before);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('a soft-deleted certificate does not consume the COI cap apply checks', async () => {
+    const plans = require('../src/config/plans');
+    const { evaluatePlanLimit } = require('../src/middleware/planLimits');
+    const spy = jest.spyOn(plans, 'getPlanLimits').mockReturnValue({ maxVendors: 50, maxCois: 1 });
+    try {
+      const org = await createTestOrg({ name: 'Soft Cap', slug: `softcap-${Date.now()}`, plan: 'FREE' });
+      const vendor = await createTestVendor(org.id, { email: `soft-${Date.now()}@test.com` });
+      const coi = await createTestCoi(vendor.id, org.id);
+      await prisma.coi.update({ where: { id: coi.id }, data: { deletedAt: new Date() } });
+
+      const result = await evaluatePlanLimit(org.id, 'coi');
+      expect(result.ok).toBe(true);
+      expect(result.current).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

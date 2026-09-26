@@ -60,7 +60,7 @@ router.get('/usage', authenticate, async (req, res) => {
 
     const [vendorCount, coiCount, sampleVendor] = await Promise.all([
       prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } }),
-      prisma.coi.count({ where: { orgId: req.user.orgId } }),
+      prisma.coi.count({ where: { orgId: req.user.orgId, deletedAt: null } }),
       req.user.role === 'ADMIN'
         ? prisma.vendor.findFirst({
           where: { orgId: req.user.orgId, deletedAt: null },
