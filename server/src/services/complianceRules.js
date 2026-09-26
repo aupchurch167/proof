@@ -66,7 +66,7 @@ const SUFFIX_OF = {
 // Words that follow a matched name on a real certificate and are not part of
 // a different company's name.
 const TRAILING_STARTERS = new Set([
-  'isaoa', 'atima', 'its', 'dba', 'attn', 'attention',
+  'isaoa', 'atima', 'its', 'dba', 'careof', 'attn', 'attention',
   'po', 'pobox', 'suite', 'ste', 'apt', 'unit', 'floor', 'fl',
 ]);
 
@@ -75,6 +75,7 @@ function partyTokens(value) {
   const rough = String(value)
     .toLowerCase()
     .replace(/&/g, ' and ')
+    .replace(/\bc\s*\/\s*o\b/g, ' careof ')
     .replace(/['’]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
@@ -120,15 +121,20 @@ function isBareOrFragment(tokens) {
 }
 
 // After the company name, a legal suffix may appear, then boilerplate
-// (an address, ISAOA/ATIMA, "its subsidiaries...", "d/b/a ..."). Another
-// business word ("Supply") is a different company.
+// (an address, ISAOA/ATIMA, "and/or ...", "and subsidiaries", "c/o ...",
+// "d/b/a ..."). Another business word ("Supply", "Services") is a different company.
 function remainderIsExtra(tokens) {
   let i = 0;
   while (i < tokens.length && SUFFIX_OF[tokens[i]]) i += 1;
   if (i >= tokens.length) return true;
   if (/^\d/.test(tokens[i])) return true;
   if (TRAILING_STARTERS.has(tokens[i])) return true;
-  if (tokens[i] === 'and' && tokens[i + 1] === 'its') return true;
+  if (tokens[i] === 'and') {
+    const next = tokens[i + 1];
+    // "and/or ...", "and its affiliates", "and subsidiaries".
+    // "and Heating" is still a different company.
+    if (next === 'or' || next === 'its' || next === 'subsidiaries' || next === 'affiliates') return true;
+  }
   return false;
 }
 

@@ -400,6 +400,19 @@ describe('requirement switches', () => {
       'Acme Construction'
     )).toBe(true);
     expect(holderMatches('Acme Construction d/b/a Ace Builders', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction, LLC and/or ISAOA/ATIMA', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction, LLC and/or ISAOA/ATIMA 123 Main Street', 'Acme Construction')).toBe(true);
+    expect(holderMatches('ACME CONSTRUCTION LLC AND/OR ISAOA ATIMA\n123 MAIN STREET', 'Acme Construction')).toBe(true);
+    expect(holderMatches('ACME CONSTRUCTION LLC AND/OR\nISAOA/ATIMA\n123 MAIN STREET', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction and/or its subsidiaries and affiliates', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction and/or its subsidiaries\n123 Main Street', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction and subsidiaries', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction and subsidiaries 500 West 2nd Street', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction and its affiliates', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction and its affiliates\nPO Box 10', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction c/o Risk Management', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction c/o Risk Management 100 Congress Ave', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction, LLC\nc/o Risk Management\n123 Main Street', 'Acme Construction')).toBe(true);
     expect(holderMatches(
       'ISAOA/ATIMA\nAcme Construction, LLC\n100 Congress Ave',
       'Acme Construction'
@@ -422,6 +435,8 @@ describe('requirement switches', () => {
     expect(holderMatches('Inc', 'Acme, Inc.')).toBe(false);
     expect(holderMatches('Acme', 'Acme Construction')).toBe(false);
     expect(holderMatches('Acme Construction', 'Acme')).toBe(false);
+    expect(holderMatches('Acme Construction Services', 'Acme Construction')).toBe(false);
+    expect(holderMatches('Acme Construction Services LLC', 'Acme Construction')).toBe(false);
     expect(holderMatches('Smith Plumbing Supply', 'Smith Plumbing')).toBe(false);
     expect(holderMatches('Smith Plumbing', 'Smith Plumbing Supply')).toBe(false);
     expect(holderMatches('Other Builders LLC', 'Acme Construction')).toBe(false);
