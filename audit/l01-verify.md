@@ -2,14 +2,14 @@
 
 **Final verdict: PASS WITH NOTES**
 
-**Implementation under test:** [PR #25](https://github.com/aupchurch167/proof/pull/25), commit `8fcd64a` (second follow-up, on top of `2ad214c` and `0d71571`), branch `cursor/l01-requirement-compliance-6c4e`.
+**Implementation under test:** [PR #25](https://github.com/aupchurch167/proof/pull/25), commit `f25a2c9` (on top of `8fcd64a`, `2ad214c`, and `0d71571`), branch `cursor/l01-requirement-compliance-6c4e`.
 **Spec:** `audit/launch-batches.md`, section L01.
 **Checked against:** `origin/main` at `6b87de5`.
 **Product code changed by this verification:** none.
 
-The second follow-up makes a legal suffix optional and ignores the usual certificate boilerplate after the company name. "Acme Construction, LLC" matches "Acme Construction". Ltd matches Limited. A street number, ISAOA/ATIMA, "d/b/a", or "its subsidiaries" after the name is ignored, including when the name is on a later line of the holder block. "Acme Construction Services" does not match "Acme Construction", and "Smith Plumbing Supply" does not match "Smith Plumbing". A name in the middle of a line, or tucked inside another word, does not match. The vendor page now says why a holder failed, and it escapes that text. Server tests: 27 suites, 329 passed. Client production build passed.
+The latest follow-up treats "and/or ISAOA/ATIMA", "and/or its subsidiaries", "and subsidiaries", "and its affiliates", and "c/o" as boilerplate, whether the address is on that line or the next. "Acme Construction Services" still fails against "Acme Construction". "Smith Plumbing Supply" still fails against "Smith Plumbing". "Acme Construction and Sons" fails. Server tests: 27 suites, 329 passed. The new holder cases are extra assertions inside two existing tests, so the count did not rise. Client production build passed.
 
-One clause still fails on real certificates: "AND/OR ISAOA/ATIMA" written on the company-name line. A few address words ("floor", "FL", "suite", "unit") also cut the comparison short, so a longer different name that starts with those words can match. Details are in the second re-verify section. The sections below it are the record of `2ad214c` and `0d71571`.
+One new shortcut remains: after "and", the words "or", "its", "subsidiaries", and "affiliates" drop the rest of the line, so "Acme Construction & Affiliates Roofing" matches "Acme Construction". "Floor", "FL", "suite", and "unit" still do the same. A different legal suffix on the same words still matches. Names shorter than three characters still never match. Details are in the final section. Earlier sections are the record of `8fcd64a`, `2ad214c`, and `0d71571`.
 
 ## Re-verify (commit `8fcd64a`)
 
@@ -93,9 +93,9 @@ The vendor list still copies only the first coverage-chip sentence (`vendors.js:
 
 Caps still count `deletedAt: null` (`server/src/middleware/planLimits.js:39`). `DELETE /api/cois/:id` still hard-deletes the row and the file (`server/src/routes/cois.js:320-323`); that path is unchanged and is L10. The recompute script is still absent from boot. Unchanged residuals from the earlier passes: inbound email can create a certificate without the cap check; the reports table still colors dates at 30 days; CSV import still omits the holder; webhook `expiresAt` still uses the earliest date on any line; a required line with no amount, date, or policy is still omitted from partner-API `coverages[]` while the vendor badge follows the shared rule.
 
-### Recommendation
+### Recommendation (commit `8fcd64a`)
 
-Merge PR #25. The prefix cases that were likely to mark the wrong company compliant do not. Before the one-time script, know that a holder line ending in "and/or ISAOA/ATIMA" will come back non-compliant even when the company name is right, and that "Floor", "FL", "Suite", or "Unit" immediately after the name will be treated as boilerplate.
+This recommendation applied to `8fcd64a`. The "and/or ISAOA/ATIMA" miss described here is fixed in `f25a2c9`. At this commit, "Floor", "FL", "Suite", or "Unit" immediately after the name was already treated as boilerplate.
 
 ## Re-verify (commit `2ad214c`)
 
@@ -395,3 +395,29 @@ Saving requirements re-checks `where: { orgId: req.user.orgId }` only (`server/s
 ## Recommendation (first pass, superseded)
 
 This recommendation applied to `0d71571` only. The follow-up at `2ad214c` is what to merge. See the re-verify section above.
+
+## Final re-verify (commit `f25a2c9`)
+
+**Verdict: PASS WITH NOTES**
+
+Commit `f25a2c9` ("L01 follow-up: treat and/or and c/o holder tails as boilerplate"). Two files: `server/src/services/complianceRules.js` and `server/tests/compliance.test.js`. No product code was changed by this review.
+
+`remainderIsExtra` (`complianceRules.js:132-137`) now accepts "and" when the next word is "or", "its", "subsidiaries", or "affiliates", and stops there. "c/o" is rewritten to `careof` (`complianceRules.js:78`) and listed in `TRAILING_STARTERS` (`complianceRules.js:69`).
+
+Checked with `holderMatches` and `evaluateCompliance` (ample general liability, switch on). These are `COMPLIANT`, with the address on the same line and on the next line:
+
+- "Acme Construction, LLC and/or ISAOA/ATIMA" and the same line plus "123 Main Street, Austin, TX 78701". Also "AND/OR" at the end of the name line, with ISAOA/ATIMA and the street on the following lines.
+- "and/or its subsidiaries", "and subsidiaries", "& subsidiaries", and "and its affiliates", each with a street or PO Box on that line and on the next line.
+- "c/o Risk Management" on the name line, with "100 Congress Ave" on that line, and with "c/o" on its own line above the street. "c / o" and "C/O" match the same way. The name after "c/o" does not itself match ("Acme Construction c/o Smith Plumbing Supply" fails against "Smith Plumbing Supply").
+
+These stay `NON_COMPLIANT`:
+
+- "Acme Construction Services" and "Acme Construction Services LLC", including with a street on the next line, against "Acme Construction".
+- "Smith Plumbing Supply" against "Smith Plumbing", and the reverse.
+- "Acme Construction and Sons", "Acme Construction & Sons", and "Acme Construction and Heating".
+
+**Low — "and affiliates" (and "and/or", "and subsidiaries") ignore every word after that pair.** "Acme Construction & Affiliates Roofing" and "Acme Construction and Affiliates Roofing, LLC" match "Acme Construction" (`COMPLIANT`). "Acme Construction and/or Roofing" matches the same way. The second company on that line does not match: "Acme Construction and/or Smith Plumbing Supply" fails against "Smith Plumbing Supply".
+
+The new assertions are inside the existing tests "matches a holder that differs only by case, spacing, punctuation, or suffix spelling" (`compliance.test.js:403-415`, 13 expects) and "does not treat a bare suffix or a short fragment as a holder match" (`compliance.test.js:438-439`, the Services cases). No new `it` was added. `npm test`: **27 suites, 329 tests, passed** (14.3s). `npm run build`: **passed** (`dist/assets/index-CDwMtk2y.js`).
+
+Notes carried forward from `8fcd64a`, still true on this commit: "Floor" / "FL" / "suite" / "unit" end the comparison immediately; "Acme Construction, Inc." matches "Acme Construction LLC"; "GE" and "3M Company" never match; the vendor list still omits a holder-only reason.
