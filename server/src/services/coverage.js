@@ -72,15 +72,21 @@ function coverageFor(coi, settings, { now = new Date() } = {}) {
   });
 }
 
-// The one-line reason behind a vendor's status pill ("Gap · Workers' comp
-// missing"), used on the vendor detail header and in the dashboard queue.
+const FAILURE_HOW = { missing: 'missing', under: 'under limit', expired: 'expired' };
+
+// Every coverage line that failed, in chip order. The vendor page lists these
+// next to a holder mismatch instead of keeping only the first one.
+function coverageFailureReasons(coverages) {
+  return (coverages || [])
+    .filter((c) => FAILURE_HOW[c.verdict])
+    .map((c) => `${c.label} ${FAILURE_HOW[c.verdict]}`);
+}
+
+// The one-line reason behind a vendor's status ("Workers' comp missing").
 function coverageReason(coverages) {
-  const problem = coverages.find((c) => c.verdict === 'missing' || c.verdict === 'under' || c.verdict === 'expired');
-  if (problem) {
-    const how = { missing: 'missing', under: 'under limit', expired: 'expired' }[problem.verdict];
-    return `${problem.label} ${how}`;
-  }
-  const soon = coverages.find((c) => c.verdict === 'expiring');
+  const failures = coverageFailureReasons(coverages);
+  if (failures.length) return failures[0];
+  const soon = (coverages || []).find((c) => c.verdict === 'expiring');
   if (soon) return `${soon.label} expires ${soon.expiresAt}`;
   return null;
 }
@@ -91,5 +97,6 @@ module.exports = {
   VERDICT_TONE,
   coverageFor,
   coverageReason,
+  coverageFailureReasons,
   centsToDollars,
 };

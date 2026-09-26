@@ -385,6 +385,25 @@ describe('requirement switches', () => {
     expect(holderMatches('Acme  Construction', 'Acme Construction')).toBe(true);
     expect(holderMatches('  ACME CONSTRUCTION  ', 'acme construction')).toBe(true);
     expect(holderMatches('Smith & Sons', 'Smith and Sons')).toBe(true);
+    expect(holderMatches('Acme Construction, LLC', 'Acme Construction')).toBe(true);
+    expect(holderMatches('Acme Construction', 'Acme Construction LLC')).toBe(true);
+    expect(holderMatches('Acme Ltd', 'Acme Limited')).toBe(true);
+    expect(holderMatches('Acme Limited', 'Acme Ltd')).toBe(true);
+    expect(holderMatches('Baker Co', 'Baker Company')).toBe(true);
+    expect(holderMatches(
+      'Acme Construction, LLC\n123 Main Street\nAustin, TX 78701',
+      'Acme Construction'
+    )).toBe(true);
+    expect(holderMatches('Acme Construction LLC ISAOA/ATIMA', 'Acme Construction')).toBe(true);
+    expect(holderMatches(
+      'Acme Construction, LLC, its subsidiaries and affiliates',
+      'Acme Construction'
+    )).toBe(true);
+    expect(holderMatches('Acme Construction d/b/a Ace Builders', 'Acme Construction')).toBe(true);
+    expect(holderMatches(
+      'ISAOA/ATIMA\nAcme Construction, LLC\n100 Congress Ave',
+      'Acme Construction'
+    )).toBe(true);
 
     const orgName = 'Acme Construction LLC';
     const matched = evaluateCompliance(
@@ -402,7 +421,10 @@ describe('requirement switches', () => {
     expect(holderMatches('A', 'Acme Construction')).toBe(false);
     expect(holderMatches('Inc', 'Acme, Inc.')).toBe(false);
     expect(holderMatches('Acme', 'Acme Construction')).toBe(false);
-    expect(holderMatches('Acme Construction, LLC', 'Acme Construction')).toBe(false);
+    expect(holderMatches('Acme Construction', 'Acme')).toBe(false);
+    expect(holderMatches('Smith Plumbing Supply', 'Smith Plumbing')).toBe(false);
+    expect(holderMatches('Smith Plumbing', 'Smith Plumbing Supply')).toBe(false);
+    expect(holderMatches('Other Builders LLC', 'Acme Construction')).toBe(false);
 
     const suffixOnly = evaluateCompliance(
       certificate({ certificateHolderName: 'LLC' }),
@@ -429,6 +451,32 @@ describe('requirement switches', () => {
     );
     expect(blank.status).toBe('NON_COMPLIANT');
     expect(blank.flags.some((flag) => flag.type === 'MISSING' && flag.field === 'certificateHolderName')).toBe(true);
+
+    const supply = evaluateCompliance(
+      certificate({ certificateHolderName: 'Smith Plumbing Supply' }),
+      baseSettings,
+      'Smith Plumbing',
+      { now: NOW }
+    );
+    expect(supply.status).toBe('NON_COMPLIANT');
+
+    const prefix = evaluateCompliance(
+      certificate({ certificateHolderName: 'Acme' }),
+      baseSettings,
+      'Acme Construction',
+      { now: NOW }
+    );
+    expect(prefix.status).toBe('NON_COMPLIANT');
+
+    const withAddress = evaluateCompliance(
+      certificate({
+        certificateHolderName: 'Acme Construction, LLC\n123 Main Street\nISAOA/ATIMA',
+      }),
+      baseSettings,
+      'Acme Construction',
+      { now: NOW }
+    );
+    expect(withAddress.status).toBe('COMPLIANT');
   });
 
   it('fails a holder mismatch or a blank holder only when the switch is on', () => {
@@ -513,6 +561,34 @@ describe('requirement switches', () => {
     await updateVendorStatus(prisma, vendor.id, org.id, { now: NOW });
     const row = await prisma.vendor.findUnique({ where: { id: vendor.id } });
     expect(row.coiStatus).toBe('COMPLIANT');
+  });
+
+  it('shows the holder text and other failures on the vendor page', async () => {
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { minUmbrella: 0, requireHolderMatch: true },
+    });
+    const later = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+    const vendor = await createTestVendor(org.id, { name: 'Holder Gap' });
+    await createTestCoi(vendor.id, org.id, {
+      status: 'APPROVED',
+      certificateHolderName: 'Somebody Else LLC',
+      glCoverageAmount: 100,
+      glExpirationDate: later,
+      wcCoverageAmount: 100000000,
+      wcExpirationDate: later,
+      autoCoverageAmount: 200000000,
+      autoExpirationDate: later,
+    });
+
+    const res = await request(app)
+      .get(`/api/vendors/${vendor.id}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.statusReason).toContain("Certificate holder doesn't match your company name");
+    expect(res.body.statusReason).toContain('Somebody Else LLC');
+    expect(res.body.statusReason).toContain('General liability under limit');
   });
 });
 

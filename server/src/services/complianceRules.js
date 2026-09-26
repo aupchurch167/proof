@@ -49,9 +49,9 @@ function isExpiringSoon(date, windowDays, now) {
   return days >= 0 && days <= windowDays;
 }
 
-// Spelling variants of the same legal suffix compare as the same token.
-// The suffix stays part of the name: "Acme LLC" does not equal "Acme".
-const SUFFIX_CANON = {
+// Trailing legal suffixes. Equivalents share a group. A suffix in the middle
+// of a name ("Company Store") is left alone.
+const SUFFIX_OF = {
   llc: 'llc',
   inc: 'inc',
   incorporated: 'inc',
@@ -59,16 +59,19 @@ const SUFFIX_CANON = {
   company: 'co',
   corp: 'corp',
   corporation: 'corp',
+  ltd: 'ltd',
+  limited: 'ltd',
 };
 
-const CANONICAL_SUFFIXES = new Set(Object.values(SUFFIX_CANON));
+// Words that follow a matched name on a real certificate and are not part of
+// a different company's name.
+const TRAILING_STARTERS = new Set([
+  'isaoa', 'atima', 'its', 'dba', 'attn', 'attention',
+  'po', 'pobox', 'suite', 'ste', 'apt', 'unit', 'floor', 'fl',
+]);
 
-// Lowercase, collapse whitespace, drop punctuation, and spell suffixes the
-// same way on both sides. "Acme Construction, LLC" and "Acme Construction LLC"
-// become the same string. A bare suffix or a one- or two-character fragment
-// is not a name and never matches.
-function normalizePartyName(value) {
-  if (value == null) return '';
+function partyTokens(value) {
+  if (value == null) return [];
   const rough = String(value)
     .toLowerCase()
     .replace(/&/g, ' and ')
@@ -88,27 +91,65 @@ function normalizePartyName(value) {
         j += 1;
       }
       if (j > i + 1) {
-        tokens.push(SUFFIX_CANON[letters] || letters);
+        tokens.push(letters);
         i = j;
         continue;
       }
     }
-    tokens.push(SUFFIX_CANON[rough[i]] || rough[i]);
+    tokens.push(rough[i]);
     i += 1;
   }
-  return tokens.join(' ');
+  return tokens;
 }
 
-function isBareOrFragment(normalized) {
-  if (!normalized || normalized.length < 3) return true;
-  return normalized.split(' ').every((token) => CANONICAL_SUFFIXES.has(token));
+function normalizePartyName(value) {
+  return partyTokens(value).join(' ');
 }
 
+function stripTrailingSuffixes(tokens) {
+  const out = tokens.slice();
+  while (out.length > 0 && SUFFIX_OF[out[out.length - 1]]) out.pop();
+  return out;
+}
+
+function isBareOrFragment(tokens) {
+  if (!tokens || tokens.length === 0) return true;
+  const text = tokens.join(' ');
+  if (text.length < 3) return true;
+  return tokens.every((token) => SUFFIX_OF[token]);
+}
+
+// After the company name, a legal suffix may appear, then boilerplate
+// (an address, ISAOA/ATIMA, "its subsidiaries...", "d/b/a ..."). Another
+// business word ("Supply") is a different company.
+function remainderIsExtra(tokens) {
+  let i = 0;
+  while (i < tokens.length && SUFFIX_OF[tokens[i]]) i += 1;
+  if (i >= tokens.length) return true;
+  if (/^\d/.test(tokens[i])) return true;
+  if (TRAILING_STARTERS.has(tokens[i])) return true;
+  if (tokens[i] === 'and' && tokens[i + 1] === 'its') return true;
+  return false;
+}
+
+function lineStartsWithCompany(lineTokens, orgCore) {
+  if (lineTokens.length < orgCore.length) return false;
+  for (let i = 0; i < orgCore.length; i += 1) {
+    if (lineTokens[i] !== orgCore[i]) return false;
+  }
+  return remainderIsExtra(lineTokens.slice(orgCore.length));
+}
+
+// The holder matches when any line of the holder block starts with the
+// company's full name. A legal suffix is optional on either side. Trailing
+// address or certificate boilerplate is ignored. A longer different name
+// ("Smith Plumbing Supply") does not match the shorter one.
 function holderMatches(holderName, orgName) {
-  const holderNorm = normalizePartyName(holderName);
-  const orgNorm = normalizePartyName(orgName);
-  if (isBareOrFragment(holderNorm) || isBareOrFragment(orgNorm)) return false;
-  return holderNorm === orgNorm;
+  const orgCore = stripTrailingSuffixes(partyTokens(orgName));
+  if (isBareOrFragment(orgCore)) return false;
+
+  const lines = String(holderName == null ? '' : holderName).split(/\r?\n/);
+  return lines.some((line) => lineStartsWithCompany(partyTokens(line), orgCore));
 }
 
 /**
@@ -252,6 +293,23 @@ function complianceIssue(result) {
   return null;
 }
 
+// Holder text for the vendor page. Coverage failures stay with the chips.
+function holderDetailReason(result) {
+  if (!result) return null;
+  const holderMissing = result.flags.find(
+    (flag) => flag.type === 'MISSING' && flag.field === 'certificateHolderName'
+  );
+  if (holderMissing) return 'Certificate holder name is missing';
+  const mismatch = result.flags.find((flag) => flag.type === 'ADDITIONALLY_INSURED_MISMATCH');
+  if (!mismatch) return null;
+  const found = mismatch.actual == null
+    ? ''
+    : String(mismatch.actual).trim().replace(/\s*\n\s*/g, ' / ');
+  return found
+    ? `Certificate holder doesn't match your company name (found: ${found})`
+    : "Certificate holder doesn't match your company name";
+}
+
 // Earliest expiration among lines the org actually requires. Optional lines
 // (minimum 0) do not pull a vendor into the expiring or expired bucket.
 function earliestRequiredExpiration(coi, settings) {
@@ -278,5 +336,6 @@ module.exports = {
   verdictForLine,
   evaluateCompliance,
   complianceIssue,
+  holderDetailReason,
   earliestRequiredExpiration,
 };

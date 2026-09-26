@@ -180,9 +180,12 @@ export default function VendorDetail() {
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-[28px] font-extrabold tracking-[-0.03em] text-navy">{vendor.name}</h1>
             <StatusPill tone={status.tone} className="!text-xs !px-2.5 !py-1">
-              {status.label}{vendor.statusReason ? ` · ${vendor.statusReason}` : ''}
+              {status.label}
             </StatusPill>
           </div>
+          {vendor.statusReason && (
+            <p className="text-[13px] leading-snug text-bad-text max-w-3xl">{vendor.statusReason}</p>
+          )}
           <div className="flex gap-4 flex-wrap text-[13px] text-ink-2">
             {[vendor.trade, vendor.contactName, vendor.email, vendor.phone].filter(Boolean).map((bit, i) => (
               <span key={i}>{bit}</span>
