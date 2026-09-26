@@ -1,7 +1,7 @@
 // Single compliance definition for the vendor badge, coverage chips, the
-// compliance overview, the weekly summary's expiring bucket, and API coverage
-// status. Callers must not keep a second copy of "is this line required?",
-// "does the holder match?", or "is this date inside the warn window?".
+// dashboard queue, the weekly summary, and API coverage lines. Callers must
+// not keep a second copy of "is this line required?", "does the holder
+// match?", or "is this date inside the warn window?".
 
 const { daysUntil } = require('./reminders');
 
@@ -49,12 +49,66 @@ function isExpiringSoon(date, windowDays, now) {
   return days >= 0 && days <= windowDays;
 }
 
+// Spelling variants of the same legal suffix compare as the same token.
+// The suffix stays part of the name: "Acme LLC" does not equal "Acme".
+const SUFFIX_CANON = {
+  llc: 'llc',
+  inc: 'inc',
+  incorporated: 'inc',
+  co: 'co',
+  company: 'co',
+  corp: 'corp',
+  corporation: 'corp',
+};
+
+const CANONICAL_SUFFIXES = new Set(Object.values(SUFFIX_CANON));
+
+// Lowercase, collapse whitespace, drop punctuation, and spell suffixes the
+// same way on both sides. "Acme Construction, LLC" and "Acme Construction LLC"
+// become the same string. A bare suffix or a one- or two-character fragment
+// is not a name and never matches.
+function normalizePartyName(value) {
+  if (value == null) return '';
+  const rough = String(value)
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const tokens = [];
+  for (let i = 0; i < rough.length;) {
+    if (rough[i].length === 1) {
+      let j = i;
+      let letters = '';
+      while (j < rough.length && rough[j].length === 1) {
+        letters += rough[j];
+        j += 1;
+      }
+      if (j > i + 1) {
+        tokens.push(SUFFIX_CANON[letters] || letters);
+        i = j;
+        continue;
+      }
+    }
+    tokens.push(SUFFIX_CANON[rough[i]] || rough[i]);
+    i += 1;
+  }
+  return tokens.join(' ');
+}
+
+function isBareOrFragment(normalized) {
+  if (!normalized || normalized.length < 3) return true;
+  return normalized.split(' ').every((token) => CANONICAL_SUFFIXES.has(token));
+}
+
 function holderMatches(holderName, orgName) {
-  if (holderName == null || orgName == null) return false;
-  const holderNorm = String(holderName).toLowerCase().trim();
-  const orgNorm = String(orgName).toLowerCase().trim();
-  if (!holderNorm || !orgNorm) return false;
-  return holderNorm.includes(orgNorm) || orgNorm.includes(holderNorm);
+  const holderNorm = normalizePartyName(holderName);
+  const orgNorm = normalizePartyName(orgName);
+  if (isBareOrFragment(holderNorm) || isBareOrFragment(orgNorm)) return false;
+  return holderNorm === orgNorm;
 }
 
 /**
@@ -178,6 +232,26 @@ function evaluateCompliance(extractedData, settings, orgName, { now = new Date()
   return { windowDays, requireHolder, flags, lines, status };
 }
 
+// One-line reason for a failing evaluation, shared by the dashboard queue and
+// the weekly email so they describe the same failure the badge used.
+function complianceIssue(result) {
+  if (!result) return null;
+  const holderMissing = result.flags.find(
+    (flag) => flag.type === 'MISSING' && flag.field === 'certificateHolderName'
+  );
+  if (holderMissing) return 'Certificate holder missing';
+  const mismatch = result.flags.find((flag) => flag.type === 'ADDITIONALLY_INSURED_MISMATCH');
+  if (mismatch) return 'Certificate holder does not match';
+  const problem = result.lines.find(
+    (line) => line.verdict === 'missing' || line.verdict === 'under' || line.verdict === 'expired'
+  );
+  if (problem) {
+    const how = { missing: 'missing', under: 'under limit', expired: 'expired' }[problem.verdict];
+    return `${problem.label} ${how}`;
+  }
+  return null;
+}
+
 // Earliest expiration among lines the org actually requires. Optional lines
 // (minimum 0) do not pull a vendor into the expiring or expired bucket.
 function earliestRequiredExpiration(coi, settings) {
@@ -199,8 +273,10 @@ module.exports = {
   lineIsRequired,
   isExpiredDate,
   isExpiringSoon,
+  normalizePartyName,
   holderMatches,
   verdictForLine,
   evaluateCompliance,
+  complianceIssue,
   earliestRequiredExpiration,
 };

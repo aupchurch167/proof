@@ -5,9 +5,13 @@
 const path = require('path');
 const {
   DEFAULT_EXPIRING_WINDOW_DAYS,
+  COVERAGE_CHECKS,
   expiringWindowDays,
+  lineIsRequired,
   isExpiredDate,
   isExpiringSoon,
+  verdictForLine,
+  earliestRequiredExpiration,
 } = require('../services/complianceRules');
 
 // Matches getSignedUrl()'s default TTL so the envelope's expiresInSeconds /
@@ -42,6 +46,13 @@ const PUBLIC_TO_INTERNAL_STATUS = {
 
 const COVERAGE_TYPES = ['general_liability', 'workers_comp', 'umbrella', 'auto'];
 
+const PUBLIC_COVERAGE_TYPE = {
+  gl: 'general_liability',
+  wc: 'workers_comp',
+  umb: 'umbrella',
+  auto: 'auto',
+};
+
 function mapCoiStatus(internal) {
   return COI_STATUS_MAP[internal] || 'none';
 }
@@ -72,24 +83,46 @@ function coverageStatus(expiration, windowDays, now) {
   return 'compliant';
 }
 
-// Build the coverages[] array from a COI row, including only coverage lines that
-// actually carry data (a limit, an expiration, or a policy number).
-function coveragesFromCoi(coi, { windowDays = EXPIRING_SOON_DAYS, now = new Date() } = {}) {
+// Partner coverage lines use the same line rule as the badge and the chips.
+// An optional line (minimum not above zero) is left out, so a date on that
+// line is not reported as expiring_soon. A required line under its dollar
+// minimum is `expired` — the public contract's word for "not acceptable".
+function coveragesFromCoi(coi, { settings = null, windowDays = EXPIRING_SOON_DAYS, now = new Date() } = {}) {
   if (!coi) return [];
-  const lines = [
-    { type: 'general_liability', amount: coi.glCoverageAmount, exp: coi.glExpirationDate, policy: coi.glPolicyNumber },
-    { type: 'workers_comp', amount: coi.wcCoverageAmount, exp: coi.wcExpirationDate, policy: coi.wcPolicyNumber },
-    { type: 'umbrella', amount: coi.umbCoverageAmount, exp: coi.umbExpirationDate, policy: coi.umbPolicyNumber },
-    { type: 'auto', amount: coi.autoCoverageAmount, exp: coi.autoExpirationDate, policy: coi.autoPolicyNumber },
-  ];
-  return lines
-    .filter((l) => l.amount != null || l.exp != null || l.policy)
-    .map((l) => ({
-      type: l.type,
-      status: coverageStatus(l.exp, windowDays, now),
-      expiresAt: isoDate(l.exp),
-      limit: centsToDollars(l.amount),
-    }));
+  const rows = [];
+  for (const check of COVERAGE_CHECKS) {
+    const amount = coi[check.amount];
+    const expiration = coi[check.expiration];
+    const policy = coi[check.policy];
+    if (amount == null && expiration == null && !policy) continue;
+
+    const minimum = settings ? settings[check.setting] : null;
+    if (settings && !lineIsRequired(minimum)) continue;
+
+    let status;
+    if (settings) {
+      const { verdict } = verdictForLine({
+        amount, expiration, policy, minimum, windowDays, now,
+      });
+      if (verdict === 'skipped') continue;
+      status = verdict === 'meets' ? 'compliant' : verdict === 'expiring' ? 'expiring_soon' : 'expired';
+    } else {
+      status = coverageStatus(expiration, windowDays, now);
+    }
+
+    rows.push({
+      type: PUBLIC_COVERAGE_TYPE[check.key],
+      status,
+      expiresAt: isoDate(expiration),
+      limit: centsToDollars(amount),
+    });
+  }
+  return rows;
+}
+
+function coverageExpiresAt(coi, settings) {
+  if (!settings) return earliestExpiration(coi);
+  return isoDate(earliestRequiredExpiration(coi, settings));
 }
 
 // Earliest expiration among a COI's coverages — drives the "expiring" badge.
@@ -114,11 +147,11 @@ function serializeVendor(vendor, { latestApprovedCoi = null, lastRequestedAt = n
   const windowDays = expiringWindowDays(settings);
   const coi = {
     status: mapCoiStatus(vendor.coiStatus),
-    expiresAt: earliestExpiration(latestApprovedCoi),
+    expiresAt: coverageExpiresAt(latestApprovedCoi, settings),
     lastRequestedAt: isoDateTime(lastRequestedAt),
   };
   if (detail) {
-    coi.coverages = coveragesFromCoi(latestApprovedCoi, { windowDays, now });
+    coi.coverages = coveragesFromCoi(latestApprovedCoi, { settings, windowDays, now });
   }
   return {
     id: vendor.id,
@@ -171,9 +204,9 @@ function serializeHistoricalCoi(coi, document, { settings = null, now = new Date
     vendorId: coi.vendorId,
     vendorName: coi.vendor?.name || null,
     submittedAt: isoDateTime(coi.submittedAt),
-    expiresAt: earliestExpiration(coi),
+    expiresAt: coverageExpiresAt(coi, settings),
     document,
-    coverages: coveragesFromCoi(coi, { windowDays, now }),
+    coverages: coveragesFromCoi(coi, { settings, windowDays, now }),
     agentName: coi.agentName || null,
     agentEmail: coi.agentEmail || null,
     agentPhone: coi.agentPhone || null,

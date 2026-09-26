@@ -4,7 +4,8 @@ const {
   DEFAULT_EXPIRING_WINDOW_DAYS,
   daysUntil,
   expiringWindowDays,
-  isExpiringSoon,
+  evaluateCompliance,
+  complianceIssue,
   earliestRequiredExpiration,
 } = require('./complianceRules');
 
@@ -31,8 +32,11 @@ async function buildComplianceOverview(
   orgId,
   { now = new Date(), ignoredAfterDays = IGNORED_AFTER_DAYS } = {}
 ) {
-  const [settings, vendors, logs, escalations] = await Promise.all([
-    prisma.organizationSettings.findUnique({ where: { orgId } }),
+  const [org, vendors, logs, escalations] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { name: true, settings: true },
+    }),
     prisma.vendor.findMany({
       where: { orgId, deletedAt: null },
       select: {
@@ -54,6 +58,15 @@ async function buildComplianceOverview(
             wcExpirationDate: true,
             umbExpirationDate: true,
             autoExpirationDate: true,
+            glCoverageAmount: true,
+            wcCoverageAmount: true,
+            umbCoverageAmount: true,
+            autoCoverageAmount: true,
+            glPolicyNumber: true,
+            wcPolicyNumber: true,
+            umbPolicyNumber: true,
+            autoPolicyNumber: true,
+            certificateHolderName: true,
           },
         },
       },
@@ -74,6 +87,7 @@ async function buildComplianceOverview(
     }),
   ]);
 
+  const settings = org?.settings || null;
   const windowDays = expiringWindowDays(settings);
 
   const logsByVendor = new Map();
@@ -92,6 +106,7 @@ async function buildComplianceOverview(
     pendingReview: [],
     expiringSoon: [],
     expired: [],
+    nonCompliant: [],
     ignoredRequests: [],
   };
 
@@ -145,9 +160,14 @@ async function buildComplianceOverview(
     if (oldestPending) buckets.pendingReview.push(entry);
     if (!latestApproved && !oldestPending) buckets.noCoi.push(entry);
 
-    if (latestApproved && daysUntilExpiration !== null) {
-      if (daysUntilExpiration < 0) buckets.expired.push(entry);
-      else if (isExpiringSoon(expiration, windowDays, now)) buckets.expiringSoon.push(entry);
+    // Same status the badge uses. A holder or short-limit failure is
+    // non-compliant here even when the expiration dates are still healthy.
+    if (latestApproved) {
+      const evaluated = evaluateCompliance(latestApproved, settings, org?.name, { now });
+      entry.statusReason = complianceIssue(evaluated);
+      if (evaluated.status === 'EXPIRED') buckets.expired.push(entry);
+      else if (evaluated.status === 'EXPIRING_SOON') buckets.expiringSoon.push(entry);
+      else if (evaluated.status === 'NON_COMPLIANT') buckets.nonCompliant.push(entry);
     }
 
     // Ignored: we asked, it's been a week or more, nothing came back, and
@@ -169,8 +189,10 @@ async function buildComplianceOverview(
 
   // Most urgent first in every bucket.
   const byName = (a, b) => a.name.localeCompare(b.name);
-  buckets.expired.sort((a, b) => a.daysUntilExpiration - b.daysUntilExpiration || byName(a, b));
-  buckets.expiringSoon.sort((a, b) => a.daysUntilExpiration - b.daysUntilExpiration || byName(a, b));
+  const byDays = (a, b) => (a.daysUntilExpiration ?? 0) - (b.daysUntilExpiration ?? 0) || byName(a, b);
+  buckets.expired.sort(byDays);
+  buckets.expiringSoon.sort(byDays);
+  buckets.nonCompliant.sort(byName);
   buckets.pendingReview.sort((a, b) => new Date(a.pendingSince) - new Date(b.pendingSince) || byName(a, b));
   buckets.ignoredRequests.sort((a, b) => b.daysSinceRequest - a.daysSinceRequest || byName(a, b));
   // Never-requested vendors sort last: there's nothing to chase yet, only to send.

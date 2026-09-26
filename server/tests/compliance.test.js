@@ -19,6 +19,9 @@ const request = require('supertest');
 const app = require('../src/app');
 const { buildComplianceOverview } = require('../src/services/complianceOverview');
 const { checkCompliance, evaluateCompliance, updateVendorStatus } = require('../src/services/compliance');
+const { holderMatches } = require('../src/services/complianceRules');
+const { runWeeklySummary } = require('../src/services/cron');
+const { sendWeeklySummaryEmail } = require('../src/services/email');
 const {
   prisma,
   createTestOrg,
@@ -63,10 +66,19 @@ const overview = () => buildComplianceOverview(prisma, org.id, { now: NOW });
 const namesIn = (bucket) => bucket.map((v) => v.name);
 
 async function approvedCoi(vendor, expiresInDays) {
+  const when = daysFromNow(expiresInDays, NOW);
   return createTestCoi(vendor.id, org.id, {
     status: 'APPROVED',
     submittedAt: daysAgo(30, NOW),
-    glExpirationDate: daysFromNow(expiresInDays, NOW),
+    certificateHolderName: org.name,
+    glCoverageAmount: 200000000,
+    wcCoverageAmount: 100000000,
+    umbCoverageAmount: 200000000,
+    autoCoverageAmount: 200000000,
+    glExpirationDate: when,
+    wcExpirationDate: when,
+    umbExpirationDate: when,
+    autoExpirationDate: when,
   });
 }
 
@@ -366,6 +378,59 @@ describe('requirement switches', () => {
     expect(short.status).toBe('NON_COMPLIANT');
   });
 
+  it('matches a holder that differs only by case, spacing, punctuation, or suffix spelling', () => {
+    expect(holderMatches('Acme Construction, LLC', 'Acme Construction LLC')).toBe(true);
+    expect(holderMatches('Acme Inc', 'Acme, Inc.')).toBe(true);
+    expect(holderMatches('Acme, Inc.', 'Acme Incorporated')).toBe(true);
+    expect(holderMatches('Acme  Construction', 'Acme Construction')).toBe(true);
+    expect(holderMatches('  ACME CONSTRUCTION  ', 'acme construction')).toBe(true);
+    expect(holderMatches('Smith & Sons', 'Smith and Sons')).toBe(true);
+
+    const orgName = 'Acme Construction LLC';
+    const matched = evaluateCompliance(
+      certificate({ certificateHolderName: 'Acme Construction, LLC' }),
+      baseSettings,
+      orgName,
+      { now: NOW }
+    );
+    expect(matched.status).toBe('COMPLIANT');
+    expect(matched.flags.some((flag) => flag.field === 'certificateHolderName')).toBe(false);
+  });
+
+  it('does not treat a bare suffix or a short fragment as a holder match', () => {
+    expect(holderMatches('LLC', 'Acme Construction LLC')).toBe(false);
+    expect(holderMatches('A', 'Acme Construction')).toBe(false);
+    expect(holderMatches('Inc', 'Acme, Inc.')).toBe(false);
+    expect(holderMatches('Acme', 'Acme Construction')).toBe(false);
+    expect(holderMatches('Acme Construction, LLC', 'Acme Construction')).toBe(false);
+
+    const suffixOnly = evaluateCompliance(
+      certificate({ certificateHolderName: 'LLC' }),
+      baseSettings,
+      'Acme Construction LLC',
+      { now: NOW }
+    );
+    expect(suffixOnly.status).toBe('NON_COMPLIANT');
+    expect(suffixOnly.flags.some((flag) => flag.type === 'ADDITIONALLY_INSURED_MISMATCH')).toBe(true);
+
+    const letter = evaluateCompliance(
+      certificate({ certificateHolderName: 'A' }),
+      baseSettings,
+      'Acme Construction',
+      { now: NOW }
+    );
+    expect(letter.status).toBe('NON_COMPLIANT');
+
+    const blank = evaluateCompliance(
+      certificate({ certificateHolderName: '   ' }),
+      baseSettings,
+      'Acme Construction LLC',
+      { now: NOW }
+    );
+    expect(blank.status).toBe('NON_COMPLIANT');
+    expect(blank.flags.some((flag) => flag.type === 'MISSING' && flag.field === 'certificateHolderName')).toBe(true);
+  });
+
   it('fails a holder mismatch or a blank holder only when the switch is on', () => {
     const mismatchOn = evaluated(certificate({ certificateHolderName: 'Other Co' }), baseSettings);
     expect(mismatchOn.flags.some((flag) => flag.type === 'ADDITIONALLY_INSURED_MISMATCH')).toBe(true);
@@ -519,5 +584,94 @@ describe('overview warn window', () => {
     const { buckets } = await overview();
     expect(namesIn(buckets.expiringSoon)).not.toContain('Optional Only');
     expect(namesIn(buckets.expired)).not.toContain('Optional Only');
+  });
+
+  it('counts a holder mismatch and a short limit as non-compliant, not covered', async () => {
+    const wrongHolder = await createTestVendor(org.id, { name: 'Wrong Holder' });
+    const shortLimit = await createTestVendor(org.id, { name: 'Short Limit' });
+    const covered = await createTestVendor(org.id, { name: 'Actually Covered' });
+    await approvedCoi(wrongHolder, 90);
+    await prisma.coi.updateMany({
+      where: { vendorId: wrongHolder.id },
+      data: { certificateHolderName: 'Somebody Else' },
+    });
+    await approvedCoi(shortLimit, 90);
+    await prisma.coi.updateMany({
+      where: { vendorId: shortLimit.id },
+      data: { glCoverageAmount: 100 },
+    });
+    await approvedCoi(covered, 90);
+
+    const { buckets } = await overview();
+    expect(namesIn(buckets.nonCompliant)).toEqual(['Short Limit', 'Wrong Holder']);
+    expect(buckets.nonCompliant.find((v) => v.name === 'Wrong Holder').statusReason)
+      .toBe('Certificate holder does not match');
+    expect(buckets.nonCompliant.find((v) => v.name === 'Short Limit').statusReason)
+      .toBe('General Liability under limit');
+    expect(namesIn(buckets.expiringSoon)).not.toContain('Wrong Holder');
+    expect(namesIn(buckets.expiringSoon)).not.toContain('Short Limit');
+    expect(namesIn(buckets.expired)).not.toContain('Wrong Holder');
+    expect(namesIn([...buckets.expiringSoon, ...buckets.expired, ...buckets.nonCompliant]))
+      .not.toContain('Actually Covered');
+  });
+
+  it('leaves a holder mismatch out of the queue when the switch is off', async () => {
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: { requireHolderMatch: false },
+    });
+    const vendor = await createTestVendor(org.id, { name: 'Holder Ignored' });
+    await approvedCoi(vendor, 90);
+    await prisma.coi.updateMany({
+      where: { vendorId: vendor.id },
+      data: { certificateHolderName: 'Somebody Else' },
+    });
+
+    const { buckets } = await overview();
+    expect(namesIn(buckets.nonCompliant)).not.toContain('Holder Ignored');
+    expect(namesIn(buckets.expiringSoon)).not.toContain('Holder Ignored');
+    expect(namesIn(buckets.expired)).not.toContain('Holder Ignored');
+  });
+});
+
+describe('weekly summary uses the badge', () => {
+  it('counts a holder mismatch and a short limit as non-compliant', async () => {
+    const far = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+    async function farCoi(vendor, overrides = {}) {
+      return createTestCoi(vendor.id, org.id, {
+        status: 'APPROVED',
+        submittedAt: new Date(),
+        certificateHolderName: org.name,
+        glCoverageAmount: 200000000,
+        wcCoverageAmount: 100000000,
+        umbCoverageAmount: 200000000,
+        autoCoverageAmount: 200000000,
+        glExpirationDate: far,
+        wcExpirationDate: far,
+        umbExpirationDate: far,
+        autoExpirationDate: far,
+        ...overrides,
+      });
+    }
+
+    const wrongHolder = await createTestVendor(org.id, { name: 'Wrong Holder' });
+    const shortLimit = await createTestVendor(org.id, { name: 'Short Limit' });
+    const covered = await createTestVendor(org.id, { name: 'Actually Covered' });
+    await farCoi(wrongHolder, { certificateHolderName: 'Somebody Else' });
+    await farCoi(shortLimit, { glCoverageAmount: 100 });
+    await farCoi(covered);
+
+    sendWeeklySummaryEmail.mockClear();
+    const stats = await runWeeklySummary(prisma);
+    expect(stats.acquired).toBe(true);
+    expect(sendWeeklySummaryEmail).toHaveBeenCalledTimes(1);
+    const summary = sendWeeklySummaryEmail.mock.calls[0][2];
+    expect(summary.nonCompliant).toBe(2);
+    expect(summary.compliant).toBe(1);
+    expect(summary.expiringSoon).toBe(0);
+    expect(summary.expired).toBe(0);
+    expect(summary.urgentVendors.map((v) => v.name).sort()).toEqual(['Short Limit', 'Wrong Holder']);
+    expect(summary.urgentVendors.find((v) => v.name === 'Wrong Holder').reason)
+      .toBe('Certificate holder does not match');
   });
 });

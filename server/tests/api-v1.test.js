@@ -185,6 +185,48 @@ describe('GET /vendors/:id', () => {
     expect(auto.status).toBe('expiring_soon');
   });
 
+  it('skips optional lines and reports a short required limit as not acceptable', async () => {
+    const org = await createOrg(`org-lines-${Date.now()}`);
+    await prisma.organizationSettings.update({
+      where: { orgId: org.id },
+      data: {
+        minGeneralLiability: 100000000,
+        minWorkersComp: 0,
+        minUmbrella: 0,
+        minAutomobile: 0,
+        expiringWindowDays: 30,
+        requireHolderMatch: false,
+      },
+    });
+    const vendor = await createTestVendor(org.id, { name: 'Line Check', email: `lines-${Date.now()}@t.com` });
+    await prisma.vendor.update({ where: { id: vendor.id }, data: { coiStatus: 'NON_COMPLIANT' } });
+    const soon = new Date(Date.now() + 5 * DAY);
+    const later = new Date(Date.now() + 90 * DAY);
+    await createTestCoi(vendor.id, org.id, {
+      status: 'APPROVED',
+      certificateHolderName: 'Acme Construction',
+      glCoverageAmount: 50000000, // $500k against a $1M minimum
+      glExpirationDate: later,
+      wcCoverageAmount: 100000000,
+      wcExpirationDate: soon,
+      umbCoverageAmount: 500000000,
+      umbExpirationDate: soon,
+      umbPolicyNumber: 'UMB',
+    });
+    const token = await createApiClient({ orgId: org.id });
+
+    const res = await request(app).get(`/api/v1/orgs/${org.slug}/vendors/${vendor.id}`).set(auth(token));
+    expect(res.status).toBe(200);
+    const coverages = res.body.data.coi.coverages;
+    expect(coverages.find((c) => c.type === 'umbrella')).toBeUndefined();
+    expect(coverages.find((c) => c.type === 'workers_comp')).toBeUndefined();
+    expect(coverages.map((c) => c.status)).not.toContain('expiring_soon');
+    const gl = coverages.find((c) => c.type === 'general_liability');
+    expect(gl.status).toBe('expired');
+    expect(gl.limit).toBe(500000);
+    expect(res.body.data.coi.expiresAt).toBe(later.toISOString().slice(0, 10));
+  });
+
   it('uses the saved expiring window for per-coverage status', async () => {
     await prisma.organizationSettings.update({
       where: { orgId: orgA.id },

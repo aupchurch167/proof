@@ -99,14 +99,23 @@ export default function Dashboard() {
 
   // Risk order: gaps that have gone unanswered, then the review queue, then
   // coverage about to lapse.
+  const nonCompliant = overview.buckets.nonCompliant || [];
   const queue = [
-    ...overview.buckets.expired.map((v) => ({
+    ...nonCompliant.map((v) => ({
       id: v.id, tone: 'bad', vendor: v.name,
-      issue: v.statusReason || `Coverage lapsed ${Math.abs(v.daysUntilExpiration)} days ago`
-        + (v.chaseCount ? ` · ${v.chaseCount} reminders unanswered` : ''),
+      issue: v.statusReason || 'Not compliant',
       action: v.badEmail ? 'Fix email' : 'Send now',
       onAct: v.badEmail ? () => navigate(`/vendors/${v.id}`) : () => handleSendNow(v.id),
     })),
+    ...overview.buckets.expired
+      .filter((v) => !nonCompliant.some((gap) => gap.id === v.id))
+      .map((v) => ({
+        id: v.id, tone: 'bad', vendor: v.name,
+        issue: v.statusReason || `Coverage lapsed ${Math.abs(v.daysUntilExpiration)} days ago`
+          + (v.chaseCount ? ` · ${v.chaseCount} reminders unanswered` : ''),
+        action: v.badEmail ? 'Fix email' : 'Send now',
+        onAct: v.badEmail ? () => navigate(`/vendors/${v.id}`) : () => handleSendNow(v.id),
+      })),
     ...overview.buckets.ignoredRequests
       .filter((v) => !overview.buckets.expired.some((e) => e.id === v.id))
       .map((v) => ({

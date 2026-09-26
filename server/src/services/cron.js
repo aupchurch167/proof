@@ -7,7 +7,8 @@ const {
 const { updateVendorStatus } = require('./compliance');
 const {
   expiringWindowDays,
-  isExpiringSoon,
+  evaluateCompliance,
+  complianceIssue,
   earliestRequiredExpiration,
   daysUntil: complianceDaysUntil,
 } = require('./complianceRules');
@@ -424,36 +425,62 @@ async function runWeeklySummary(prisma) {
       let compliant = 0;
       let expiringSoon = 0;
       let expired = 0;
+      let nonCompliant = 0;
       let noCoi = 0;
       const urgentList = [];
 
       for (const vendor of vendors) {
         const latestCoi = vendor.cois[0];
-        // Required lines only, so an optional coverage date does not land in
-        // the expiring bucket. No settings row keeps the previous all-dates view.
-        const earliestExpirationDate = org.settings
-          ? earliestRequiredExpiration(latestCoi, org.settings)
-          : earliestExpiration(latestCoi);
-
-        if (!latestCoi || !earliestExpirationDate) {
+        if (!latestCoi) {
           noCoi++;
           continue;
         }
 
-        const days = complianceDaysUntil(earliestExpirationDate, now);
+        // Same status as the vendor badge. A healthy expiration date does not
+        // count as covered when the holder is wrong or a required limit is short.
+        if (!org.settings) {
+          const earliestExpirationDate = earliestExpiration(latestCoi);
+          if (!earliestExpirationDate) {
+            noCoi++;
+            continue;
+          }
+          const days = complianceDaysUntil(earliestExpirationDate, now);
+          if (days < 0) {
+            expired++;
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days, rank: 0 });
+          } else if (days <= windowDays && windowDays > 0) {
+            expiringSoon++;
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days, rank: 2 });
+          } else {
+            compliant++;
+          }
+          continue;
+        }
 
-        if (days < 0) {
-          expired++;
-          urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
-        } else if (isExpiringSoon(earliestExpirationDate, windowDays, now)) {
-          expiringSoon++;
-          urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
-        } else {
+        const evaluated = evaluateCompliance(latestCoi, org.settings, org.name, { now });
+        const earliestExpirationDate = earliestRequiredExpiration(latestCoi, org.settings);
+        const days = earliestExpirationDate ? complianceDaysUntil(earliestExpirationDate, now) : null;
+        const urgent = {
+          name: vendor.name,
+          expirationDate: earliestExpirationDate,
+          daysUntil: days,
+        };
+
+        if (evaluated.status === 'COMPLIANT') {
           compliant++;
+        } else if (evaluated.status === 'EXPIRING_SOON') {
+          expiringSoon++;
+          urgentList.push({ ...urgent, rank: 2 });
+        } else if (evaluated.status === 'EXPIRED') {
+          expired++;
+          urgentList.push({ ...urgent, rank: 0 });
+        } else {
+          nonCompliant++;
+          urgentList.push({ ...urgent, rank: 1, reason: complianceIssue(evaluated) });
         }
       }
 
-      urgentList.sort((a, b) => a.daysUntil - b.daysUntil);
+      urgentList.sort((a, b) => a.rank - b.rank || (a.daysUntil ?? 0) - (b.daysUntil ?? 0));
       const urgentVendors = urgentList.slice(0, 5);
 
       const summary = {
@@ -461,6 +488,7 @@ async function runWeeklySummary(prisma) {
         compliant,
         expiringSoon,
         expired,
+        nonCompliant,
         noCoi,
         urgentVendors,
         expiringWindowDays: windowDays,

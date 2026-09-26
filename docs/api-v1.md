@@ -92,15 +92,18 @@ Rate limit: 600 requests / 15 min, keyed per token.
 - `coi.expiresAt` — earliest expiration among coverages (drives the badge).
   Calendar date (`YYYY-MM-DD`); timestamps like `lastRequestedAt` are full ISO.
 - `coi.coverages` — returned by the **detail** endpoint only. `limit` is in
-  **whole dollars**. Only coverage lines with data are included.
+  **whole dollars**. Only required coverage lines with data are included. A
+  line set to a $0 minimum is left out.
 
 ### COI status enum
 
 `coi.status` and each coverage `status` is one of: `compliant`,
 `expiring_soon`, `expired`, `pending`, `none`. Proof owns this computation.
-`expiring_soon` uses a 30-day window. Internally, a vendor whose coverage is
-below the org's required limits (`NON_COMPLIANT`) surfaces as `expired`
-("not acceptable, needs a new COI").
+`expiring_soon` uses the company's saved warn window. A coverage line whose
+minimum is $0 is optional and is omitted. A required line below its dollar
+minimum is `expired` ("not acceptable, needs a new COI"), the same way a
+vendor whose coverage is below the required limits (`NON_COMPLIANT`) surfaces
+as `expired`.
 
 ### COI request
 
@@ -145,8 +148,8 @@ below the org's required limits (`NON_COMPLIANT`) surfaces as `expired`
 
 - `expiresAt` — earliest coverage expiration (`YYYY-MM-DD`), or `null` when no
   expiration is on file. This is **not** invented from `submittedAt`.
-- `coverages` — same shape as vendor detail (`GET /vendors/:id`). Only lines
-  with a limit, expiration, or policy number are included.
+- `coverages` — same shape as vendor detail (`GET /vendors/:id`). Only
+  required lines with a limit, expiration, or policy number are included.
 - `document` — short-lived signed download (same fields as
   `GET /vendors/:id/coi/document`). Fetch promptly; do not persist the URL.
 
