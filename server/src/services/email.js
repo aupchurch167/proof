@@ -196,15 +196,22 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
     compliant,
     expiringSoon,
     expired,
+    nonCompliant = 0,
     noCoi,
     urgentVendors,
+    expiringWindowDays,
   } = summary;
+  const windowDays = Number.isFinite(Number(expiringWindowDays)) ? Math.trunc(Number(expiringWindowDays)) : 30;
+  const expiringLabel = windowDays > 0 ? `Expiring within ${windowDays} days` : 'Expiring soon';
+  const notCompliant = Number(nonCompliant) || 0;
 
   const urgentRows = urgentVendors.map((v) => {
-    const statusColor = v.daysUntil <= 0 ? '#dc2626' : '#d97706';
-    const statusLabel = v.daysUntil <= 0
-      ? `Expired ${Math.abs(v.daysUntil)} day(s) ago`
-      : `Expires in ${v.daysUntil} day(s)`;
+    const statusColor = v.reason || v.daysUntil <= 0 ? '#dc2626' : '#d97706';
+    const statusLabel = v.reason
+      ? escapeHtml(v.reason)
+      : v.daysUntil <= 0
+        ? `Expired ${Math.abs(v.daysUntil)} day(s) ago`
+        : `Expires in ${v.daysUntil} day(s)`;
     return `
       <tr>
         <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;">${escapeHtml(v.name)}</td>
@@ -234,7 +241,7 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
       </table>
     </div>` : '';
 
-  const actionableCount = expiringSoon + expired + noCoi;
+  const actionableCount = expiringSoon + expired + notCompliant + noCoi;
 
   await sendEmail(
     to,
@@ -265,12 +272,16 @@ async function sendWeeklySummaryEmail(to, orgName, summary) {
        <div style="background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;padding:16px;margin-bottom:24px;">
          <table style="width:100%;font-size:14px;border-collapse:collapse;">
            <tr>
-             <td style="padding:6px 0;color:#374151;">Expiring within 30 days</td>
+             <td style="padding:6px 0;color:#374151;">${expiringLabel}</td>
              <td style="padding:6px 0;text-align:right;font-weight:600;color:${expiringSoon > 0 ? '#d97706' : '#6b7280'};">${expiringSoon}</td>
            </tr>
            <tr>
              <td style="padding:6px 0;color:#374151;">Expired</td>
              <td style="padding:6px 0;text-align:right;font-weight:600;color:${expired > 0 ? '#dc2626' : '#6b7280'};">${expired}</td>
+           </tr>
+           <tr>
+             <td style="padding:6px 0;color:#374151;">Not compliant</td>
+             <td style="padding:6px 0;text-align:right;font-weight:600;color:${notCompliant > 0 ? '#dc2626' : '#6b7280'};">${notCompliant}</td>
            </tr>
            <tr>
              <td style="padding:6px 0;color:#374151;">Missing COI entirely</td>

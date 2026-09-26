@@ -5,6 +5,13 @@ const {
   sendChaseEmail,
 } = require('./email');
 const { updateVendorStatus } = require('./compliance');
+const {
+  expiringWindowDays,
+  evaluateCompliance,
+  complianceIssue,
+  earliestRequiredExpiration,
+  daysUntil: complianceDaysUntil,
+} = require('./complianceRules');
 const { generateUploadToken } = require('../utils/tokens');
 const { isPlaceholderEmail, placeholderReason } = require('../utils/email');
 const {
@@ -382,6 +389,7 @@ async function runWeeklySummary(prisma) {
   const lock = await withAdvisoryLock(LOCK_KEYS.weeklySummary, async () => {
     const orgs = await prisma.organization.findMany({
       include: {
+        settings: true,
         users: {
           where: { role: 'ADMIN' },
           select: { email: true, firstName: true },
@@ -413,35 +421,66 @@ async function runWeeklySummary(prisma) {
       }
 
       const now = new Date();
+      const windowDays = expiringWindowDays(org.settings);
       let compliant = 0;
       let expiringSoon = 0;
       let expired = 0;
+      let nonCompliant = 0;
       let noCoi = 0;
       const urgentList = [];
 
       for (const vendor of vendors) {
         const latestCoi = vendor.cois[0];
-        const earliestExpirationDate = earliestExpiration(latestCoi);
-
-        if (!earliestExpirationDate) {
+        if (!latestCoi) {
           noCoi++;
           continue;
         }
 
-        const days = daysUntil(earliestExpirationDate, now);
+        // Same status as the vendor badge. A healthy expiration date does not
+        // count as covered when the holder is wrong or a required limit is short.
+        if (!org.settings) {
+          const earliestExpirationDate = earliestExpiration(latestCoi);
+          if (!earliestExpirationDate) {
+            noCoi++;
+            continue;
+          }
+          const days = complianceDaysUntil(earliestExpirationDate, now);
+          if (days < 0) {
+            expired++;
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days, rank: 0 });
+          } else if (days <= windowDays && windowDays > 0) {
+            expiringSoon++;
+            urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days, rank: 2 });
+          } else {
+            compliant++;
+          }
+          continue;
+        }
 
-        if (days < 0) {
-          expired++;
-          urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
-        } else if (days <= 30) {
-          expiringSoon++;
-          urgentList.push({ name: vendor.name, expirationDate: earliestExpirationDate, daysUntil: days });
-        } else {
+        const evaluated = evaluateCompliance(latestCoi, org.settings, org.name, { now });
+        const earliestExpirationDate = earliestRequiredExpiration(latestCoi, org.settings);
+        const days = earliestExpirationDate ? complianceDaysUntil(earliestExpirationDate, now) : null;
+        const urgent = {
+          name: vendor.name,
+          expirationDate: earliestExpirationDate,
+          daysUntil: days,
+        };
+
+        if (evaluated.status === 'COMPLIANT') {
           compliant++;
+        } else if (evaluated.status === 'EXPIRING_SOON') {
+          expiringSoon++;
+          urgentList.push({ ...urgent, rank: 2 });
+        } else if (evaluated.status === 'EXPIRED') {
+          expired++;
+          urgentList.push({ ...urgent, rank: 0 });
+        } else {
+          nonCompliant++;
+          urgentList.push({ ...urgent, rank: 1, reason: complianceIssue(evaluated) });
         }
       }
 
-      urgentList.sort((a, b) => a.daysUntil - b.daysUntil);
+      urgentList.sort((a, b) => a.rank - b.rank || (a.daysUntil ?? 0) - (b.daysUntil ?? 0));
       const urgentVendors = urgentList.slice(0, 5);
 
       const summary = {
@@ -449,8 +488,10 @@ async function runWeeklySummary(prisma) {
         compliant,
         expiringSoon,
         expired,
+        nonCompliant,
         noCoi,
         urgentVendors,
+        expiringWindowDays: windowDays,
       };
 
       try {

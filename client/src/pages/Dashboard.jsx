@@ -47,13 +47,12 @@ export default function Dashboard() {
 
   const load = async () => {
     try {
-      const [stats, overview, week, expiring] = await Promise.all([
+      const [stats, overview, week] = await Promise.all([
         api.get('/reports/compliance'),
         api.get('/compliance/overview'),
         api.get('/audit/week').catch(() => null),
-        api.get('/reports/expiring?days=30').catch(() => []),
       ]);
-      setData({ stats, overview, week, expiring });
+      setData({ stats, overview, week });
       setError('');
     } catch (err) {
       setError(err.message);
@@ -90,7 +89,8 @@ export default function Dashboard() {
     );
   }
 
-  const { stats, overview, week, expiring } = data;
+  const { stats, overview, week } = data;
+  const windowDays = overview?.expiringSoonDays ?? 30;
   const gaps = (stats.nonCompliant || 0) + (stats.expired || 0);
 
   // The headline count is the work, not the vendor list: things that will not
@@ -99,14 +99,23 @@ export default function Dashboard() {
 
   // Risk order: gaps that have gone unanswered, then the review queue, then
   // coverage about to lapse.
+  const nonCompliant = overview.buckets.nonCompliant || [];
   const queue = [
-    ...overview.buckets.expired.map((v) => ({
+    ...nonCompliant.map((v) => ({
       id: v.id, tone: 'bad', vendor: v.name,
-      issue: v.statusReason || `Coverage lapsed ${Math.abs(v.daysUntilExpiration)} days ago`
-        + (v.chaseCount ? ` · ${v.chaseCount} reminders unanswered` : ''),
+      issue: v.statusReason || 'Not compliant',
       action: v.badEmail ? 'Fix email' : 'Send now',
       onAct: v.badEmail ? () => navigate(`/vendors/${v.id}`) : () => handleSendNow(v.id),
     })),
+    ...overview.buckets.expired
+      .filter((v) => !nonCompliant.some((gap) => gap.id === v.id))
+      .map((v) => ({
+        id: v.id, tone: 'bad', vendor: v.name,
+        issue: v.statusReason || `Coverage lapsed ${Math.abs(v.daysUntilExpiration)} days ago`
+          + (v.chaseCount ? ` · ${v.chaseCount} reminders unanswered` : ''),
+        action: v.badEmail ? 'Fix email' : 'Send now',
+        onAct: v.badEmail ? () => navigate(`/vendors/${v.id}`) : () => handleSendNow(v.id),
+      })),
     ...overview.buckets.ignoredRequests
       .filter((v) => !overview.buckets.expired.some((e) => e.id === v.id))
       .map((v) => ({
@@ -130,11 +139,10 @@ export default function Dashboard() {
     })),
   ].slice(0, 8);
 
-  const renewals = (expiring || []).slice(0, 5).map((coi) => {
-    const soonest = [coi.glExpirationDate, coi.wcExpirationDate, coi.umbExpirationDate, coi.autoExpirationDate]
-      .filter(Boolean).sort()[0];
-    return { name: coi.vendor?.name, when: soonest };
-  });
+  const renewals = (overview.buckets?.expiringSoon || []).slice(0, 5).map((vendor) => ({
+    name: vendor.name,
+    when: vendor.earliestExpiration,
+  }));
 
   return (
     <div className="px-9 py-8 max-w-content w-full flex flex-col gap-7">
@@ -156,7 +164,12 @@ export default function Dashboard() {
 
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
         <Stat value={stats.compliant} label="Covered" tone="ok" to="/vendors?status=COMPLIANT" />
-        <Stat value={stats.expiringSoon} label="Expiring ≤30d" tone="warn" to="/vendors?status=EXPIRING_SOON" />
+        <Stat
+          value={stats.expiringSoon}
+          label={windowDays > 0 ? `Expiring ≤${windowDays}d` : 'Expiring'}
+          tone="warn"
+          to="/vendors?status=EXPIRING_SOON"
+        />
         <Stat value={gaps} label="Gaps" tone="bad" to="/vendors?status=NON_COMPLIANT" />
         <Stat value={stats.pending} label="To review" tone="navy" to="/cois?status=PENDING_REVIEW" />
         <Stat value={stats.noCoi} label="No COI" tone="muted" to="/vendors?status=NO_COI" />
@@ -220,7 +233,11 @@ export default function Dashboard() {
           <Card className="px-5 py-[18px] flex flex-col gap-3">
             <span className="text-sm font-bold text-navy">Upcoming renewals</span>
             {renewals.length === 0 ? (
-              <p className="text-[13px] text-muted">Nothing expiring in the next 30 days.</p>
+              <p className="text-[13px] text-muted">
+                {windowDays > 0
+                  ? `Nothing expiring in the next ${windowDays} days.`
+                  : 'Expiring warnings are turned off in Requirements.'}
+              </p>
             ) : (
               renewals.map((r, i) => (
                 <div key={i} className="flex justify-between gap-3 text-[13px] py-1.5 border-b border-line-divider last:border-0">

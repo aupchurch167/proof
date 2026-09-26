@@ -64,8 +64,9 @@ router.get('/', requireScope(SCOPES.VENDORS_READ), async (req, res) => {
       ? encodeCursor({ submittedAt: last.submittedAt.toISOString(), id: last.id })
       : null;
 
+    const settings = await prisma.organizationSettings.findUnique({ where: { orgId: req.org.id } });
     const items = await Promise.all(
-      page.map(async (coi) => serializeHistoricalCoi(coi, await signDocument(coi)))
+      page.map(async (coi) => serializeHistoricalCoi(coi, await signDocument(coi), { settings }))
     );
 
     return paginated(res, items, nextCursor, hasMore);

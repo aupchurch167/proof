@@ -1,5 +1,5 @@
 const prisma = require('../lib/prisma');
-const { getPlanLimits, getPlanLabel } = require('../config/plans');
+const plans = require('../config/plans');
 
 async function evaluatePlanLimit(orgId, resource) {
   const org = await prisma.organization.findUnique({
@@ -8,8 +8,8 @@ async function evaluatePlanLimit(orgId, resource) {
   });
 
   const plan = org?.plan || 'FREE';
-  const limits = getPlanLimits(plan);
-  const label = getPlanLabel(plan);
+  const limits = plans.getPlanLimits(plan);
+  const label = plans.getPlanLabel(plan);
 
   if (resource === 'vendor') {
     if (limits.maxVendors === Infinity) return { ok: true };
@@ -33,14 +33,17 @@ async function evaluatePlanLimit(orgId, resource) {
   }
 
   if (resource === 'coi') {
-    if (limits.maxCois === Infinity) return { ok: true };
+    if (limits.maxCois === Infinity) return { ok: true, current: null, limit: null };
+    // Soft-deleted certificates stay on file but do not consume the plan cap.
     const count = await prisma.coi.count({
-      where: { orgId },
+      where: { orgId, deletedAt: null },
     });
     if (count >= limits.maxCois) {
       return {
         ok: false,
         status: 403,
+        current: count,
+        limit: limits.maxCois,
         body: {
           error: `You've reached the COI limit (${limits.maxCois}) for your ${label} plan. Upgrade to add more.`,
           code: 'PLAN_LIMIT_EXCEEDED',
@@ -51,6 +54,7 @@ async function evaluatePlanLimit(orgId, resource) {
         },
       };
     }
+    return { ok: true, current: count, limit: limits.maxCois };
   }
 
   return { ok: true };

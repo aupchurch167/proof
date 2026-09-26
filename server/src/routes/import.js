@@ -4,6 +4,7 @@ const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
 const { checkCompliance } = require('../services/compliance');
+const { evaluatePlanLimit } = require('../middleware/planLimits');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
 const core = require('../lib/core');
 const { mapTradeToCanonical } = require('../constants/trades');
@@ -216,13 +217,11 @@ router.post('/cois', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upl
       return res.status(400).json({ error: 'Vendor email header mapping is required' });
     }
 
-    // Check plan limits
+    // Check plan limits. evaluatePlanLimit ignores soft-deleted certificates.
     const org = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { plan: true } });
-    const coiLimits = getPlanLimits(org?.plan || 'FREE');
     const coiLabel = getPlanLabel(org?.plan || 'FREE');
-    let coiCount = coiLimits.maxCois !== Infinity
-      ? await prisma.coi.count({ where: { orgId: req.user.orgId } })
-      : 0;
+    const coiGate = await evaluatePlanLimit(req.user.orgId, 'coi');
+    let coiCount = coiGate.limit == null ? 0 : coiGate.current;
 
     // Load org settings and name if compliance check requested
     let orgSettings = null;
@@ -277,8 +276,8 @@ router.post('/cois', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), upl
       }
 
       // Check COI plan limit
-      if (coiLimits.maxCois !== Infinity && coiCount >= coiLimits.maxCois) {
-        results.errors.push({ row: i + 2, message: `COI limit (${coiLimits.maxCois}) reached for ${coiLabel} plan` });
+      if (coiGate.limit != null && coiCount >= coiGate.limit) {
+        results.errors.push({ row: i + 2, message: `COI limit (${coiGate.limit}) reached for ${coiLabel} plan` });
         results.skipped++;
         continue;
       }

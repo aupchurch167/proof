@@ -32,6 +32,7 @@ describe('updateVendorStatus -> coi.updated wiring', () => {
     // Give the vendor a fully-compliant approved COI, then recompute.
     await createTestCoi(vendor.id, org.id, {
       status: 'APPROVED',
+      certificateHolderName: org.name,
       glCoverageAmount: 200000000,
       glExpirationDate: new Date(Date.now() + 120 * DAY),
       wcCoverageAmount: 100000000,

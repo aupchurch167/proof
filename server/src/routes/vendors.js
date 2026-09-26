@@ -11,7 +11,8 @@ const { extractCoiData } = require('../services/coiExtractor');
 const { isExtractLimitError } = require('../lib/extractErrors');
 const { rejectUnlessPdfMagic } = require('../utils/uploadFilters');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
-const { coverageFor, coverageReason } = require('../services/coverage');
+const { coverageFor, coverageReason, coverageFailureReasons } = require('../services/coverage');
+const { evaluateCompliance, holderDetailReason } = require('../services/complianceRules');
 const { uploadFile, getSignedUrl } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
@@ -236,11 +237,26 @@ router.get('/:id', authenticate, async (req, res) => {
       });
     }
 
-    const settings = await prisma.organizationSettings.findUnique({
-      where: { orgId: req.user.orgId },
+    const orgRow = await prisma.organization.findUnique({
+      where: { id: req.user.orgId },
+      select: { name: true, settings: true },
     });
+    const settings = orgRow?.settings || null;
     const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
     const coverages = coverageFor(latestApproved, settings, {});
+    const evaluated = latestApproved
+      ? evaluateCompliance(latestApproved, settings, orgRow?.name)
+      : null;
+    const holderReason = holderDetailReason(evaluated);
+    const coverageFailures = coverageFailureReasons(coverages);
+    const reasons = [];
+    if (holderReason) reasons.push(holderReason);
+    if (coverageFailures.length) reasons.push(...coverageFailures);
+    else if (!holderReason) {
+      const soon = coverageReason(coverages);
+      if (soon) reasons.push(soon);
+    }
+    const statusReason = reasons.length ? reasons.join(' · ') : null;
 
     res.json(omitVendorSecrets({
       ...vendor,
@@ -248,7 +264,7 @@ router.get('/:id', authenticate, async (req, res) => {
       masterAgreementUrl,
       lastCoiRequestAt: lastCoiRequest?.sentAt || null,
       coverages,
-      statusReason: coverageReason(coverages),
+      statusReason,
       // The certificate list marks anything older than the newest approved one
       // for the same coverage as superseded rather than just "approved".
       supersededCoiIds: latestApproved

@@ -9,7 +9,7 @@ const { isExtractLimitError } = require('../lib/extractErrors');
 const { rejectUnlessPdfMagic } = require('../utils/uploadFilters');
 const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
-const { getPlanLimits, getPlanLabel } = require('../config/plans');
+const { evaluatePlanLimit } = require('../middleware/planLimits');
 const { uploadFile } = require('../services/storage');
 const { verifyUploadToken } = require('../utils/tokens');
 
@@ -131,17 +131,13 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
     }
     if (!rejectUnlessPdfMagic(req, res)) return;
 
-    // Check COI plan limit
-    const plan = vendor.organization.plan || 'FREE';
-    const limits = getPlanLimits(plan);
-    if (limits.maxCois !== Infinity) {
-      const coiCount = await prisma.coi.count({ where: { orgId: vendor.orgId } });
-      if (coiCount >= limits.maxCois) {
-        return res.status(403).json({
-          error: `This organization has reached its COI limit. Please contact them to resolve this.`,
-          code: 'PLAN_LIMIT_EXCEEDED',
-        });
-      }
+    // Same cap as staff upload. Soft-deleted certificates do not count.
+    const coiLimit = await evaluatePlanLimit(vendor.orgId, 'coi');
+    if (!coiLimit.ok) {
+      return res.status(403).json({
+        error: 'This organization has reached its COI limit. Please contact them to resolve this.',
+        code: 'PLAN_LIMIT_EXCEEDED',
+      });
     }
 
     // Upload to DigitalOcean Spaces
