@@ -1,14 +1,72 @@
 # PR 27 verification (Prompt V)
 
-**Final verdict: FAIL**
+**Final verdict: PASS WITH NOTES**
 
-**Implementation under test:** [PR #27](https://github.com/aupchurch167/proof/pull/27), commit `b428d4f` (`Cap the free plan at 10 vendors and store signup UTMs.`), branch `cursor/free-plan-utm-signup-ee6f`.
+**Implementation under test:** [PR #27](https://github.com/aupchurch167/proof/pull/27), commit `c58eaad` (`Hold the vendor cap with an organization row lock.`), branch `cursor/free-plan-utm-signup-ee6f`.
 **Checked against:** `origin/main` at `8e5f3f6`.
-**Product code changed by this verification:** none. This branch only adds this note.
+**Product code changed by this verification:** none.
+
+The current result is the re-verify dated 2026-09-28. Commit `c58eaad` closes the parallel-create hole from the first pass. Two low notes from that pass are still open, and the 20s transaction timeout does not cancel a session blocked on the organization row lock. The section below the re-verify is the record of commit `b428d4f`, when the verdict was FAIL.
+
+## Re-verify (2026-09-28, commit `c58eaad`)
+
+**Verdict for this commit: PASS WITH NOTES**
+
+`createVendorUnderCap` (`server/src/middleware/planLimits.js:88-136`) locks the organization row with `SELECT ... FOR UPDATE`, recounts live vendors, and inserts in that same transaction. Add vendor (`server/src/routes/vendors.js:125`), public apply (`server/src/routes/apply.js:136`), and each CSV row (`server/src/routes/import.js:126`) go through it. The lock is taken and released once per vendor. Core mirroring, certificate upload, and the rest of a CSV row run after the transaction commits.
+
+### What was run
+
+- `npm test` in `server` on `c58eaad` against PostgreSQL 16 (`proof_test`): **29 suites, 346 tests, passed** (33.8s). Six of those tests are new in `server/tests/vendor-cap-concurrency.test.js`.
+- `npm run build` in `client`: **passed** (`dist/assets/index-BSzVSXcz.js`). The client files are unchanged in this commit.
+- The same concurrency probe as the first pass, plus a Starter crossing, a mixed burst, a duplicate-email burst, an 80-row unlimited import, and a lock held from outside the app. Database `pg_stat_database.deadlocks` for that database stayed **0**.
+
+### The parallel cap
+
+These are the cases that failed on `b428d4f`. On `c58eaad` they stop at the cap, and every rejection is the friendly limit message (`PLAN_LIMIT_EXCEEDED`), not a 500.
+
+- 20 parallel `POST /api/vendors` on an empty free account: **10 created, 10 rejected, 10 live.** The rejection text is "The Free plan includes 10 vendors, and this account is already at that limit. Your existing vendors stay on file."
+- 8 parallel adds with 9 vendors already on file: **1 created, 7 rejected, 10 live.**
+- Two overlapping CSV imports of 12 new rows each: **5 created in each file, 10 live.** Skipped rows use that same free-plan sentence. Neither file's error list contained a Prisma or timeout message.
+- One CSV of 25 rows: **10 created, 15 skipped.**
+- 6 parallel `POST /api/apply/:slug` with 9 vendors already on file: **1 created, 5 rejected, 10 live.** The applicant sentence is "This organization has reached its vendor limit. Please contact them to resolve this."
+- Starter with 48 vendors, 5 parallel adds: **2 created, 3 rejected, 50 live.** The rejection names Starter and the limit 50.
+- Starter already at 50, 4 parallel adds: **all 403, 50 live.**
+- Adds, a CSV, and public applications at once on a free account that started at 7: **10 live, no 500.**
+- 8 parallel adds of the same email: **one 201, seven 409, 1 live.**
+
+### Locks
+
+An unlimited import of 80 rows took 1230ms and created all 80. A same-organization add started during that import returned 201 in 22ms. The import does not keep the organization lock across the file. Each row is its own transaction (`import.js:123-149`), and `mirrorImportedVendorToCore` runs after commit.
+
+A second session held `SELECT ... FOR UPDATE` on the organization for 3 seconds. The add waited about 3 seconds and then returned 201. It did not 500.
+
+The same hold, left in place past the 20 second `timeout` on `planLimits.js:7`, did not end the request. After more than two minutes the add and a one-row import were still blocked on that row lock (`pg_stat_activity` wait event `Lock`, query `SELECT "id" FROM "Organization" ... FOR UPDATE`). Prisma's transaction timeout did not cancel the waiting query, so the route did not return 500 and did not return the limit message. The requests stay open until the other session commits or rolls back. A short queue of inserts does not hit this. An abandoned transaction that has locked the organization row does.
+
+No deadlock showed up in the parallel bursts or in `pg_stat_database.deadlocks`.
+
+### Paths that create a vendor
+
+Request handlers that insert a vendor all call `createVendorUnderCap`: `POST /api/vendors`, `POST /api/import/vendors`, and `POST /api/apply/:slug`. Inbound email, the public API, portal upload, and staff certificate upload update or read vendors. They do not insert one. `POST /api/vendors` still runs `enforcePlanLimit('vendor')` before the helper (`vendors.js:117`). That early check is outside the lock. The helper is what stops the burst. Public apply still calls `evaluatePlanLimit` before the helper (`apply.js:82-88`) and still spreads `plan` and `limit` on the 403 body. The probe's apply rejection included `plan: "FREE"` and `limit: 10` next to the public sentence.
+
+`server/scripts/import-airtable-vendors.js:196` still calls `prisma.vendor.create` directly. That is the operator import script, not a request route. Running it can add vendors past the cap.
+
+### Notes that remain
+
+**1. Low — A numeric UTM is stored.** Unchanged from the first pass. `server/src/lib/signupAttribution.js:15-16`. `utm_campaign: 99` is stored as `"99"`. Arrays, objects, and booleans are stored as null.
+
+**2. Low — Public apply's JSON still names the plan and the cap.** `server/src/routes/apply.js:148-152` replaces `error` and spreads the rest of the plan-limit body. Confirmed again on this commit: 403 with the public sentence, plus `plan: "FREE"`, `limit: 10`, and `current: 10`.
+
+**3. Low — The 20 second transaction timeout does not cancel a blocked row lock.** `server/src/middleware/planLimits.js:7` and the catch blocks at `vendors.js:148-154` and `apply.js:216-220`. Those catches would turn a thrown timeout into "Failed to create vendor" or "Failed to submit application". A lock wait does not throw. The request waits. CSV import would put `err.message` on the row if a later error did throw (`import.js:151-156`). That path was not hit by the cap tests. Over-limit responses in this run were 403 with the friendly sentence.
+
+### Recommendation
+
+The free-plan cap of 10 holds for parallel adds, overlapping CSV imports, and parallel public applications. Starter holds at 50. The earlier FAIL is closed. The three notes above are what remain.
+
+## First pass (commit `b428d4f`)
 
 The free-plan number, the copy, the over-limit behavior, and signup attribution match the PR on a single request. Parallel requests do not. A burst that all read the live count before any insert commits can create as many vendors as it fires. On a free organization that started at zero, 20 parallel adds created 20 vendors and none were rejected. Two overlapping CSV imports created 20. Six overlapping public applications, starting from 9 vendors, created 6 more (15 live). That is the failure. Signup UTMs, the migration, and the certificate caps held.
 
-Line numbers below are from `b428d4f`.
+Line numbers in this section are from `b428d4f`.
 
 ## What was run
 
@@ -103,6 +161,8 @@ Checked through `POST /api/auth/signup` and `POST /api/auth/google`:
 
 The client sanitizer (`client/src/utils/signupAttribution.js:9-13`) is thinner than the server: it deletes C0 controls instead of turning them into spaces, and it leaves `<`, `>`, and zero-width characters in `sessionStorage`. The server runs again before insert, which is why the stored script payload has no tags. The values are not rendered anywhere in `client/src` (the only `utm_` matches are the capture helper). U+202E (right-to-left override) is not in the server's strip set, so `safe\u202Eevil` is stored with that character still in it. Nothing in the app prints the column.
 
-## Recommendation
+## Recommendation (commit `b428d4f`)
+
+This recommendation applied to `b428d4f`. Commit `c58eaad` is the re-verify above.
 
 The cap number, the copy, the "keep everyone already over 10" behavior, and signup attribution match the request on a single request. The cap is not enforced against parallel adds, parallel CSV imports, or parallel public applications. Treat the vendor cap as open until the count and the insert share a lock or run in one transaction on all three paths (`planLimits.js`, `apply.js`, `import.js`). The UTM notes above are separate and small.
