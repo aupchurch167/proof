@@ -1,5 +1,21 @@
 const prisma = require('../lib/prisma');
 const plans = require('../config/plans');
+const { generateUploadToken } = require('../utils/tokens');
+
+// A burst of creates can wait on the organization row lock. Keep this above
+// the time a short queue of single-row inserts needs.
+const VENDOR_CAP_TX = { maxWait: 20000, timeout: 20000 };
+
+function vendorCapBody(plan, limit, current) {
+  return {
+    error: plans.vendorLimitReachedMessage(plan, limit),
+    code: 'PLAN_LIMIT_EXCEEDED',
+    resource: 'vendor',
+    limit,
+    current,
+    plan,
+  };
+}
 
 async function evaluatePlanLimit(orgId, resource) {
   const org = await prisma.organization.findUnique({
@@ -17,18 +33,7 @@ async function evaluatePlanLimit(orgId, resource) {
       where: { orgId, deletedAt: null },
     });
     if (count >= limits.maxVendors) {
-      return {
-        ok: false,
-        status: 403,
-        body: {
-          error: `You've reached the vendor limit (${limits.maxVendors}) for your ${label} plan. Upgrade to add more.`,
-          code: 'PLAN_LIMIT_EXCEEDED',
-          resource: 'vendor',
-          limit: limits.maxVendors,
-          current: count,
-          plan,
-        },
-      };
+      return { ok: false, status: 403, body: vendorCapBody(plan, limits.maxVendors, count) };
     }
   }
 
@@ -76,4 +81,58 @@ function enforcePlanLimit(resource) {
   };
 }
 
-module.exports = { enforcePlanLimit, evaluatePlanLimit };
+// Insert one vendor while the organization row is locked. Parallel creates,
+// public applies, and CSV import rows then see each other's commits, so a
+// finite cap cannot be passed. Unlimited plans are not rejected for count.
+// Returns { ok: true, vendor } or { ok: false, reason: 'email' | 'cap', ... }.
+async function createVendorUnderCap(orgId, data) {
+  return prisma.$transaction(async (tx) => {
+    // Organization.id is TEXT, not uuid. Compare it as text.
+    const locked = await tx.$queryRaw`
+      SELECT "id" FROM "Organization" WHERE "id" = ${orgId} FOR UPDATE
+    `;
+    if (!locked.length) {
+      const err = new Error('Organization not found');
+      err.code = 'ORG_NOT_FOUND';
+      throw err;
+    }
+
+    const org = await tx.organization.findUnique({
+      where: { id: orgId },
+      select: { plan: true },
+    });
+    const plan = org?.plan || 'FREE';
+    const limits = plans.getPlanLimits(plan);
+
+    // Same order as CSV import: an email already on file is a duplicate,
+    // even when the account is also at its cap.
+    const existing = await tx.vendor.findFirst({
+      where: { orgId, email: data.email, deletedAt: null },
+      select: { id: true },
+    });
+    if (existing) return { ok: false, reason: 'email' };
+
+    if (limits.maxVendors !== Infinity) {
+      const current = await tx.vendor.count({ where: { orgId, deletedAt: null } });
+      if (current >= limits.maxVendors) {
+        return {
+          ok: false,
+          reason: 'cap',
+          status: 403,
+          body: vendorCapBody(plan, limits.maxVendors, current),
+        };
+      }
+    }
+
+    const vendor = await tx.vendor.create({
+      data: { ...data, orgId },
+    });
+    const updated = await tx.vendor.update({
+      where: { id: vendor.id },
+      data: { uploadToken: generateUploadToken(vendor.id) },
+    });
+    return { ok: true, vendor: updated };
+  }, VENDOR_CAP_TX);
+}
+
+module.exports = { enforcePlanLimit, evaluatePlanLimit, createVendorUnderCap };

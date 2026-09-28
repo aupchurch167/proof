@@ -2,6 +2,8 @@
 
 Proof uses Prisma Migrate. Apply pending migrations with:
 
+`20260928000000_add_signup_attribution` adds five nullable text columns on `Organization` (`utmSource`, `utmMedium`, `utmCampaign`, `utmTerm`, `utmContent`) and an index on `(utmSource, createdAt)`. Existing rows stay null. `createdAt` is the signup timestamp; it is not a new column. No backfill.
+
 B06 (`20260921000000_add_legal_acceptance`) is additive: four nullable columns on `User` (`termsAcceptedAt`, `termsVersion`, `privacyAcceptedAt`, `privacyVersion`). Existing rows stay null.
 
 ```bash

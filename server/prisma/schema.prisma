@@ -77,6 +77,14 @@ model Organization {
   // The window a carrier audits: { mode, start, end, warnInPeriod, retainForPeriod }.
   // Drives the Requirements coverage-period block and the Audit log presets.
   coveragePeriod        Json?
+  // Marketing attribution from the signup URL. Null when the visitor arrived
+  // with no UTMs, and for every account created before these columns existed.
+  // createdAt is the signup timestamp.
+  utmSource             String?
+  utmMedium             String?
+  utmCampaign           String?
+  utmTerm               String?
+  utmContent            String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -89,6 +97,8 @@ model Organization {
   apiClients    ApiClient[]
   coiRequests   CoiRequest[]
   webhookEndpoints WebhookEndpoint[]
+
+  @@index([utmSource, createdAt])
 }
 
 model OrganizationSettings {

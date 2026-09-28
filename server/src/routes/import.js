@@ -4,11 +4,10 @@ const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
 const { checkCompliance } = require('../services/compliance');
-const { evaluatePlanLimit } = require('../middleware/planLimits');
-const { getPlanLimits, getPlanLabel } = require('../config/plans');
+const { evaluatePlanLimit, createVendorUnderCap } = require('../middleware/planLimits');
+const { getPlanLabel, vendorLimitReachedMessage } = require('../config/plans');
 const core = require('../lib/core');
 const { mapTradeToCanonical } = require('../constants/trades');
-const { generateUploadToken } = require('../utils/tokens');
 const { isVendorEmailConflict } = require('../lib/prismaErrors');
 
 const router = express.Router();
@@ -103,14 +102,6 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
       return res.status(400).json({ error: 'Name and email header mappings are required' });
     }
 
-    // Check plan limits
-    const org = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { plan: true } });
-    const limits = getPlanLimits(org?.plan || 'FREE');
-    const label = getPlanLabel(org?.plan || 'FREE');
-    let vendorCount = limits.maxVendors !== Infinity
-      ? await prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } })
-      : 0;
-
     const results = { created: 0, skipped: 0, errors: [] };
 
     for (let i = 0; i < rows.length; i++) {
@@ -129,43 +120,32 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
         continue;
       }
 
-      // Check for existing vendor by email within this org
-      const existing = await prisma.vendor.findFirst({
-        where: { orgId: req.user.orgId, email, deletedAt: null },
-      });
-
-      if (existing) {
-        results.errors.push({ row: i + 2, message: `Vendor with email ${email} already exists` });
-        results.skipped++;
-        continue;
-      }
-
-      // Check vendor plan limit
-      if (limits.maxVendors !== Infinity && vendorCount >= limits.maxVendors) {
-        results.errors.push({ row: i + 2, message: `Vendor limit (${limits.maxVendors}) reached for ${label} plan` });
-        results.skipped++;
-        continue;
-      }
-
       try {
-        const created = await prisma.vendor.create({
-          data: {
-            orgId: req.user.orgId,
-            name,
-            contactName: contactName || null,
-            email,
-            phone: phone || null,
-            address: address || null,
-            trade: trade || null,
-          },
+        // Count and insert share an organization row lock, so a second import
+        // running at the same time cannot also fill the same slots.
+        const created = await createVendorUnderCap(req.user.orgId, {
+          name,
+          contactName: contactName || null,
+          email,
+          phone: phone || null,
+          address: address || null,
+          trade: trade || null,
         });
-        await prisma.vendor.update({
-          where: { id: created.id },
-          data: { uploadToken: generateUploadToken(created.id) },
-        });
-        vendorCount++;
+        if (!created.ok && created.reason === 'email') {
+          results.errors.push({ row: i + 2, message: `Vendor with email ${email} already exists` });
+          results.skipped++;
+          continue;
+        }
+        if (!created.ok && created.reason === 'cap') {
+          results.errors.push({
+            row: i + 2,
+            message: vendorLimitReachedMessage(created.body.plan, created.body.limit),
+          });
+          results.skipped++;
+          continue;
+        }
         results.created++;
-        mirrorImportedVendorToCore(created);
+        mirrorImportedVendorToCore(created.vendor);
       } catch (err) {
         const message = isVendorEmailConflict(err)
           ? `Vendor with email ${email} already exists`

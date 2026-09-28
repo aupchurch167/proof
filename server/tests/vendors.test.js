@@ -216,32 +216,92 @@ describe('POST /api/vendors/:id/request-coi', () => {
 });
 
 describe('Free plan vendor limit', () => {
-  it('returns 403 when Free plan limit of 20 vendors is reached', async () => {
-    // Clean vendors first, then create 20
-    await prisma.coi.deleteMany({ where: { orgId: org.id } });
-    await prisma.vendor.deleteMany({ where: { orgId: org.id } });
-
-    const vendorPromises = [];
-    for (let i = 0; i < 20; i++) {
-      vendorPromises.push(
-        prisma.vendor.create({
-          data: {
-            orgId: org.id,
-            name: `Limit Vendor ${i}`,
-            email: `limit${i}-${Date.now()}@test.com`,
-          },
-        })
-      );
+  async function orgWithVendors({ plan = 'FREE', active = 0, deleted = 0, name = 'Cap Org' } = {}) {
+    const capOrg = await createTestOrg({ name, plan });
+    const capUser = await createTestUser(capOrg.id, { email: `cap-${plan}-${Date.now()}-${Math.random().toString(16).slice(2)}@test.com` });
+    const rows = [];
+    for (let i = 0; i < active + deleted; i++) {
+      rows.push(prisma.vendor.create({
+        data: {
+          orgId: capOrg.id,
+          name: `Limit Vendor ${i}`,
+          email: `limit${i}-${capOrg.id}@test.com`,
+          ...(i < deleted ? { deletedAt: new Date() } : {}),
+        },
+      }));
     }
-    await Promise.all(vendorPromises);
+    await Promise.all(rows);
+    return { capOrg, token: getAuthToken(capUser) };
+  }
+
+  it('returns 403 when the Free plan limit of 10 vendors is reached', async () => {
+    const { token: capToken } = await orgWithVendors({ active: 10, name: 'Free At Cap' });
 
     const res = await request(app)
       .post('/api/vendors')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'Over Limit', email: 'over@test.com' });
+      .set('Authorization', `Bearer ${capToken}`)
+      .send({ name: 'Over Limit', email: `over-${Date.now()}@test.com` });
 
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('PLAN_LIMIT_EXCEEDED');
+    expect(res.body.limit).toBe(10);
+    expect(res.body.current).toBe(10);
+    expect(res.body.plan).toBe('FREE');
+    expect(res.body.error).toMatch(/Free plan includes 10 vendors/);
+    expect(res.body.error).toMatch(/stay on file/i);
+  });
+
+  it('allows the 10th vendor on the Free plan', async () => {
+    const { token: capToken } = await orgWithVendors({ active: 9, name: 'Free Under Cap' });
+
+    const res = await request(app)
+      .post('/api/vendors')
+      .set('Authorization', `Bearer ${capToken}`)
+      .send({ name: 'Tenth', email: `tenth-${Date.now()}@test.com` });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('keeps vendors already over 10 and only blocks adding more', async () => {
+    const { capOrg, token: capToken } = await orgWithVendors({ active: 11, name: 'Free Over Cap' });
+
+    const list = await request(app)
+      .get('/api/vendors')
+      .set('Authorization', `Bearer ${capToken}`);
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(11);
+
+    const blocked = await request(app)
+      .post('/api/vendors')
+      .set('Authorization', `Bearer ${capToken}`)
+      .send({ name: 'Still Over', email: `still-${Date.now()}@test.com` });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.code).toBe('PLAN_LIMIT_EXCEEDED');
+
+    const remaining = await prisma.vendor.count({ where: { orgId: capOrg.id, deletedAt: null } });
+    expect(remaining).toBe(11);
+  });
+
+  it('does not count soft-deleted vendors toward the Free cap', async () => {
+    const { token: capToken } = await orgWithVendors({ active: 9, deleted: 5, name: 'Free Deleted' });
+
+    const res = await request(app)
+      .post('/api/vendors')
+      .set('Authorization', `Bearer ${capToken}`)
+      .send({ name: 'After Deletes', email: `afterdel-${Date.now()}@test.com` });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('does not apply the Free cap of 10 to Starter', async () => {
+    const { token: capToken } = await orgWithVendors({ plan: 'STARTER', active: 11, name: 'Starter Over Free' });
+
+    const res = await request(app)
+      .post('/api/vendors')
+      .set('Authorization', `Bearer ${capToken}`)
+      .send({ name: 'Starter Vendor', email: `starter-${Date.now()}@test.com` });
+
+    expect(res.status).toBe(201);
   });
 });
 

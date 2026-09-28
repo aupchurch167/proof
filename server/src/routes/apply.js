@@ -10,9 +10,8 @@ const { isExtractLimitError } = require('../lib/extractErrors');
 const { hasPdfMagic } = require('../utils/uploadFilters');
 const { schemas, parseSchema } = require('../utils/validation');
 const { checkCompliance, updateVendorStatus } = require('../services/compliance');
-const { generateUploadToken } = require('../utils/tokens');
 const { isValidTrade } = require('../constants/trades');
-const { evaluatePlanLimit } = require('../middleware/planLimits');
+const { evaluatePlanLimit, createVendorUnderCap } = require('../middleware/planLimits');
 const { isVendorEmailConflict } = require('../lib/prismaErrors');
 
 const router = express.Router();
@@ -134,23 +133,25 @@ router.post(
         }
       }
 
-      const vendor = await prisma.vendor.create({
-        data: {
-          orgId: org.id,
-          name,
-          contactName: contactName || null,
-          email,
-          phone,
-          address: composedAddress,
-          trade: trade || null,
-          notes: notes || null,
-          uploadToken: undefined, // placeholder, replaced below with a signed JWT
-        },
+      const created = await createVendorUnderCap(org.id, {
+        name,
+        contactName: contactName || null,
+        email,
+        phone,
+        address: composedAddress,
+        trade: trade || null,
+        notes: notes || null,
       });
-      await prisma.vendor.update({
-        where: { id: vendor.id },
-        data: { uploadToken: generateUploadToken(vendor.id) },
-      });
+      if (!created.ok && created.reason === 'email') {
+        return res.status(409).json({ error: 'A vendor with this email already exists for this organization' });
+      }
+      if (!created.ok && created.reason === 'cap') {
+        return res.status(403).json({
+          ...created.body,
+          error: 'This organization has reached its vendor limit. Please contact them to resolve this.',
+        });
+      }
+      const vendor = created.vendor;
 
       if (coiFile) {
         const key = `${uuidv4()}${path.extname(coiFile.originalname) || ''}`;

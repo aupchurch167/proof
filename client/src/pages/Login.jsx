@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import GoogleSignInButton from '../components/GoogleSignInButton';
+import { readSignupUtms, rememberSignupUtms, signupUtmSearch } from '../utils/signupAttribution';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -12,6 +13,9 @@ export default function Login() {
   const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const resetSuccess = searchParams.get('reset') === 'success';
+
+  // Same-tab Google sign-in and the sign-up link need UTMs before effects run.
+  rememberSignupUtms(searchParams);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -30,7 +34,7 @@ export default function Login() {
   const handleGoogle = async (credential) => {
     setError('');
     try {
-      await loginWithGoogle(credential);
+      await loginWithGoogle(credential, undefined, readSignupUtms());
       navigate('/');
     } catch (err) {
       setError(err.message);
@@ -67,7 +71,7 @@ export default function Login() {
           </button>
           <GoogleSignInButton onCredential={handleGoogle} onError={(err) => setError(err.message)} text="signin_with" />
           <p className="text-center mt-4 text-sm text-muted">
-            Don't have an account? <Link to="/signup" className="text-navy hover:underline">Sign up</Link>
+            Don't have an account? <Link to={`/signup${signupUtmSearch()}`} className="text-navy hover:underline">Sign up</Link>
           </p>
           <p className="text-center mt-2 text-xs text-faint">
             <Link to="/terms" className="hover:underline">Terms</Link>

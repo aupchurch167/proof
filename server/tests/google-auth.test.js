@@ -34,7 +34,7 @@ describe('GET /api/auth/config', () => {
     isGoogleConfigured.mockReturnValue(true);
     const res = await request(app).get('/api/auth/config');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ googleEnabled: true });
+    expect(res.body).toEqual({ googleEnabled: true, freeVendorLimit: 10 });
   });
 });
 
