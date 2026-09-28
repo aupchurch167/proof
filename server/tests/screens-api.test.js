@@ -360,7 +360,7 @@ describe('GET /api/organization/usage', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.planLabel).toBe('Free');
-    expect(res.body.vendors.limit).toBe(20);
+    expect(res.body.vendors.limit).toBe(10);
     expect(typeof res.body.vendors.percent).toBe('number');
     expect(res.body.portalPreviewToken).toBeTruthy();
   });

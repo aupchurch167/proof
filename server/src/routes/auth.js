@@ -15,6 +15,8 @@ const {
 const { hashToken } = require('../lib/apiTokens');
 const { verifyAccessToken } = require('../utils/tokens');
 const { acceptedLegal, legalAcceptanceFields } = require('../legal/documents');
+const { signupAttributionFromBody } = require('../lib/signupAttribution');
+const { PLAN_LIMITS } = require('../config/plans');
 
 const router = express.Router();
 
@@ -61,7 +63,10 @@ async function findInviteUser(rawToken) {
 
 // GET /api/auth/config — public client config (which providers are enabled)
 router.get('/config', (req, res) => {
-  res.json({ googleEnabled: isGoogleConfigured() });
+  res.json({
+    googleEnabled: isGoogleConfigured(),
+    freeVendorLimit: PLAN_LIMITS.FREE.maxVendors,
+  });
 });
 
 // POST /api/auth/signup
@@ -87,6 +92,7 @@ router.post('/signup', validate('signup'), async (req, res) => {
           phone: phone || null,
           address: address || null,
           slug: slugForOrg(orgName),
+          ...signupAttributionFromBody(req.body),
           settings: {
             create: {},
           },
@@ -239,6 +245,7 @@ router.post('/google', validate('google'), async (req, res) => {
               || profile.email,
             email: profile.email,
             slug: slugForOrg(orgName || profile.email),
+            ...signupAttributionFromBody(req.body),
             settings: { create: {} },
           },
         });

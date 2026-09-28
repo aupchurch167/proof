@@ -21,7 +21,7 @@ async function evaluatePlanLimit(orgId, resource) {
         ok: false,
         status: 403,
         body: {
-          error: `You've reached the vendor limit (${limits.maxVendors}) for your ${label} plan. Upgrade to add more.`,
+          error: plans.vendorLimitReachedMessage(plan, limits.maxVendors),
           code: 'PLAN_LIMIT_EXCEEDED',
           resource: 'vendor',
           limit: limits.maxVendors,

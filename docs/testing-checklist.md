@@ -71,7 +71,7 @@
 
 ## Plans & Limits
 
-- [ ] Free plan shows limit warning at 20 vendors
+- [ ] Free plan shows limit warning at 10 vendors
 
 ## Responsive & Infrastructure
 

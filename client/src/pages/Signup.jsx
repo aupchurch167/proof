@@ -1,16 +1,32 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import GoogleSignInButton from '../components/GoogleSignInButton';
+import { api } from '../utils/api';
+import { clearSignupUtms, readSignupUtms, rememberSignupUtms, signupUtmSearch } from '../utils/signupAttribution';
 
 export default function Signup() {
+  const [searchParams] = useSearchParams();
   const [form, setForm] = useState({ orgName: '', email: '', password: '', firstName: '', lastName: '' });
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [freeVendorLimit, setFreeVendorLimit] = useState(null);
   const { signup, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
+
+  // Run during render so the sign-in link and the submit payload see UTMs
+  // before the first effect (including a same-tab return from Google).
+  rememberSignupUtms(searchParams);
+
+  useEffect(() => {
+    api.get('/auth/config')
+      .then((cfg) => {
+        if (Number.isInteger(cfg.freeVendorLimit)) setFreeVendorLimit(cfg.freeVendorLimit);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -24,7 +40,8 @@ export default function Signup() {
         setLoading(false);
         return;
       }
-      const data = await signup({ ...form, acceptTerms: true });
+      const data = await signup({ ...form, acceptTerms: true, ...readSignupUtms() });
+      clearSignupUtms();
       if (data.accessToken) {
         navigate('/');
       } else {
@@ -45,7 +62,8 @@ export default function Signup() {
       return;
     }
     try {
-      await loginWithGoogle(credential, form.orgName, { acceptTerms: true });
+      await loginWithGoogle(credential, form.orgName, { acceptTerms: true, ...readSignupUtms() });
+      clearSignupUtms();
       navigate('/');
     } catch (err) {
       setError(err.message);
@@ -61,7 +79,10 @@ export default function Signup() {
         </div>
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-card shadow-sm border">
           <h2 className="text-xl font-semibold mb-1">Create your account</h2>
-          <p className="text-sm text-muted mb-6">You'll be the admin for your organization. You can invite team members later.</p>
+          <p className="text-sm text-muted mb-6">
+            You'll be the admin for your organization. You can invite team members later.
+            {freeVendorLimit != null && ` Free forever for up to ${freeVendorLimit} vendors.`}
+          </p>
           {submitted && (
             <div className="bg-ok-bg text-ok-text px-4 py-3 rounded-control mb-4 text-sm">
               If this address is new, we sent a verification email.
@@ -118,7 +139,7 @@ export default function Signup() {
           </button>
           <GoogleSignInButton onCredential={handleGoogle} onError={(err) => setError(err.message)} text="signup_with" />
           <p className="text-center mt-4 text-sm text-muted">
-            Already have an account? <Link to="/login" className="text-navy hover:underline">Sign in</Link>
+            Already have an account? <Link to={`/login${signupUtmSearch()}`} className="text-navy hover:underline">Sign in</Link>
           </p>
           <p className="text-center mt-2 text-xs text-faint">
             <Link to="/terms" className="hover:underline">Terms</Link>

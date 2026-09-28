@@ -320,6 +320,14 @@ export default function Settings() {
               </div>
               <Meter label="Vendors" used={usage.vendors.used} limit={usage.vendors.limit} />
               <Meter label="Certificates read" used={usage.cois.used} limit={usage.cois.limit} />
+              {usage.plan === 'FREE' && usage.vendors.limit != null && (
+                <p className="text-[13px] text-on-navy-2 leading-[1.5]">
+                  Free forever for up to {usage.vendors.limit} vendors.
+                  {usage.vendors.used > usage.vendors.limit
+                    ? ' This account already has more than that. Every vendor stays on file.'
+                    : ''}
+                </p>
+              )}
               {usage.plan !== 'UNLIMITED' && (
                 <p className="mt-1 text-[13px] text-on-navy-2 leading-[1.5]">
                   No self-serve upgrade. Contact us to change plans — we'll invoice you.

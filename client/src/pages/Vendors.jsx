@@ -161,7 +161,7 @@ function AddVendorDrawer({ open, onClose, onCreated }) {
 export default function Vendors() {
   const { user } = useAuth();
   const toast = useToast();
-  const { refreshUsage } = useUsage();
+  const { usage, refreshUsage } = useUsage();
   const [searchParams, setSearchParams] = useSearchParams();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -313,6 +313,14 @@ export default function Vendors() {
           )}
         </div>
       </div>
+
+      {usage?.vendors?.limit != null && usage.vendors.used >= usage.vendors.limit && (
+        <div className="bg-warn-bg border border-amber text-warn-text px-4 py-3 rounded-control text-[13px]">
+          {usage.plan === 'FREE'
+            ? `The Free plan includes ${usage.vendors.limit} vendors, and this account is already at that limit. Your existing vendors stay on file. Contact us when you need room for more.`
+            : `You've reached the vendor limit (${usage.vendors.limit}) for your ${usage.planLabel} plan. Upgrade to add more.`}
+        </div>
+      )}
 
       <div className="flex gap-2 flex-wrap items-center">
         <Input

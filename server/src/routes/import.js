@@ -5,7 +5,7 @@ const { authenticateVerified: authenticate, authorize } = require('../middleware
 const { parseCsv, generateCsv, VENDOR_HEADERS, COI_HEADERS } = require('../utils/csv');
 const { checkCompliance } = require('../services/compliance');
 const { evaluatePlanLimit } = require('../middleware/planLimits');
-const { getPlanLimits, getPlanLabel } = require('../config/plans');
+const { getPlanLimits, getPlanLabel, vendorLimitReachedMessage } = require('../config/plans');
 const core = require('../lib/core');
 const { mapTradeToCanonical } = require('../constants/trades');
 const { generateUploadToken } = require('../utils/tokens');
@@ -106,7 +106,6 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
     // Check plan limits
     const org = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { plan: true } });
     const limits = getPlanLimits(org?.plan || 'FREE');
-    const label = getPlanLabel(org?.plan || 'FREE');
     let vendorCount = limits.maxVendors !== Infinity
       ? await prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } })
       : 0;
@@ -142,7 +141,10 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), 
 
       // Check vendor plan limit
       if (limits.maxVendors !== Infinity && vendorCount >= limits.maxVendors) {
-        results.errors.push({ row: i + 2, message: `Vendor limit (${limits.maxVendors}) reached for ${label} plan` });
+        results.errors.push({
+          row: i + 2,
+          message: vendorLimitReachedMessage(org?.plan || 'FREE', limits.maxVendors),
+        });
         results.skipped++;
         continue;
       }

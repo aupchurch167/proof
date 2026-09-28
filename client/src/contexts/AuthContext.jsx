@@ -43,10 +43,12 @@ export function AuthProvider({ children }) {
   };
 
   const loginWithGoogle = async (credential, orgName, extra = {}) => {
+    const { acceptTerms, ...attribution } = extra;
     const data = await api.post('/auth/google', {
       credential,
       orgName,
-      ...(extra.acceptTerms ? { acceptTerms: true } : {}),
+      ...(acceptTerms ? { acceptTerms: true } : {}),
+      ...attribution,
     });
     storeSession(data);
     return data.user;
