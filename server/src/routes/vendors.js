@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { omitVendorSecrets } = require('../http/sanitize');
-const { enforcePlanLimit } = require('../middleware/planLimits');
+const { enforcePlanLimit, createVendorUnderCap } = require('../middleware/planLimits');
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { isExtractLimitError } = require('../lib/extractErrors');
@@ -122,19 +122,23 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
       return res.status(400).json({ error: 'Invalid trade value' });
     }
 
-    const vendor = await prisma.vendor.create({
-      data: {
-        orgId: req.user.orgId, name, contactName, email, phone, address,
-        trade: trade || null,
-        additionalEmails: Array.isArray(additionalEmails) ? additionalEmails : [],
-      },
+    const created = await createVendorUnderCap(req.user.orgId, {
+      name,
+      contactName,
+      email,
+      phone,
+      address,
+      trade: trade || null,
+      additionalEmails: Array.isArray(additionalEmails) ? additionalEmails : [],
     });
-
-    // Replace default UUID token with a signed JWT
-    const updated = await prisma.vendor.update({
-      where: { id: vendor.id },
-      data: { uploadToken: generateUploadToken(vendor.id) },
-    });
+    if (!created.ok && created.reason === 'email') {
+      return res.status(409).json({
+        error: 'A vendor with this email already exists',
+        code: 'VENDOR_EMAIL_CONFLICT',
+      });
+    }
+    if (!created.ok) return res.status(created.status).json(created.body);
+    const updated = created.vendor;
 
     logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'create', entity: 'vendor', entityId: updated.id, details: { name, email }, ipAddress: req.ip });
 
