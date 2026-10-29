@@ -5,6 +5,7 @@ const {
   sendChaseEmail,
 } = require('./email');
 const { updateVendorStatus } = require('./compliance');
+const { mergeApprovedCois } = require('./effectiveCoverage');
 const {
   expiringWindowDays,
   evaluateCompliance,
@@ -66,7 +67,6 @@ async function expirationSweepBody(prisma, now) {
         cois: {
           where: { status: 'APPROVED', deletedAt: null },
           orderBy: { submittedAt: 'desc' },
-          take: 1,
         },
       },
     });
@@ -74,7 +74,7 @@ async function expirationSweepBody(prisma, now) {
     for (const vendor of vendors) {
       await updateVendorStatus(prisma, vendor.id, org.id);
 
-      const latestCoi = vendor.cois[0];
+      const latestCoi = mergeApprovedCois(vendor.cois);
       if (!latestCoi) continue;
 
       const expiration = earliestExpiration(latestCoi);
@@ -410,7 +410,6 @@ async function runWeeklySummary(prisma) {
           cois: {
             where: { status: 'APPROVED', deletedAt: null },
             orderBy: { submittedAt: 'desc' },
-            take: 1,
           },
         },
       });
@@ -430,7 +429,7 @@ async function runWeeklySummary(prisma) {
       const urgentList = [];
 
       for (const vendor of vendors) {
-        const latestCoi = vendor.cois[0];
+        const latestCoi = mergeApprovedCois(vendor.cois);
         if (!latestCoi) {
           noCoi++;
           continue;

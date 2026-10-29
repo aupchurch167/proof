@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { api } from '../utils/api';
+import { emailFieldError, normalizeEmail } from '../utils/emailCheck';
 
 const roleLabels = { ADMIN: 'Admin', MEMBER: 'Member', REVIEWER: 'Reviewer', VIEWER: 'Viewer' };
 const roleColors = { ADMIN: 'bg-info-bg text-info-text', MEMBER: 'bg-info-bg text-info-text', REVIEWER: 'bg-ok-bg text-ok-text', VIEWER: 'bg-warm text-ink' };
@@ -15,6 +16,7 @@ export default function Users() {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'MEMBER' });
   const [inviteMsg, setInviteMsg] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [inviting, setInviting] = useState(false);
 
   const fetchUsers = () => {
@@ -28,10 +30,16 @@ export default function Users() {
 
   const handleInvite = async (e) => {
     e.preventDefault();
+    const problem = emailFieldError(inviteForm.email);
+    if (problem) {
+      setEmailError(problem);
+      return;
+    }
+    setEmailError('');
     setInviting(true);
     setInviteMsg('');
     try {
-      await api.post('/users/invite', inviteForm);
+      await api.post('/users/invite', { ...inviteForm, email: normalizeEmail(inviteForm.email) });
       setInviteMsg('Invitation sent!');
       setInviteForm({ email: '', role: 'MEMBER' });
       setShowInvite(false);
@@ -102,14 +110,19 @@ export default function Users() {
           <h2 className="text-lg font-semibold mb-4">Invite a New User</h2>
           <p className="text-sm text-muted mb-4">An email will be sent with a link to join your organization.</p>
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
-            <input
-              type="email"
-              placeholder="Email address"
-              value={inviteForm.email}
-              onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
-              className="flex-1 px-3 py-2.5 border rounded-control text-base sm:text-sm"
-              required
-            />
+            <div className="flex-1">
+              <input
+                type="email"
+                placeholder="Email address"
+                value={inviteForm.email}
+                onChange={(e) => { setInviteForm({ ...inviteForm, email: e.target.value }); setEmailError(''); }}
+                onInvalid={(e) => { e.preventDefault(); setEmailError(emailFieldError(inviteForm.email)); }}
+                aria-invalid={emailError ? 'true' : undefined}
+                className="w-full px-3 py-2.5 border rounded-control text-base sm:text-sm"
+                required
+              />
+              {emailError && <p className="text-bad-text text-xs mt-1">{emailError}</p>}
+            </div>
             <select
               value={inviteForm.role}
               onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}

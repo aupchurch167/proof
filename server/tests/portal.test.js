@@ -5,16 +5,18 @@ const {
   createTestOrg,
   createTestUser,
   createTestVendor,
+  getAuthToken,
   cleanupTestData,
 } = require('./setup');
 
-let org, user, vendor;
+let org, user, vendor, token;
 
 beforeAll(async () => {
   await cleanupTestData();
   org = await createTestOrg();
   user = await createTestUser(org.id, { email: 'portaltest@test.com' });
   vendor = await createTestVendor(org.id);
+  token = getAuthToken(user);
 });
 
 afterAll(async () => {
@@ -103,5 +105,31 @@ describe('PUT /api/portal/:uploadToken/info', () => {
       .send({ name: 'Should Fail' });
 
     expect(res.status).toBe(401);
+  });
+});
+
+describe('admin portal preview', () => {
+  it('opens from the admin session and puts no JWT in the URL', async () => {
+    const res = await request(app)
+      .get('/api/portal/preview')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(vendor.id);
+    expect(JSON.stringify(res.body)).not.toMatch(/eyJ/);
+  });
+
+  it('rejects a caller who is not signed in', async () => {
+    const res = await request(app).get('/api/portal/preview');
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a non-PDF upload with a clear error', async () => {
+    const res = await request(app)
+      .post(`/api/portal/${vendor.uploadToken}/upload`)
+      .attach('pdf', Buffer.from('not a pdf'), { filename: 'notes.txt', contentType: 'text/plain' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/PDF/i);
   });
 });

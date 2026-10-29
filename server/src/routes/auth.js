@@ -17,6 +17,7 @@ const { verifyAccessToken } = require('../utils/tokens');
 const { acceptedLegal, legalAcceptanceFields } = require('../legal/documents');
 const { signupAttributionFromBody } = require('../lib/signupAttribution');
 const { PLAN_LIMITS } = require('../config/plans');
+const { normalizeEmail, findUserByEmail } = require('../utils/emailAddress');
 
 const router = express.Router();
 
@@ -72,12 +73,13 @@ router.get('/config', (req, res) => {
 // POST /api/auth/signup
 router.post('/signup', validate('signup'), async (req, res) => {
   try {
-    const { orgName, email, password, firstName, lastName, phone, address } = req.body;
+    const { orgName, password, firstName, lastName, phone, address } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     // Hash first so existing-vs-new timing is closer (A1-06).
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const existing = await findUserByEmail(prisma, email);
     if (existing) {
       return res.status(201).json({ message: SIGNUP_MESSAGE });
     }
@@ -134,12 +136,10 @@ router.post('/signup', validate('signup'), async (req, res) => {
 // POST /api/auth/login
 router.post('/login', validate('login'), async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = normalizeEmail(req.body.email);
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: { organization: true },
-    });
+    const user = await findUserByEmail(prisma, email, { include: { organization: true } });
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -207,8 +207,7 @@ router.post('/google', validate('google'), async (req, res) => {
         });
       }
     } else {
-      const byEmail = await prisma.user.findUnique({
-        where: { email: profile.email },
+      const byEmail = await findUserByEmail(prisma, profile.email, {
         include: { organization: true },
       });
       if (byEmail) {
@@ -414,7 +413,8 @@ router.put('/me', authenticate, validate('updateProfile'), async (req, res) => {
     if (firstName) data.firstName = firstName;
     if (lastName) data.lastName = lastName;
 
-    if (email && email !== user.email) {
+    const normalizedEmail = email ? normalizeEmail(email) : '';
+    if (normalizedEmail && normalizedEmail !== normalizeEmail(user.email)) {
       if (!user.passwordHash) {
         return res.status(400).json({ error: 'Set a password before changing email' });
       }
@@ -425,11 +425,11 @@ router.put('/me', authenticate, validate('updateProfile'), async (req, res) => {
       if (!valid) {
         return res.status(401).json({ error: 'Current password is incorrect' });
       }
-      const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing) {
+      const existing = await findUserByEmail(prisma, normalizedEmail);
+      if (existing && existing.id !== user.id) {
         return res.status(409).json({ error: 'Email already in use' });
       }
-      data.email = email;
+      data.email = normalizedEmail;
       data.emailVerified = false;
       data.emailVerifyToken = crypto.randomBytes(32).toString('hex');
     }
@@ -475,10 +475,10 @@ router.put('/me', authenticate, validate('updateProfile'), async (req, res) => {
 // POST /api/auth/forgot-password
 router.post('/forgot-password', validate('forgotPassword'), async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     // Always return 200 to prevent email enumeration
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await findUserByEmail(prisma, email);
     if (user) {
       const resetToken = crypto.randomBytes(32).toString('hex');
       const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour

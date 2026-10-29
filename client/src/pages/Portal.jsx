@@ -2,6 +2,19 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { API_BASE } from '../utils/api';
 
+function pdfFileError(file) {
+  if (!file) return 'Choose a PDF certificate';
+  const name = (file.name || '').toLowerCase();
+  const type = (file.type || '').toLowerCase();
+  const namedPdf = name.endsWith('.pdf');
+  const typedPdf = type === 'application/pdf' || type === 'application/x-pdf' || type === 'application/octet-stream';
+  if (type && !typedPdf) return 'Only PDF files are allowed';
+  if (!namedPdf && type !== 'application/pdf' && type !== 'application/x-pdf') {
+    return 'Only PDF files are allowed';
+  }
+  return null;
+}
+
 const money = (dollars) => (dollars == null ? null : `$${dollars.toLocaleString()}`);
 const day = (s) => (s ? new Date(`${s}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null);
 
@@ -27,8 +40,15 @@ function fixFor(flag) {
   return flag.message;
 }
 
-export default function Portal() {
+export default function Portal({ preview = false }) {
   const { token } = useParams();
+  const portalBase = preview ? `${API_BASE}/portal/preview` : `${API_BASE}/portal/${token}`;
+
+  const authHeaders = () => {
+    if (!preview) return {};
+    const access = localStorage.getItem('accessToken');
+    return access ? { Authorization: `Bearer ${access}` } : {};
+  };
   const inputRef = useRef(null);
 
   const [vendor, setVendor] = useState(null);
@@ -42,7 +62,7 @@ export default function Portal() {
   const [form, setForm] = useState({});
 
   useEffect(() => {
-    fetch(`${API_BASE}/portal/${token}`)
+    fetch(portalBase, { headers: authHeaders() })
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) {
@@ -54,16 +74,21 @@ export default function Portal() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [portalBase, preview]);
 
   const upload = async (file) => {
     if (!file) return;
+    const problem = pdfFileError(file);
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setUploading(true);
     setError('');
     try {
       const fd = new FormData();
       fd.append('pdf', file);
-      const res = await fetch(`${API_BASE}/portal/${token}/upload`, { method: 'POST', body: fd });
+      const res = await fetch(`${portalBase}/upload`, { method: 'POST', body: fd, headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Upload failed');
       setResult(data);
@@ -77,9 +102,9 @@ export default function Portal() {
   const saveInfo = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API_BASE}/portal/${token}/info`, {
+      const res = await fetch(`${portalBase}/info`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Could not save');

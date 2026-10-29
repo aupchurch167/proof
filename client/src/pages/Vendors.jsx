@@ -8,6 +8,8 @@ import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import EmailTagInput from '../components/EmailTagInput';
 import { CANONICAL_TRADES } from '../constants/trades';
 import { VENDOR_FILTERS, vendorStatus } from '../constants/status';
+import { VENDOR_NAME_MAX, vendorNameError } from '../constants/limits';
+import { canDeleteVendors, canEditVendors, canImport } from '../constants/roles';
 import {
   Button, Card, Chip, CoverageChip, Input, Select, StatusPill, PageTitle, Th, EmptyState,
 } from '../components/ui';
@@ -52,6 +54,11 @@ function AddVendorDrawer({ open, onClose, onCreated }) {
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+    const nameError = vendorNameError(form.name);
+    if (nameError) {
+      setError(nameError);
+      return;
+    }
     setSaving(true);
     try {
       const payload = { ...form };
@@ -106,6 +113,7 @@ function AddVendorDrawer({ open, onClose, onCreated }) {
               <input
                 type={f.type || 'text'}
                 required={f.required}
+                maxLength={f.key === 'name' ? VENDOR_NAME_MAX : undefined}
                 value={form[f.key]}
                 onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
                 className={field}
@@ -213,8 +221,9 @@ export default function Vendors() {
     setSearchParams(next);
   };
 
-  const canManage = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
-  const canDelete = ['ADMIN', 'MEMBER'].includes(user?.role);
+  const canManage = canEditVendors(user?.role);
+  const canDelete = canDeleteVendors(user?.role);
+  const showImport = canImport(user?.role);
   const allSelected = visible.length > 0 && visible.every((v) => selected.has(v.id));
 
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(visible.map((v) => v.id)));
@@ -307,7 +316,7 @@ export default function Vendors() {
                   Copy application link
                 </Button>
               )}
-              <Button as={Link} to="/import">Import</Button>
+              {showImport && <Button as={Link} to="/import">Import</Button>}
               <Button variant="amber" onClick={() => setShowAdd(true)}>Add vendor</Button>
             </>
           )}

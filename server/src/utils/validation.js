@@ -1,6 +1,34 @@
 const { z } = require('zod');
+const { emailFieldError } = require('./emailAddress');
 
 const PRIVILEGED_BODY_KEYS = ['plan', 'role', 'orgId'];
+const VENDOR_NAME_MAX = 200;
+const ORG_NAME_MAX = 200;
+
+const vendorName = z.string()
+  .trim()
+  .min(1, 'Vendor name is required')
+  .max(VENDOR_NAME_MAX, `Vendor name must be ${VENDOR_NAME_MAX} characters or fewer`);
+
+const orgName = z.string()
+  .trim()
+  .min(1, 'Organization name is required')
+  .max(ORG_NAME_MAX, `Company name must be ${ORG_NAME_MAX} characters or fewer`);
+
+function accountEmail() {
+  return z.string().superRefine((val, ctx) => {
+    const message = emailFieldError(val);
+    if (message) ctx.addIssue({ code: 'custom', message });
+  });
+}
+
+function optionalAccountEmail() {
+  return z.string().superRefine((val, ctx) => {
+    if (val == null || String(val).trim() === '') return;
+    const message = emailFieldError(val);
+    if (message && message !== 'Email is required') ctx.addIssue({ code: 'custom', message });
+  });
+}
 
 const passwordSchema = z
   .string()
@@ -13,13 +41,13 @@ const dayListInput = z.array(z.union([z.number(), z.string()]));
 
 const schemas = {
   login: z.object({
-    email: z.string().email('Invalid email format'),
+    email: accountEmail(),
     password: z.string().min(1, 'Password is required'),
   }),
 
   signup: z.object({
-    orgName: z.string().min(1, 'Organization name is required'),
-    email: z.string().email('Invalid email format'),
+    orgName,
+    email: accountEmail(),
     password: passwordSchema,
     firstName: z.string().min(1, 'First name is required'),
     lastName: z.string().min(1, 'Last name is required'),
@@ -39,29 +67,29 @@ const schemas = {
   updateProfile: z.object({
     firstName: z.string().min(1).optional(),
     lastName: z.string().min(1).optional(),
-    email: z.string().email('Invalid email format').optional(),
+    email: optionalAccountEmail().optional(),
     currentPassword: z.string().optional(),
     newPassword: passwordSchema.optional(),
   }),
 
   createVendor: z.object({
-    name: z.string().min(1, 'Vendor name is required'),
-    email: z.string().email('Invalid email format'),
+    name: vendorName,
+    email: accountEmail(),
     contactName: z.string().optional(),
     phone: z.string().optional(),
     address: z.string().optional(),
     trade: z.string().optional(),
-    additionalEmails: z.array(z.string().email('Invalid email in additional emails')).optional(),
+    additionalEmails: z.array(accountEmail()).optional(),
   }),
 
   updateVendor: z.object({
-    name: z.string().min(1).optional(),
+    name: vendorName.optional(),
     contactName: z.string().optional().nullable(),
-    email: z.string().email('Invalid email format').optional(),
+    email: optionalAccountEmail().optional(),
     phone: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
     trade: z.string().optional().nullable(),
-    additionalEmails: z.array(z.string().email('Invalid email in additional emails')).optional(),
+    additionalEmails: z.array(accountEmail()).optional(),
     notes: z.string().optional().nullable(),
   }),
 
@@ -88,12 +116,12 @@ const schemas = {
   }),
 
   forgotPassword: z.object({
-    email: z.string().min(1, 'Email is required').email('Invalid email format'),
+    email: accountEmail(),
   }),
 
   applyVendor: z.object({
-    name: z.string().min(1, 'Business name is required'),
-    email: z.string().email('Invalid email format'),
+    name: vendorName,
+    email: accountEmail(),
     phone: z.string().min(1, 'Phone is required'),
     address: z.string().min(1, 'Address is required'),
     contactName: z.string().optional(),
@@ -143,4 +171,6 @@ module.exports = {
   parseSchema,
   privilegedKeyError,
   PRIVILEGED_BODY_KEYS,
+  VENDOR_NAME_MAX,
+  ORG_NAME_MAX,
 };

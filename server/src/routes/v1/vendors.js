@@ -13,6 +13,7 @@ const { generateUploadToken } = require('../../utils/tokens');
 const { sendUploadRequestEmail } = require('../../services/email');
 const { getSignedUrl } = require('../../services/storage');
 const { isValidTrade } = require('../../constants/trades');
+const { mergeApprovedCois } = require('../../services/effectiveCoverage');
 
 // Matches getSignedUrl()'s default TTL so the envelope's expiresInSeconds /
 // expiresAt describe the URL we actually issued.
@@ -20,13 +21,12 @@ const SIGNED_URL_EXPIRES_IN = 900;
 
 const router = express.Router({ mergeParams: true });
 
-// Pull the newest APPROVED COI (for coverages/expiry) and the last COI-request
-// timestamp for each vendor in a single query, avoiding N+1 on the list route.
+// Approved certificates (newest first) plus the last COI-request timestamp.
+// Coverage is the per-line union, not only the newest row.
 const VENDOR_INCLUDE = {
   cois: {
     where: { status: 'APPROVED', deletedAt: null },
     orderBy: { submittedAt: 'desc' },
-    take: 1,
   },
   notifications: {
     where: { type: 'UPLOAD_REQUEST', status: 'SENT' },
@@ -38,7 +38,7 @@ const VENDOR_INCLUDE = {
 
 function toSerializerOpts(vendor, detail, settings) {
   return {
-    latestApprovedCoi: vendor.cois?.[0] || null,
+    latestApprovedCoi: mergeApprovedCois(vendor.cois),
     lastRequestedAt: vendor.notifications?.[0]?.sentAt || null,
     detail,
     settings,
@@ -145,7 +145,7 @@ router.get('/:vendorId/coi/document', requireScope(SCOPES.VENDORS_READ), async (
     });
     if (!vendor) return errors.notFound(res, 'vendor_not_found', 'Vendor not found');
 
-    const coi = vendor.cois?.[0] || null;
+    const coi = (vendor.cois || []).find((row) => row.pdfPath) || null;
     if (!coi || !coi.pdfPath) {
       return errors.notFound(res, 'coi_document_not_found', 'No approved COI document for this vendor');
     }

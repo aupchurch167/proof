@@ -308,16 +308,16 @@ describe('A2-04 / V-01 / O-03 tokens stripped', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/uploadToken/);
   });
 
-  it('usage omits portalPreviewToken for non-admins (O-03)', async () => {
+  it('usage never returns a portal JWT (O-03)', async () => {
     const member = await request(app).get('/api/organization/usage').set(auth(memberToken));
     expect(member.status).toBe(200);
     expect(member.body).not.toHaveProperty('portalPreviewToken');
+    expect(JSON.stringify(member.body)).not.toMatch(/eyJ/);
 
     const admin = await request(app).get('/api/organization/usage').set(auth(tokenA));
     expect(admin.status).toBe(200);
-    expect(admin.body.portalPreviewToken).toBeTruthy();
-    expect(admin.body.portalPreviewToken).not.toBe(vendorB.uploadToken);
-    expect(admin.body.portalPreviewToken).not.toBe(vendorA.uploadToken);
+    expect(admin.body).not.toHaveProperty('portalPreviewToken');
+    expect(JSON.stringify(admin.body)).not.toMatch(/eyJ/);
   });
 });
 

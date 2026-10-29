@@ -1,10 +1,10 @@
 const { daysSince } = require('./reminders');
+const { assessVendorCompliance } = require('./compliance');
 const { isPlaceholderEmail } = require('../utils/email');
 const {
   DEFAULT_EXPIRING_WINDOW_DAYS,
   daysUntil,
   expiringWindowDays,
-  evaluateCompliance,
   complianceIssue,
   earliestRequiredExpiration,
 } = require('./complianceRules');
@@ -111,7 +111,13 @@ async function buildComplianceOverview(
   };
 
   for (const vendor of vendors) {
-    const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
+    const assessed = assessVendorCompliance({
+      cois: vendor.cois,
+      settings,
+      orgName: org?.name,
+      now,
+    });
+    const latestApproved = assessed.merged;
     const oldestPending = [...vendor.cois].reverse().find((c) => c.status === 'PENDING_REVIEW') || null;
     const latestSubmission = vendor.cois[0] || null;
 
@@ -141,7 +147,7 @@ async function buildComplianceOverview(
       contactName: vendor.contactName,
       phone: vendor.phone,
       trade: vendor.trade,
-      coiStatus: vendor.coiStatus,
+      coiStatus: assessed.status,
       badEmail: isPlaceholderEmail(vendor.email),
       earliestExpiration: expiration,
       daysUntilExpiration,
@@ -163,11 +169,10 @@ async function buildComplianceOverview(
     // Same status the badge uses. A holder or short-limit failure is
     // non-compliant here even when the expiration dates are still healthy.
     if (latestApproved) {
-      const evaluated = evaluateCompliance(latestApproved, settings, org?.name, { now });
-      entry.statusReason = complianceIssue(evaluated);
-      if (evaluated.status === 'EXPIRED') buckets.expired.push(entry);
-      else if (evaluated.status === 'EXPIRING_SOON') buckets.expiringSoon.push(entry);
-      else if (evaluated.status === 'NON_COMPLIANT') buckets.nonCompliant.push(entry);
+      entry.statusReason = complianceIssue(assessed.evaluated);
+      if (assessed.status === 'EXPIRED') buckets.expired.push(entry);
+      else if (assessed.status === 'EXPIRING_SOON') buckets.expiringSoon.push(entry);
+      else if (assessed.status === 'NON_COMPLIANT') buckets.nonCompliant.push(entry);
     }
 
     // Ignored: we asked, it's been a week or more, nothing came back, and

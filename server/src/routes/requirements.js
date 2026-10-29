@@ -1,8 +1,8 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
-const { COVERAGE_LINES, coverageFor } = require('../services/coverage');
-const { updateVendorStatus } = require('../services/compliance');
+const { COVERAGE_LINES } = require('../services/coverage');
+const { updateVendorStatus, assessVendorCompliance } = require('../services/compliance');
 const { logAudit } = require('../services/audit');
 
 const router = express.Router();
@@ -86,7 +86,10 @@ router.post('/impact', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'coverages must be an array' });
     }
 
-    const settings = await prisma.organizationSettings.findUnique({ where: { orgId: req.user.orgId } });
+    const [settings, org] = await Promise.all([
+      prisma.organizationSettings.findUnique({ where: { orgId: req.user.orgId } }),
+      prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { name: true } }),
+    ]);
     const next = { ...settings };
     for (const c of proposed) {
       const line = COVERAGE_LINES.find((l) => l.key === c.key);
@@ -99,17 +102,21 @@ router.post('/impact', authenticate, async (req, res) => {
       select: {
         id: true, name: true,
         cois: {
-          where: { status: 'APPROVED', deletedAt: null },
+          where: { deletedAt: null },
           orderBy: { submittedAt: 'desc' },
-          take: 1,
         },
       },
     });
 
     const now = new Date();
     const failing = (s) => (vendor) => {
-      const coverages = coverageFor(vendor.cois[0] || null, s, { now });
-      return coverages.some((c) => ['missing', 'under', 'expired'].includes(c.verdict));
+      const assessed = assessVendorCompliance({
+        cois: vendor.cois,
+        settings: s,
+        orgName: org?.name,
+        now,
+      });
+      return assessed.status === 'NON_COMPLIANT' || assessed.status === 'EXPIRED';
     };
 
     const failsNow = new Set(vendors.filter(failing(settings)).map((v) => v.id));

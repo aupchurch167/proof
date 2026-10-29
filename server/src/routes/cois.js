@@ -304,7 +304,7 @@ router.post('/:id/approve', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER
 });
 
 // DELETE /api/cois/:id
-router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const coi = await prisma.coi.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },

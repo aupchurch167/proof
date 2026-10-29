@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { API_BASE } from '../utils/api';
 import { CANONICAL_TRADES } from '../constants/trades';
+import { VENDOR_NAME_MAX } from '../constants/limits';
 
 const blankForm = {
   name: '', contactName: '', phone: '', email: '', trade: '', notes: '',
@@ -81,7 +82,7 @@ export default function Apply() {
       <form onSubmit={handleSubmit} className="space-y-4 bg-white border rounded-card p-4 sm:p-6">
         <div>
           <label className={labelClass}>Business Name / Nombre de Negocio *</label>
-          <input required value={form.name} onChange={set('name')} className={inputClass}
+          <input required maxLength={VENDOR_NAME_MAX} value={form.name} onChange={set('name')} className={inputClass}
             placeholder="Legal business name, include LLC, Inc or whatever" />
         </div>
         <div>

@@ -4,9 +4,11 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('../lib/prisma');
 const { coverageFor } = require('../services/coverage');
+const { mergeApprovedCois } = require('../services/effectiveCoverage');
+const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { extractCoiData } = require('../services/coiExtractor');
 const { isExtractLimitError } = require('../lib/extractErrors');
-const { rejectUnlessPdfMagic } = require('../utils/uploadFilters');
+const { rejectUnlessPdfMagic, rejectNonPdfUpload } = require('../utils/uploadFilters');
 const { checkCompliance } = require('../services/compliance');
 const { sendUploadNotificationEmail } = require('../services/email');
 const { evaluatePlanLimit } = require('../middleware/planLimits');
@@ -15,7 +17,29 @@ const { verifyUploadToken } = require('../utils/tokens');
 
 const router = express.Router();
 
+function markPreview(req, _res, next) {
+  req.portalPreview = true;
+  next();
+}
+
+const previewGate = [authenticate, authorize('ADMIN'), markPreview];
+
 async function loadPortalVendor(req, res, query = {}) {
+  // Admin preview uses the signed-in session. The URL carries no token, so a
+  // copied link, screenshot, or Referer header cannot open the portal.
+  if (req.portalPreview) {
+    const vendor = await prisma.vendor.findFirst({
+      where: { orgId: req.user.orgId, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      ...query,
+    });
+    if (!vendor) {
+      res.status(404).json({ error: 'Add a vendor to preview the portal', orgName: null });
+      return null;
+    }
+    return vendor;
+  }
+
   let payload;
   try {
     payload = verifyUploadToken(req.params.uploadToken);
@@ -51,8 +75,13 @@ const upload = multer({
   },
 });
 
+// GET /api/portal/preview — admin session, no credential in the URL.
+router.get('/preview', ...previewGate, async (req, res) => getPortal(req, res));
+
 // GET /api/portal/:uploadToken
-router.get('/:uploadToken', async (req, res) => {
+router.get('/:uploadToken', async (req, res) => getPortal(req, res));
+
+async function getPortal(req, res) {
   try {
     const vendor = await loadPortalVendor(req, res, {
       select: {
@@ -64,7 +93,6 @@ router.get('/:uploadToken', async (req, res) => {
         cois: {
           where: { status: 'APPROVED', deletedAt: null },
           orderBy: { submittedAt: 'desc' },
-          take: 1,
         },
       },
     });
@@ -75,7 +103,7 @@ router.get('/:uploadToken', async (req, res) => {
     const settings = await prisma.organizationSettings.findUnique({
       where: { orgId: vendor.orgId },
     });
-    const coverages = coverageFor(vendor.cois[0] || null, settings, {});
+    const coverages = coverageFor(mergeApprovedCois(vendor.cois), settings, {});
 
     const { cois, orgId, ...rest } = vendor;
     res.json({
@@ -90,12 +118,19 @@ router.get('/:uploadToken', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to load portal' });
   }
-});
+}
+
+router.put('/preview/info', ...previewGate, async (req, res) => updatePortalInfo(req, res));
 
 // PUT /api/portal/:uploadToken/info
-router.put('/:uploadToken/info', async (req, res) => {
+router.put('/:uploadToken/info', async (req, res) => updatePortalInfo(req, res));
+
+async function updatePortalInfo(req, res) {
   try {
     const { name, contactName, email, phone, address } = req.body;
+    if (name && String(name).trim().length > 200) {
+      return res.status(400).json({ error: 'Vendor name must be 200 characters or fewer' });
+    }
 
     const vendor = await loadPortalVendor(req, res);
     if (!vendor) return;
@@ -116,10 +151,14 @@ router.put('/:uploadToken/info', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to update info' });
   }
-});
+}
+
+router.post('/preview/upload', ...previewGate, rejectNonPdfUpload(upload, 'pdf'), async (req, res) => uploadPortalPdf(req, res));
 
 // POST /api/portal/:uploadToken/upload
-router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
+router.post('/:uploadToken/upload', rejectNonPdfUpload(upload, 'pdf'), async (req, res) => uploadPortalPdf(req, res));
+
+async function uploadPortalPdf(req, res) {
   try {
     const vendor = await loadPortalVendor(req, res, {
       include: { organization: { include: { settings: true } } },
@@ -237,6 +276,6 @@ router.post('/:uploadToken/upload', upload.single('pdf'), async (req, res) => {
     console.error('Portal upload error:', err);
     res.status(500).json({ error: 'Failed to upload COI' });
   }
-});
+}
 
 module.exports = router;
