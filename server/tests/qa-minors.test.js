@@ -214,6 +214,41 @@ describe('login rate limit', () => {
       .send({ email, password });
   }
 
+  it('allows twenty successful login and logout cycles, including the session reads between them', async () => {
+    const email = `cycles-${Date.now()}@test.com`;
+    await createTestUser(org.id, { email });
+    const ip = '203.0.113.77';
+    const sessionReads = [
+      '/api/auth/me',
+      '/api/organization/usage',
+      '/api/reports/compliance',
+      '/api/compliance/overview',
+      '/api/audit/week',
+    ];
+
+    for (let i = 0; i < 20; i += 1) {
+      const signedIn = await login(email, TEST_PASSWORD, ip);
+      expect(signedIn.status).toBe(200);
+      expect(signedIn.body.error).toBeUndefined();
+
+      const headers = {
+        Authorization: `Bearer ${signedIn.body.accessToken}`,
+        'X-Forwarded-For': ip,
+      };
+      for (const path of sessionReads) {
+        const res = await request(app).get(path).set(headers);
+        expect(res.status).not.toBe(429);
+      }
+
+      const signedOut = await request(app)
+        .post('/api/auth/logout')
+        .set(headers)
+        .send({ refreshToken: signedIn.body.refreshToken });
+      expect(signedOut.status).toBe(200);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  });
+
   it('does not count successful sign-ins', async () => {
     const email = `success-${Date.now()}@test.com`;
     await createTestUser(org.id, { email });

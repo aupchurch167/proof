@@ -119,14 +119,50 @@ const googleLimiter = rateLimit({
   keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
+// Session routes are not part of the browsing budget. Login failures are
+// already capped above; a successful login, logout, refresh, or /me must not
+// consume a limiter that can later reject the next sign-in.
+const SESSION_PATHS = new Set([
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/refresh',
+  '/api/auth/me',
+  '/api/auth/google',
+]);
+
+function originalPath(req) {
+  return String(req.originalUrl || req.url || '').split('?')[0];
+}
+
+// The previous cap was 100 requests per IP per 15 minutes, and it counted
+// every successful call. One sign-in loads the dashboard (usage, compliance,
+// overview, the weekly audit) and logout is another call, so a retest plus
+// a handful of login/logout cycles crossed 100 and the next login form showed
+// "Too many requests". Authenticated calls are keyed by the access token so
+// a shared address (or an extra proxy hop) cannot pool everyone's traffic.
+// 2000 per 15 minutes is a runaway-client ceiling, not something a person
+// working in the app can reach.
+const GENERAL_MAX = 2000;
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
+  max: GENERAL_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
-  // The versioned service API has its own, higher, per-token limiter below.
-  skip: (req) => req.path === '/v1' || req.path.startsWith('/v1/'),
+  skip: (req) => {
+    const path = originalPath(req);
+    if (path === '/api/v1' || path.startsWith('/api/v1/')) return true;
+    return SESSION_PATHS.has(path);
+  },
+  keyGenerator: (req) => {
+    const header = req.headers.authorization;
+    if (header && header.startsWith('Bearer ')) {
+      const token = header.slice(7).trim();
+      if (token) return `session:${hashToken(token)}`;
+    }
+    return `ip:${ipKeyGenerator(req.ip)}`;
+  },
 });
 
 // Service-to-service traffic (one consumer, one IP, many orgs) needs a higher
