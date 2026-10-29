@@ -4,6 +4,7 @@ const { authenticateVerified: authenticate, authorize } = require('../middleware
 const { COVERAGE_LINES } = require('../services/coverage');
 const { updateVendorStatus, assessVendorCompliance } = require('../services/compliance');
 const { logAudit } = require('../services/audit');
+const { parseWholeDollars, dollarsToCents, parseDayCount } = require('../utils/money');
 
 const router = express.Router();
 
@@ -30,7 +31,9 @@ function toTemplate(settings, vendorCount) {
         label: line.label,
         note: line.note,
         required: cents > 0,
-        minLimit: cents > 0 ? Math.round(cents / 100) : null,
+        // Integer division. Amounts are stored as whole dollars times 100, so
+        // this never produces a float like 1000000.0000001.
+        minLimit: cents > 0 ? Math.trunc(cents / 100) : null,
         setting: line.setting,
       };
     }),
@@ -94,7 +97,21 @@ router.post('/impact', authenticate, async (req, res) => {
     for (const c of proposed) {
       const line = COVERAGE_LINES.find((l) => l.key === c.key);
       if (!line) continue;
-      next[line.setting] = c.required ? Math.round((Number(c.minLimit) || 0) * 100) : 0;
+      if (!c.required) {
+        next[line.setting] = 0;
+        continue;
+      }
+      const parsed = parseWholeDollars(c.minLimit);
+      if (!parsed.ok || parsed.empty || parsed.dollars <= 0) {
+        return res.status(400).json({
+          error: parsed.error || `${line.label} needs a minimum limit above zero`,
+        });
+      }
+      const cents = dollarsToCents(parsed.dollars);
+      if (cents == null) {
+        return res.status(400).json({ error: `${line.label}: that amount is too large` });
+      }
+      next[line.setting] = cents;
     }
 
     const vendors = await prisma.vendor.findMany({
@@ -157,23 +174,34 @@ router.put('/:templateId', authenticate, authorize('ADMIN'), async (req, res) =>
       for (const c of coverages) {
         const line = COVERAGE_LINES.find((l) => l.key === c.key);
         if (!line) return res.status(400).json({ error: `Unknown coverage: ${c.key}` });
-        const dollars = Number(c.minLimit);
-        if (c.required && (!Number.isFinite(dollars) || dollars <= 0)) {
-          return res.status(400).json({ error: `${line.label} needs a minimum limit above zero` });
-        }
         // A coverage that isn't required is stored as a zero minimum, which is
         // what every check already reads as "don't hold this against them".
-        data[line.setting] = c.required ? Math.round(dollars * 100) : 0;
+        if (!c.required) {
+          data[line.setting] = 0;
+          continue;
+        }
+        const parsed = parseWholeDollars(c.minLimit);
+        if (!parsed.ok) {
+          return res.status(400).json({ error: `${line.label}: ${parsed.error}` });
+        }
+        if (parsed.empty || parsed.dollars <= 0) {
+          return res.status(400).json({ error: `${line.label} needs a minimum limit above zero` });
+        }
+        const cents = dollarsToCents(parsed.dollars);
+        if (cents == null) {
+          return res.status(400).json({ error: `${line.label}: that amount is too large` });
+        }
+        data[line.setting] = cents;
       }
     }
     if (requireHolderMatch !== undefined) data.requireHolderMatch = Boolean(requireHolderMatch);
     if (expiringWindowDays !== undefined) {
-      const days = parseInt(expiringWindowDays, 10);
+      const parsedDays = parseDayCount(expiringWindowDays);
       // 0 turns the Expiring badge off. A date already past is still Expired.
-      if (!Number.isFinite(days) || days < 0 || days > 365) {
-        return res.status(400).json({ error: 'expiringWindowDays must be between 0 and 365' });
+      if (!parsedDays.ok) {
+        return res.status(400).json({ error: parsedDays.error });
       }
-      data.expiringWindowDays = days;
+      data.expiringWindowDays = parsedDays.days;
     }
 
     const settings = await prisma.organizationSettings.update({

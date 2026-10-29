@@ -9,6 +9,7 @@ const { getPlanLabel, vendorLimitReachedMessage } = require('../config/plans');
 const core = require('../lib/core');
 const { mapTradeToCanonical } = require('../constants/trades');
 const { isVendorEmailConflict } = require('../lib/prismaErrors');
+const { phoneFieldError, addressFieldError } = require('../utils/vendorContact');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -116,6 +117,19 @@ router.post('/vendors', authenticate, authorize('ADMIN', 'REVIEWER'), upload.sin
 
       if (!name || !email) {
         results.errors.push({ row: i + 2, message: 'Missing name or email' });
+        results.skipped++;
+        continue;
+      }
+
+      const phoneError = phoneFieldError(phone);
+      if (phoneError) {
+        results.errors.push({ row: i + 2, message: phoneError });
+        results.skipped++;
+        continue;
+      }
+      const addressError = addressFieldError(address);
+      if (addressError) {
+        results.errors.push({ row: i + 2, message: addressError });
         results.skipped++;
         continue;
       }

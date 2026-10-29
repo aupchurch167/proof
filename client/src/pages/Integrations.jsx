@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 
@@ -128,17 +127,10 @@ export default function Integrations() {
     }
   };
 
-  if (loading) return <div className="text-center py-12 text-muted">Loading...</div>;
+  if (loading) return <div className="text-[13px] text-muted">Loading…</div>;
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Settings</h1>
-
-      <div className="flex border-b mb-6">
-        <Link to="/settings" className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted hover:text-ink-2 hover:border-line-strong">General</Link>
-        <Link to="/settings/users" className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted hover:text-ink-2 hover:border-line-strong">Users</Link>
-        <Link to="/settings/integrations" className="px-4 py-2.5 text-sm font-medium border-b-2 border-amber text-navy">Integrations</Link>
-      </div>
+    <div className="flex flex-col gap-4">
 
       {/* Connection details */}
       <div className="bg-white rounded-card border p-6 mb-6">
@@ -146,11 +138,11 @@ export default function Integrations() {
         <p className="text-sm text-muted mb-4">Give these to the app you’re connecting (e.g. in its Proof integration settings).</p>
         <div className="space-y-3 text-sm">
           <div>
-            <label className="block text-xs font-medium text-muted mb-1">Organization slug</label>
+            <span className="block text-xs font-semibold text-ink-2 mb-1">Organization slug</span>
             <code className="block bg-warm px-3 py-2 rounded-control break-all">{orgSlug}</code>
           </div>
           <div>
-            <label className="block text-xs font-medium text-muted mb-1">API base URL</label>
+            <span className="block text-xs font-semibold text-ink-2 mb-1">API base URL</span>
             <code className="block bg-warm px-3 py-2 rounded-control break-all">{`${apiRoot}/api/v1/orgs/${orgSlug}`}</code>
           </div>
         </div>
@@ -167,19 +159,26 @@ export default function Integrations() {
           <SecretReveal label="New API key" value={newToken} onDismiss={() => setNewToken(null)} />
         )}
 
-        <form onSubmit={createKey} className="flex flex-col sm:flex-row gap-2 mb-5">
-          <input
-            placeholder="Name (e.g. Scheduled, Quill)"
-            value={keyName}
-            onChange={(e) => setKeyName(e.target.value)}
-            className="flex-1 px-3 py-2.5 border rounded-control text-base sm:text-sm"
-            required
-          />
-          <select value={keyScope} onChange={(e) => setKeyScope(e.target.value)}
-            className="px-3 py-2.5 border rounded-control text-base sm:text-sm">
+        <form onSubmit={createKey} className="flex flex-col sm:flex-row gap-2 mb-5 sm:items-end">
+          <div className="flex-1">
+            <label htmlFor="settings-api-key-name" className="block text-xs font-semibold text-ink-2 mb-1">Key name</label>
+            <input
+              id="settings-api-key-name"
+              placeholder="Name (e.g. Scheduled, Quill)"
+              value={keyName}
+              onChange={(e) => setKeyName(e.target.value)}
+              className="w-full px-3 py-2.5 border rounded-control text-base sm:text-sm"
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="settings-api-key-scope" className="block text-xs font-semibold text-ink-2 mb-1">Access</label>
+            <select id="settings-api-key-scope" value={keyScope} onChange={(e) => setKeyScope(e.target.value)}
+              className="px-3 py-2.5 border rounded-control text-base sm:text-sm">
             <option value="full">{SCOPE_PRESETS.full.label}</option>
             <option value="read">{SCOPE_PRESETS.read.label}</option>
-          </select>
+            </select>
+          </div>
           <button type="submit" disabled={creatingKey}
             className="bg-amber text-white px-4 py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 text-sm font-medium whitespace-nowrap">
             {creatingKey ? 'Creating…' : 'Create key'}
@@ -225,22 +224,30 @@ export default function Integrations() {
         )}
 
         <form onSubmit={createWebhook} className="flex flex-col gap-2 mb-5">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              placeholder="Name"
-              value={whName}
-              onChange={(e) => setWhName(e.target.value)}
-              className="sm:w-48 px-3 py-2.5 border rounded-control text-base sm:text-sm"
-              required
-            />
-            <input
-              placeholder="https://your-app.com/api/webhooks/proof/coi"
-              value={whUrl}
-              onChange={(e) => setWhUrl(e.target.value)}
-              type="url"
-              className="flex-1 px-3 py-2.5 border rounded-control text-base sm:text-sm"
-              required
-            />
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div className="sm:w-48">
+              <label htmlFor="settings-webhook-name" className="block text-xs font-semibold text-ink-2 mb-1">Name</label>
+              <input
+                id="settings-webhook-name"
+                placeholder="Name"
+                value={whName}
+                onChange={(e) => setWhName(e.target.value)}
+                className="w-full px-3 py-2.5 border rounded-control text-base sm:text-sm"
+                required
+              />
+            </div>
+            <div className="flex-1">
+              <label htmlFor="settings-webhook-url" className="block text-xs font-semibold text-ink-2 mb-1">URL</label>
+              <input
+                id="settings-webhook-url"
+                placeholder="https://your-app.com/api/webhooks/proof/coi"
+                value={whUrl}
+                onChange={(e) => setWhUrl(e.target.value)}
+                type="url"
+                className="w-full px-3 py-2.5 border rounded-control text-base sm:text-sm"
+                required
+              />
+            </div>
             <button type="submit" disabled={creatingWh}
               className="bg-amber text-white px-4 py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 text-sm font-medium whitespace-nowrap">
               {creatingWh ? 'Adding…' : 'Add webhook'}

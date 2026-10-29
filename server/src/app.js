@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { loginLimiters } = require('./middleware/loginRateLimit');
 const morgan = require('morgan');
 const path = require('path');
 
@@ -94,7 +95,12 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// Rate limiting
+// Rate limiting.
+// Login has its own failure-only limiters (per account+IP, per account, and
+// per IP). The other auth routes stay on a tight per-IP cap that counts every
+// request, so signup and password-reset spam stay blocked. Google sign-in
+// ignores successes so a person can use the button repeatedly; failed Google
+// attempts still stop at 10 per IP per 15 minutes.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10,
@@ -103,14 +109,60 @@ const authLimiter = rateLimit({
   message: { error: 'Too many requests, please try again later' },
 });
 
+const googleLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many requests, please try again later' },
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+});
+
+// Session routes are not part of the browsing budget. Login failures are
+// already capped above; a successful login, logout, refresh, or /me must not
+// consume a limiter that can later reject the next sign-in.
+const SESSION_PATHS = new Set([
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/refresh',
+  '/api/auth/me',
+  '/api/auth/google',
+]);
+
+function originalPath(req) {
+  return String(req.originalUrl || req.url || '').split('?')[0];
+}
+
+// The previous cap was 100 requests per IP per 15 minutes, and it counted
+// every successful call. One sign-in loads the dashboard (usage, compliance,
+// overview, the weekly audit) and logout is another call, so a retest plus
+// a handful of login/logout cycles crossed 100 and the next login form showed
+// "Too many requests". Authenticated calls are keyed by the access token so
+// a shared address (or an extra proxy hop) cannot pool everyone's traffic.
+// 2000 per 15 minutes is a runaway-client ceiling, not something a person
+// working in the app can reach.
+const GENERAL_MAX = 2000;
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
+  max: GENERAL_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
-  // The versioned service API has its own, higher, per-token limiter below.
-  skip: (req) => req.path === '/v1' || req.path.startsWith('/v1/'),
+  skip: (req) => {
+    const path = originalPath(req);
+    if (path === '/api/v1' || path.startsWith('/api/v1/')) return true;
+    return SESSION_PATHS.has(path);
+  },
+  keyGenerator: (req) => {
+    const header = req.headers.authorization;
+    if (header && header.startsWith('Bearer ')) {
+      const token = header.slice(7).trim();
+      if (token) return `session:${hashToken(token)}`;
+    }
+    return `ip:${ipKeyGenerator(req.ip)}`;
+  },
 });
 
 // Service-to-service traffic (one consumer, one IP, many orgs) needs a higher
@@ -129,9 +181,11 @@ const apiV1Limiter = rateLimit({
   message: { error: { code: 'rate_limited', message: 'Too many requests, please try again later', details: {} } },
 });
 
-app.use('/api/auth/login', authLimiter);
+for (const limiter of loginLimiters) {
+  app.use('/api/auth/login', limiter);
+}
 app.use('/api/auth/signup', authLimiter);
-app.use('/api/auth/google', authLimiter);
+app.use('/api/auth/google', googleLimiter);
 app.use('/api/auth/accept-invite', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);

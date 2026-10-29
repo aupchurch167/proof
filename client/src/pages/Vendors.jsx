@@ -9,6 +9,7 @@ import EmailTagInput from '../components/EmailTagInput';
 import { CANONICAL_TRADES } from '../constants/trades';
 import { VENDOR_FILTERS, vendorStatus } from '../constants/status';
 import { VENDOR_NAME_MAX, vendorNameError } from '../constants/limits';
+import { addressFieldError, phoneFieldError } from '../utils/vendorContact';
 import { canDeleteVendors, canEditVendors, canImport } from '../constants/roles';
 import {
   Button, Card, Chip, CoverageChip, Input, Select, StatusPill, PageTitle, Th, EmptyState,
@@ -43,10 +44,11 @@ function AddVendorDrawer({ open, onClose, onCreated }) {
   const [w9File, setW9File] = useState(null);
   const [maFile, setMaFile] = useState(null);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) { setForm(empty); setW9File(null); setMaFile(null); setError(''); }
+    if (open) { setForm(empty); setW9File(null); setMaFile(null); setError(''); setFieldErrors({}); }
   }, [open]);
 
   if (!open) return null;
@@ -55,10 +57,16 @@ function AddVendorDrawer({ open, onClose, onCreated }) {
     e.preventDefault();
     setError('');
     const nameError = vendorNameError(form.name);
+    const nextErrors = {
+      phone: phoneFieldError(form.phone) || '',
+      address: addressFieldError(form.address) || '',
+    };
+    setFieldErrors(nextErrors);
     if (nameError) {
       setError(nameError);
       return;
     }
+    if (nextErrors.phone || nextErrors.address) return;
     setSaving(true);
     try {
       const payload = { ...form };
@@ -107,17 +115,30 @@ function AddVendorDrawer({ open, onClose, onCreated }) {
             { key: 'address', label: 'Address' },
           ].map((f) => (
             <div key={f.key}>
-              <label className="block text-[13px] font-semibold text-ink-2 mb-1">
+              <label htmlFor={`add-vendor-${f.key}`} className="block text-[13px] font-semibold text-ink-2 mb-1">
                 {f.label} {f.required && <span className="text-amber-text">*</span>}
               </label>
               <input
+                id={`add-vendor-${f.key}`}
                 type={f.type || 'text'}
                 required={f.required}
                 maxLength={f.key === 'name' ? VENDOR_NAME_MAX : undefined}
                 value={form[f.key]}
-                onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                aria-invalid={fieldErrors[f.key] ? 'true' : undefined}
+                aria-describedby={fieldErrors[f.key] ? `add-vendor-${f.key}-error` : undefined}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setForm({ ...form, [f.key]: value });
+                  if (f.key === 'phone' || f.key === 'address') {
+                    const check = f.key === 'phone' ? phoneFieldError : addressFieldError;
+                    setFieldErrors((prev) => ({ ...prev, [f.key]: prev[f.key] ? (check(value) || '') : prev[f.key] }));
+                  }
+                }}
                 className={field}
               />
+              {fieldErrors[f.key] && (
+                <p id={`add-vendor-${f.key}-error`} className="text-bad-text text-xs mt-1">{fieldErrors[f.key]}</p>
+              )}
             </div>
           ))}
 

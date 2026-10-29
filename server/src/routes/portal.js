@@ -14,6 +14,8 @@ const { sendUploadNotificationEmail } = require('../services/email');
 const { evaluatePlanLimit } = require('../middleware/planLimits');
 const { uploadFile } = require('../services/storage');
 const { verifyUploadToken } = require('../utils/tokens');
+const { phoneFieldError, addressFieldError } = require('../utils/vendorContact');
+const { logAudit } = require('../services/audit');
 
 const router = express.Router();
 
@@ -131,6 +133,14 @@ async function updatePortalInfo(req, res) {
     if (name && String(name).trim().length > 200) {
       return res.status(400).json({ error: 'Vendor name must be 200 characters or fewer' });
     }
+    if (phone !== undefined) {
+      const phoneError = phoneFieldError(phone);
+      if (phoneError) return res.status(400).json({ error: phoneError });
+    }
+    if (address !== undefined) {
+      const addressError = addressFieldError(address);
+      if (addressError) return res.status(400).json({ error: addressError });
+    }
 
     const vendor = await loadPortalVendor(req, res);
     if (!vendor) return;
@@ -141,8 +151,8 @@ async function updatePortalInfo(req, res) {
         ...(name && { name }),
         ...(contactName !== undefined && { contactName }),
         ...(email && { email }),
-        ...(phone !== undefined && { phone }),
-        ...(address !== undefined && { address }),
+        ...(phone !== undefined && { phone: phone == null ? null : String(phone).trim() || null }),
+        ...(address !== undefined && { address: address == null ? null : String(address).trim() || null }),
       },
       select: { id: true, name: true, contactName: true, email: true, phone: true, address: true },
     });
@@ -235,6 +245,16 @@ async function uploadPortalPdf(req, res) {
     }
 
     const coi = await prisma.coi.create({ data: coiData });
+
+    await logAudit({
+      orgId: vendor.orgId,
+      userId: null,
+      action: 'create',
+      entity: 'coi',
+      entityId: coi.id,
+      details: { vendorName: vendor.name, name: vendor.name, source: 'portal' },
+      ipAddress: req.ip,
+    });
 
     // Auto-add agent email to vendor's additional emails
     if (extractedData?.agentEmail) {

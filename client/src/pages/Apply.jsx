@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { API_BASE } from '../utils/api';
 import { CANONICAL_TRADES } from '../constants/trades';
 import { VENDOR_NAME_MAX } from '../constants/limits';
+import { addressFieldError, phoneFieldError } from '../utils/vendorContact';
 
 const blankForm = {
   name: '', contactName: '', phone: '', email: '', trade: '', notes: '',
@@ -19,6 +20,7 @@ export default function Apply() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
   useEffect(() => {
     fetch(`${API_BASE}/apply/${slug}`)
@@ -33,6 +35,12 @@ export default function Apply() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const nextErrors = {
+      phone: phoneFieldError(form.phone, { required: true }) || '',
+      address: addressFieldError(form.address, { required: true }) || '',
+    };
+    setFieldErrors(nextErrors);
+    if (nextErrors.phone || nextErrors.address) return;
     setSubmitting(true);
     try {
       const fd = new FormData();
@@ -92,8 +100,20 @@ export default function Apply() {
         </div>
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className={labelClass}>Contact Phone Number / Tu Número *</label>
-            <input required value={form.phone} onChange={set('phone')} className={inputClass} />
+            <label htmlFor="apply-phone" className={labelClass}>Contact Phone Number / Tu Número *</label>
+            <input
+              id="apply-phone"
+              required
+              value={form.phone}
+              aria-invalid={fieldErrors.phone ? 'true' : undefined}
+              aria-describedby={fieldErrors.phone ? 'apply-phone-error' : undefined}
+              onChange={(e) => {
+                set('phone')(e);
+                if (fieldErrors.phone) setFieldErrors((prev) => ({ ...prev, phone: phoneFieldError(e.target.value, { required: true }) || '' }));
+              }}
+              className={inputClass}
+            />
+            {fieldErrors.phone && <p id="apply-phone-error" className="text-bad-text text-xs mt-1">{fieldErrors.phone}</p>}
           </div>
           <div>
             <label className={labelClass}>Email *</label>
@@ -130,8 +150,20 @@ export default function Apply() {
           <input type="file" accept="application/pdf,image/*" onChange={(e) => setCoi(e.target.files?.[0] || null)} className={fileClass} />
         </div>
         <div>
-          <label className={labelClass}>Address / dirección *</label>
-          <input required value={form.address} onChange={set('address')} className={inputClass} />
+          <label htmlFor="apply-address" className={labelClass}>Address / dirección *</label>
+          <input
+            id="apply-address"
+            required
+            value={form.address}
+            aria-invalid={fieldErrors.address ? 'true' : undefined}
+            aria-describedby={fieldErrors.address ? 'apply-address-error' : undefined}
+            onChange={(e) => {
+              set('address')(e);
+              if (fieldErrors.address) setFieldErrors((prev) => ({ ...prev, address: addressFieldError(e.target.value, { required: true }) || '' }));
+            }}
+            className={inputClass}
+          />
+          {fieldErrors.address && <p id="apply-address-error" className="text-bad-text text-xs mt-1">{fieldErrors.address}</p>}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div>

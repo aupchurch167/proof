@@ -13,6 +13,7 @@ const { checkCompliance, updateVendorStatus } = require('../services/compliance'
 const { isValidTrade } = require('../constants/trades');
 const { evaluatePlanLimit, createVendorUnderCap } = require('../middleware/planLimits');
 const { isVendorEmailConflict } = require('../lib/prismaErrors');
+const { logAudit } = require('../services/audit');
 
 const router = express.Router();
 
@@ -153,6 +154,16 @@ router.post(
       }
       const vendor = created.vendor;
 
+      await logAudit({
+        orgId: org.id,
+        userId: null,
+        action: 'create',
+        entity: 'vendor',
+        entityId: vendor.id,
+        details: { name: vendor.name, email: vendor.email, source: 'application' },
+        ipAddress: req.ip,
+      });
+
       if (coiFile) {
         const key = `${uuidv4()}${path.extname(coiFile.originalname) || ''}`;
         const pdfPath = await uploadFile(coiFile.buffer, key, coiFile.mimetype, 'cois');
@@ -170,7 +181,7 @@ router.post(
         const complianceFlags = (org.settings && extracted)
           ? checkCompliance(extracted, org.settings, org.name) : null;
 
-        await prisma.coi.create({
+        const appliedCoi = await prisma.coi.create({
           data: {
             vendorId: vendor.id,
             orgId: org.id,
@@ -198,6 +209,16 @@ router.post(
             certificateHolderName: extracted?.certificateHolderName || null,
             certificateHolderAddress: extracted?.certificateHolderAddress || null,
           },
+        });
+
+        await logAudit({
+          orgId: org.id,
+          userId: null,
+          action: 'create',
+          entity: 'coi',
+          entityId: appliedCoi.id,
+          details: { vendorName: vendor.name, name: vendor.name, source: 'application' },
+          ipAddress: req.ip,
         });
         // Auto-add agent email to vendor's additional emails
         if (extracted?.agentEmail) {
