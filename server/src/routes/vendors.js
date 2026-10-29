@@ -9,10 +9,9 @@ const { enforcePlanLimit, createVendorUnderCap } = require('../middleware/planLi
 const { sendUploadRequestEmail } = require('../services/email');
 const { extractCoiData } = require('../services/coiExtractor');
 const { isExtractLimitError } = require('../lib/extractErrors');
-const { rejectUnlessPdfMagic } = require('../utils/uploadFilters');
-const { checkCompliance, updateVendorStatus } = require('../services/compliance');
-const { coverageFor, coverageReason, coverageFailureReasons } = require('../services/coverage');
-const { evaluateCompliance, holderDetailReason } = require('../services/complianceRules');
+const { rejectUnlessPdfMagic, rejectNonPdfUpload } = require('../utils/uploadFilters');
+const { checkCompliance, updateVendorStatus, assessVendorCompliance } = require('../services/compliance');
+const { supersededApprovedIds } = require('../services/effectiveCoverage');
 const { uploadFile, getSignedUrl } = require('../services/storage');
 const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
@@ -54,7 +53,6 @@ router.get('/', authenticate, async (req, res) => {
     const { status, search, trade } = req.query;
     const where = { orgId: req.user.orgId, deletedAt: null };
 
-    if (status) where.coiStatus = status;
     if (trade) where.trade = trade;
     if (search) {
       where.OR = [
@@ -66,7 +64,7 @@ router.get('/', authenticate, async (req, res) => {
     // Newest-first COIs per vendor: the first row drives the "latest COI"
     // column, the first APPROVED one drives the coverage chips. One include
     // serves both, so the list stays a single query.
-    const [vendors, settings] = await Promise.all([
+    const [vendors, org] = await Promise.all([
       prisma.vendor.findMany({
         where,
         orderBy: { name: 'asc' },
@@ -80,29 +78,37 @@ router.get('/', authenticate, async (req, res) => {
               autoCoverageAmount: true, autoExpirationDate: true, autoPolicyNumber: true,
               wcCoverageAmount: true, wcExpirationDate: true, wcPolicyNumber: true,
               umbCoverageAmount: true, umbExpirationDate: true, umbPolicyNumber: true,
+              certificateHolderName: true,
             },
           },
         },
       }),
-      prisma.organizationSettings.findUnique({ where: { orgId: req.user.orgId } }),
+      prisma.organization.findUnique({
+        where: { id: req.user.orgId },
+        select: { name: true, settings: true },
+      }),
     ]);
 
     const now = new Date();
-    res.json(vendors.map((vendor) => {
-      const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
-      const coverages = coverageFor(latestApproved, settings, { now });
+    const rows = vendors.map((vendor) => {
+      const assessed = assessVendorCompliance({
+        cois: vendor.cois,
+        settings: org?.settings,
+        orgName: org?.name,
+        now,
+      });
       return omitVendorSecrets({
         ...vendor,
+        // The badge is the live verdict, not the cached Vendor.coiStatus column.
+        coiStatus: assessed.status,
         // The list only ever renders the newest certificate.
         cois: vendor.cois.slice(0, 1),
-        coverages,
-        statusReason: coverageReason(coverages),
-        nextExpiration: coverages
-          .filter((c) => c.expiresAt && c.verdict !== 'skipped')
-          .map((c) => c.expiresAt)
-          .sort()[0] || null,
+        coverages: assessed.coverages,
+        statusReason: assessed.statusReason,
+        nextExpiration: assessed.nextExpiration,
       });
-    }));
+    });
+    res.json(status ? rows.filter((vendor) => vendor.coiStatus === status) : rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list vendors' });
   }
@@ -245,35 +251,23 @@ router.get('/:id', authenticate, async (req, res) => {
       where: { id: req.user.orgId },
       select: { name: true, settings: true },
     });
-    const settings = orgRow?.settings || null;
-    const latestApproved = vendor.cois.find((c) => c.status === 'APPROVED') || null;
-    const coverages = coverageFor(latestApproved, settings, {});
-    const evaluated = latestApproved
-      ? evaluateCompliance(latestApproved, settings, orgRow?.name)
-      : null;
-    const holderReason = holderDetailReason(evaluated);
-    const coverageFailures = coverageFailureReasons(coverages);
-    const reasons = [];
-    if (holderReason) reasons.push(holderReason);
-    if (coverageFailures.length) reasons.push(...coverageFailures);
-    else if (!holderReason) {
-      const soon = coverageReason(coverages);
-      if (soon) reasons.push(soon);
-    }
-    const statusReason = reasons.length ? reasons.join(' · ') : null;
+    const assessed = assessVendorCompliance({
+      cois: vendor.cois,
+      settings: orgRow?.settings || null,
+      orgName: orgRow?.name,
+    });
 
     res.json(omitVendorSecrets({
       ...vendor,
+      coiStatus: assessed.status,
       w9Url,
       masterAgreementUrl,
       lastCoiRequestAt: lastCoiRequest?.sentAt || null,
-      coverages,
-      statusReason,
-      // The certificate list marks anything older than the newest approved one
-      // for the same coverage as superseded rather than just "approved".
-      supersededCoiIds: latestApproved
-        ? vendor.cois.filter((c) => c.status === 'APPROVED' && c.id !== latestApproved.id).map((c) => c.id)
-        : [],
+      coverages: assessed.coverages,
+      statusReason: assessed.statusReason,
+      // Older approved rows stay active when they still supply a coverage line
+      // the newer certificates do not.
+      supersededCoiIds: supersededApprovedIds(vendor.cois),
     }));
   } catch (err) {
     res.status(500).json({ error: 'Failed to get vendor' });
@@ -335,8 +329,10 @@ async function softDeleteVendorsAndCois(tx, { ids, orgId, now = new Date() }) {
   });
 }
 
-// DELETE /api/vendors/bulk (soft-delete vendors and COIs; keep Spaces objects)
-router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
+// DELETE /api/vendors/bulk (soft-delete vendors and COIs; keep Spaces objects).
+// Removing a vendor from the live book is an admin action. Members can add
+// and correct vendor details; they cannot delete them.
+router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -363,7 +359,7 @@ router.delete('/bulk', authenticate, authorize('ADMIN', 'MEMBER'), async (req, r
 });
 
 // DELETE /api/vendors/:id (soft-delete vendor and COIs; keep Spaces objects)
-router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },
@@ -387,7 +383,7 @@ router.delete('/:id', authenticate, authorize('ADMIN', 'MEMBER'), async (req, re
 });
 
 // POST /api/vendors/:id/coi/upload (admin-authenticated upload)
-router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('coi'), upload.single('pdf'), async (req, res) => {
+router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforcePlanLimit('coi'), rejectNonPdfUpload(upload, 'pdf'), async (req, res) => {
   try {
     const vendor = await prisma.vendor.findFirst({
       where: { id: req.params.id, orgId: req.user.orgId, deletedAt: null },

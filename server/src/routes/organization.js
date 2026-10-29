@@ -2,7 +2,7 @@ const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticateVerified: authenticate, authorize } = require('../middleware/auth');
 const { getPlanLimits, getPlanLabel } = require('../config/plans');
-const { generateUploadToken } = require('../utils/tokens');
+const { ORG_NAME_MAX } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -29,7 +29,18 @@ router.put('/', authenticate, authorize('ADMIN'), async (req, res) => {
     const { name, email, phone, address, additionalInsuredNote } = req.body;
 
     const data = {};
-    if (name) data.name = name;
+    if (name !== undefined) {
+      const trimmed = String(name).trim();
+      if (!trimmed) {
+        return res.status(400).json({ error: 'Company name is required' });
+      }
+      if (trimmed.length > ORG_NAME_MAX) {
+        return res.status(400).json({
+          error: `Company name must be ${ORG_NAME_MAX} characters or fewer`,
+        });
+      }
+      data.name = trimmed;
+    }
     if (email) data.email = email;
     if (phone !== undefined) data.phone = phone;
     if (address !== undefined) data.address = address;
@@ -47,8 +58,9 @@ router.put('/', authenticate, authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// GET /api/organization/usage — plan meter for the sidebar. ADMIN-only mint of
-// a short-lived portal preview JWT (never the stored uploadToken).
+// GET /api/organization/usage — plan meter for the sidebar.
+// The vendor-portal preview is a session-gated route (/portal/preview), not a
+// JWT embedded in this response.
 router.get('/usage', authenticate, async (req, res) => {
   try {
     const org = await prisma.organization.findUnique({
@@ -58,16 +70,9 @@ router.get('/usage', authenticate, async (req, res) => {
     const plan = org?.plan || 'FREE';
     const limits = getPlanLimits(plan);
 
-    const [vendorCount, coiCount, sampleVendor] = await Promise.all([
+    const [vendorCount, coiCount] = await Promise.all([
       prisma.vendor.count({ where: { orgId: req.user.orgId, deletedAt: null } }),
       prisma.coi.count({ where: { orgId: req.user.orgId, deletedAt: null } }),
-      req.user.role === 'ADMIN'
-        ? prisma.vendor.findFirst({
-          where: { orgId: req.user.orgId, deletedAt: null },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
-        })
-        : Promise.resolve(null),
     ]);
 
     // Infinity doesn't survive JSON, so an unlimited plan reports a null limit
@@ -84,10 +89,6 @@ router.get('/usage', authenticate, async (req, res) => {
       vendors: meter(vendorCount, limits.maxVendors),
       cois: meter(coiCount, limits.maxCois),
     };
-    if (req.user.role === 'ADMIN' && sampleVendor) {
-      body.portalPreviewToken = generateUploadToken(sampleVendor.id, '15m');
-    }
-
     res.json(body);
   } catch (err) {
     console.error('Usage error:', err);

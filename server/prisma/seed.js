@@ -1,7 +1,15 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const { updateVendorStatus } = require('../src/services/compliance');
 
 const prisma = new PrismaClient();
+
+function daysFromNow(days) {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() + days);
+  return d;
+}
 
 async function main() {
   if (process.env.NODE_ENV === 'production') {
@@ -48,7 +56,6 @@ async function main() {
       email: 'billing@acmeplumbing.com',
       phone: '555-0101',
       address: '456 Oak St, Austin, TX 78702',
-      coiStatus: 'COMPLIANT',
     },
   });
 
@@ -60,7 +67,6 @@ async function main() {
       email: 'insurance@sparkelectric.com',
       phone: '555-0202',
       address: '789 Elm Ave, Austin, TX 78703',
-      coiStatus: 'PENDING',
     },
   });
 
@@ -72,11 +78,13 @@ async function main() {
       email: 'bob@foundationfirst.com',
       phone: '555-0303',
       address: '321 Pine Rd, Austin, TX 78704',
-      coiStatus: 'EXPIRING_SOON',
     },
   });
 
-  // Vendor 1: GL COI (compliant, expires in 6 months)
+  const holder = 'Mark Allan Contracting';
+
+  // Vendor 1: coverages split across approved rows, all comfortably in the future.
+  // Status is not hardcoded — updateVendorStatus below must land on COMPLIANT.
   await prisma.coi.create({
     data: {
       vendorId: vendor1.id,
@@ -86,7 +94,8 @@ async function main() {
       status: 'APPROVED',
       glPolicyNumber: 'GL-2026-001',
       glCoverageAmount: 200000000, // $2,000,000
-      glExpirationDate: new Date('2026-09-15'),
+      glExpirationDate: daysFromNow(180),
+      certificateHolderName: holder,
       agentName: 'Sarah Parker',
       agentEmail: 'sarah@insuranceco.com',
       agentPhone: '555-0500',
@@ -94,7 +103,6 @@ async function main() {
     },
   });
 
-  // Vendor 1: WC COI (compliant, expires in 8 months)
   await prisma.coi.create({
     data: {
       vendorId: vendor1.id,
@@ -104,7 +112,8 @@ async function main() {
       status: 'APPROVED',
       wcPolicyNumber: 'WC-2026-001',
       wcCoverageAmount: 100000000, // $1,000,000
-      wcExpirationDate: new Date('2026-11-30'),
+      wcExpirationDate: daysFromNow(240),
+      certificateHolderName: holder,
       agentName: 'Sarah Parker',
       agentEmail: 'sarah@insuranceco.com',
       agentPhone: '555-0500',
@@ -112,7 +121,6 @@ async function main() {
     },
   });
 
-  // Vendor 1: Auto COI
   await prisma.coi.create({
     data: {
       vendorId: vendor1.id,
@@ -122,7 +130,26 @@ async function main() {
       status: 'APPROVED',
       autoPolicyNumber: 'AUTO-2026-001',
       autoCoverageAmount: 100000000, // $1,000,000
-      autoExpirationDate: new Date('2026-12-31'),
+      autoExpirationDate: daysFromNow(300),
+      certificateHolderName: holder,
+      agentName: 'Sarah Parker',
+      agentEmail: 'sarah@insuranceco.com',
+      agentPhone: '555-0500',
+      insuranceCompany: 'State Farm',
+    },
+  });
+
+  await prisma.coi.create({
+    data: {
+      vendorId: vendor1.id,
+      orgId: org.id,
+      coverageType: 'UMBRELLA',
+      pdfPath: '',
+      status: 'APPROVED',
+      umbPolicyNumber: 'UMB-2026-001',
+      umbCoverageAmount: 200000000,
+      umbExpirationDate: daysFromNow(200),
+      certificateHolderName: holder,
       agentName: 'Sarah Parker',
       agentEmail: 'sarah@insuranceco.com',
       agentPhone: '555-0500',
@@ -140,16 +167,16 @@ async function main() {
       status: 'PENDING_REVIEW',
       glPolicyNumber: 'CGL-5500',
       glCoverageAmount: 100000000,
-      glExpirationDate: new Date('2027-01-15'),
+      glExpirationDate: daysFromNow(400),
       wcPolicyNumber: 'WC-5500',
       wcCoverageAmount: 50000000,
-      wcExpirationDate: new Date('2027-01-15'),
+      wcExpirationDate: daysFromNow(400),
       umbPolicyNumber: 'UMB-5500',
       umbCoverageAmount: 200000000,
-      umbExpirationDate: new Date('2027-01-15'),
+      umbExpirationDate: daysFromNow(400),
       autoPolicyNumber: 'AU-5500',
       autoCoverageAmount: 100000000,
-      autoExpirationDate: new Date('2027-01-15'),
+      autoExpirationDate: daysFromNow(400),
       agentName: 'Mike Torres',
       agentEmail: 'mike@allcoverage.com',
       agentPhone: '555-0600',
@@ -157,9 +184,7 @@ async function main() {
     },
   });
 
-  // Vendor 3: GL COI expiring soon (14 days)
-  const soon = new Date();
-  soon.setDate(soon.getDate() + 14);
+  // Vendor 3: every required line is on file; general liability expires in 14 days.
   await prisma.coi.create({
     data: {
       vendorId: vendor3.id,
@@ -167,9 +192,19 @@ async function main() {
       coverageType: 'GENERAL_LIABILITY',
       pdfPath: '',
       status: 'APPROVED',
+      certificateHolderName: holder,
       glPolicyNumber: 'GL-9900',
       glCoverageAmount: 100000000,
-      glExpirationDate: soon,
+      glExpirationDate: daysFromNow(14),
+      wcPolicyNumber: 'WC-9900',
+      wcCoverageAmount: 100000000,
+      wcExpirationDate: daysFromNow(200),
+      autoPolicyNumber: 'AUTO-9900',
+      autoCoverageAmount: 100000000,
+      autoExpirationDate: daysFromNow(200),
+      umbPolicyNumber: 'UMB-9900',
+      umbCoverageAmount: 200000000,
+      umbExpirationDate: daysFromNow(200),
       agentName: 'Lisa Chen',
       agentEmail: 'lisa@protectins.com',
       agentPhone: '555-0700',
@@ -177,25 +212,9 @@ async function main() {
     },
   });
 
-  // Vendor 3: Umbrella COI (already expired)
-  const expired = new Date();
-  expired.setDate(expired.getDate() - 30);
-  await prisma.coi.create({
-    data: {
-      vendorId: vendor3.id,
-      orgId: org.id,
-      coverageType: 'UMBRELLA',
-      pdfPath: '',
-      status: 'EXPIRED',
-      umbPolicyNumber: 'UMB-9900',
-      umbCoverageAmount: 200000000,
-      umbExpirationDate: expired,
-      agentName: 'Lisa Chen',
-      agentEmail: 'lisa@protectins.com',
-      agentPhone: '555-0700',
-      insuranceCompany: 'Progressive',
-    },
-  });
+  for (const vendor of [vendor1, vendor2, vendor3]) {
+    await updateVendorStatus(prisma, vendor.id, org.id);
+  }
 
   console.log(`Seed complete. Login: admin@markallancont.com / ${seedPassword}`);
   console.log(`Created ${3} vendors with ${6} COIs across different coverage types`);

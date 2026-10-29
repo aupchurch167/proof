@@ -50,6 +50,7 @@ export default function App() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/portal/preview" element={<Portal preview />} />
       <Route path="/portal/:token" element={<Portal />} />
       <Route path="/apply/:slug" element={<Apply />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />

@@ -3,12 +3,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { readSignupUtms, rememberSignupUtms, signupUtmSearch } from '../utils/signupAttribution';
+import { emailFieldError, normalizeEmail } from '../utils/emailCheck';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
@@ -19,10 +21,16 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const problem = emailFieldError(email);
+    if (problem) {
+      setEmailError(problem);
+      return;
+    }
+    setEmailError('');
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
+      await login(normalizeEmail(email), password);
       navigate('/');
     } catch (err) {
       setError(err.message);
@@ -53,16 +61,22 @@ export default function Login() {
           {resetSuccess && <div className="bg-ok-bg text-ok-text px-4 py-3 rounded-control mb-4 text-sm">Password reset successfully. Please sign in.</div>}
           {error && <div className="bg-bad-bg text-bad-text px-4 py-3 rounded-control mb-4 text-sm">{error}</div>}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-ink-2 mb-1">Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
+            <label htmlFor="login-email" className="block text-sm font-medium text-ink-2 mb-1">Email</label>
+            <input id="login-email" type="email" value={email}
+              onChange={(e) => { setEmail(e.target.value); setEmailError(''); }}
+              onInvalid={(e) => { e.preventDefault(); setEmailError(emailFieldError(email)); }}
+              required
+              aria-invalid={emailError ? 'true' : undefined}
+              aria-describedby={emailError ? 'login-email-error' : undefined}
               className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
+            {emailError && <p id="login-email-error" className="text-bad-text text-xs mt-1">{emailError}</p>}
           </div>
           <div className="mb-6">
             <div className="flex justify-between items-center mb-1">
-              <label className="block text-sm font-medium text-ink-2">Password</label>
+              <label htmlFor="login-password" className="block text-sm font-medium text-ink-2">Password</label>
               <Link to="/forgot-password" className="text-sm text-navy hover:underline">Forgot password?</Link>
             </div>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
+            <input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
               className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
           </div>
           <button type="submit" disabled={loading}

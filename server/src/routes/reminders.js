@@ -13,6 +13,7 @@ const {
   earliestExpiration,
 } = require('../services/reminders');
 const { isPlaceholderEmail } = require('../utils/email');
+const { mergeApprovedCois } = require('../services/effectiveCoverage');
 
 const router = express.Router();
 
@@ -48,7 +49,7 @@ router.get('/upcoming', authenticate, async (req, res) => {
     const vendors = await prisma.vendor.findMany({
       where: { orgId: req.user.orgId, deletedAt: null },
       include: {
-        cois: { where: { status: 'APPROVED', deletedAt: null }, orderBy: { submittedAt: 'desc' }, take: 1 },
+        cois: { where: { status: 'APPROVED', deletedAt: null }, orderBy: { submittedAt: 'desc' } },
         notifications: {
           where: { type: { in: ['UPLOAD_REQUEST', 'UPLOAD_CHASE', 'EXPIRATION_REMINDER'] }, status: 'SENT' },
           orderBy: { sentAt: 'desc' },
@@ -63,7 +64,7 @@ router.get('/upcoming', authenticate, async (req, res) => {
       const badEmail = isPlaceholderEmail(vendor.email);
 
       // --- expiration ladder -------------------------------------------------
-      const latestApproved = vendor.cois[0] || null;
+      const latestApproved = mergeApprovedCois(vendor.cois);
       const expiration = earliestExpiration(latestApproved);
       if (expiration && settings?.notifyOnExpiration !== false) {
         const days = daysUntil(expiration, now);

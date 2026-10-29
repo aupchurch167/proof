@@ -84,7 +84,7 @@ describe('A3-02 vendor delete retains COIs and Spaces objects', () => {
     deleteFile.mockClear();
     const res = await request(app)
       .delete(`/api/vendors/${vendor.id}`)
-      .set(auth(memberToken));
+      .set(auth(adminToken));
 
     expect(res.status).toBe(200);
     expect(deleteFile).not.toHaveBeenCalled();

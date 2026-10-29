@@ -4,12 +4,14 @@ import { useAuth } from '../contexts/AuthContext';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { api } from '../utils/api';
 import { clearSignupUtms, readSignupUtms, rememberSignupUtms, signupUtmSearch } from '../utils/signupAttribution';
+import { emailFieldError, normalizeEmail } from '../utils/emailCheck';
 
 export default function Signup() {
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState({ orgName: '', email: '', password: '', firstName: '', lastName: '' });
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [freeVendorLimit, setFreeVendorLimit] = useState(null);
@@ -40,7 +42,18 @@ export default function Signup() {
         setLoading(false);
         return;
       }
-      const data = await signup({ ...form, acceptTerms: true, ...readSignupUtms() });
+      const problem = emailFieldError(form.email);
+      if (problem) {
+        setEmailError(problem);
+        setLoading(false);
+        return;
+      }
+      const data = await signup({
+        ...form,
+        email: normalizeEmail(form.email),
+        acceptTerms: true,
+        ...readSignupUtms(),
+      });
       clearSignupUtms();
       if (data.accessToken) {
         navigate('/');
@@ -107,9 +120,15 @@ export default function Signup() {
             </div>
           </div>
           <div className="mb-4">
-            <label className="block text-sm font-medium text-ink-2 mb-1">Email</label>
-            <input name="email" type="email" value={form.email} onChange={handleChange} required
+            <label htmlFor="signup-email" className="block text-sm font-medium text-ink-2 mb-1">Email</label>
+            <input id="signup-email" name="email" type="email" value={form.email}
+              onChange={(e) => { handleChange(e); setEmailError(''); }}
+              onInvalid={(e) => { e.preventDefault(); setEmailError(emailFieldError(form.email)); }}
+              required
+              aria-invalid={emailError ? 'true' : undefined}
+              aria-describedby={emailError ? 'signup-email-error' : undefined}
               className="w-full px-3 py-2 border rounded-control focus:ring-2 focus:ring-navy focus:border-transparent" />
+            {emailError && <p id="signup-email-error" className="text-bad-text text-xs mt-1">{emailError}</p>}
           </div>
           <div className="mb-4">
             <label className="block text-sm font-medium text-ink-2 mb-1">Password</label>

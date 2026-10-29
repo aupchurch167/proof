@@ -27,7 +27,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={toast}>
       {children}
-      <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-[calc(100%-2rem)] pointer-events-none">
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -44,7 +44,7 @@ export function ToastProvider({ children }) {
                   : 'bg-amber-light'
               }`}
             />
-            <span className="leading-[1.45]">{t.message}</span>
+            <span className="leading-[1.45] break-words min-w-0">{t.message}</span>
           </div>
         ))}
       </div>

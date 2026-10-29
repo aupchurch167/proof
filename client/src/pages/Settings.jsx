@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useUsage } from '../contexts/UsageContext';
 import { Button, Card, PageTitle } from '../components/ui';
+import { ORG_NAME_MAX, companyNameError } from '../constants/limits';
 
 const TABS = ['Company', 'Team', 'Plan & billing', 'Vendor portal', 'Profile'];
 
@@ -51,6 +52,7 @@ export default function Settings() {
   const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', email: '', currentPassword: '' });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [saving, setSaving] = useState('');
+  const [orgError, setOrgError] = useState('');
 
   const isAdmin = user?.role === 'ADMIN';
   const applyUrl = org?.slug ? `${window.location.origin}/apply/${org.slug}` : null;
@@ -76,12 +78,20 @@ export default function Settings() {
   }, []);
 
   const saveOrg = async () => {
+    const problem = companyNameError(orgForm.name);
+    if (problem) {
+      setOrgError(problem);
+      return;
+    }
+    setOrgError('');
     setSaving('org');
     try {
-      await api.put('/organization', orgForm);
+      const saved = await api.put('/organization', { ...orgForm, name: orgForm.name.trim() });
+      setOrg(saved);
+      setOrgForm((prev) => ({ ...prev, name: saved.name || prev.name.trim() }));
       toast.success('Company details saved');
     } catch (err) {
-      toast.error(err.message);
+      setOrgError(err.message);
     } finally {
       setSaving('');
     }
@@ -152,7 +162,15 @@ export default function Settings() {
               <span className="text-[15px] font-bold text-navy">Company</span>
               <div className="grid sm:grid-cols-2 gap-3.5">
                 <Field label="Legal name">
-                  <input value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })} className={input} disabled={!isAdmin} />
+                  <input
+                    value={orgForm.name}
+                    maxLength={ORG_NAME_MAX}
+                    onChange={(e) => { setOrgForm({ ...orgForm, name: e.target.value }); setOrgError(''); }}
+                    aria-invalid={orgError ? 'true' : undefined}
+                    className={input}
+                    disabled={!isAdmin}
+                  />
+                  {orgError && <p className="text-bad-text text-xs mt-1">{orgError}</p>}
                 </Field>
                 <Field label="Notification email">
                   <input value={orgForm.email} onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })} className={input} disabled={!isAdmin} />
@@ -187,12 +205,18 @@ export default function Settings() {
           {tab === 'Team' && (
             <Card className="p-[22px] flex flex-col gap-3.5">
               <span className="text-[15px] font-bold text-navy">Team · {team.length}</span>
-              {team.map((m) => (
-                <div key={m.id} className="flex justify-between items-center text-[13px] py-1.5 border-b border-line-divider last:border-0">
-                  <span className="text-ink">{m.firstName} {m.lastName}</span>
-                  <span className="text-muted capitalize">{(m.role || '').toLowerCase()}</span>
-                </div>
-              ))}
+              {team.length === 0 && (
+                <p className="text-[13px] text-muted">No teammates to show.</p>
+              )}
+              {team.map((m) => {
+                const name = `${m.firstName || ''} ${m.lastName || ''}`.trim();
+                return (
+                  <div key={m.id} className="flex justify-between items-center gap-3 text-[13px] py-1.5 border-b border-line-divider last:border-0">
+                    <span className="text-ink min-w-0 break-words">{name || m.email}</span>
+                    <span className="text-muted capitalize flex-none">{(m.role || '').toLowerCase()}</span>
+                  </div>
+                );
+              })}
               {isAdmin && (
                 <Button as={Link} to="/settings/users" variant="secondary" className="!border-dashed justify-center">
                   + Invite teammate
@@ -245,9 +269,9 @@ export default function Settings() {
                   <Button as="a" href={applyUrl} target="_blank" rel="noreferrer">Preview ↗</Button>
                 </div>
               )}
-              {usage?.portalPreviewToken && (
+              {isAdmin && (
                 <p className="text-xs text-muted">
-                  <a href={`/portal/${usage.portalPreviewToken}`} target="_blank" rel="noreferrer" className="font-semibold text-navy hover:text-amber">
+                  <a href="/portal/preview" target="_blank" rel="noreferrer" className="font-semibold text-navy hover:text-amber">
                     See what a vendor sees ↗
                   </a>
                 </p>

@@ -218,6 +218,7 @@ describe('Requirements', () => {
     const vendor = await createTestVendor(org.id, { name: 'Impact Co' });
     await createTestCoi(vendor.id, org.id, {
       status: 'APPROVED',
+      certificateHolderName: org.name,
       glCoverageAmount: 150000000, // $1.5M
       glExpirationDate: daysFromNow(200),
       autoCoverageAmount: 150000000,
@@ -355,13 +356,13 @@ describe('GET /api/audit', () => {
 });
 
 describe('GET /api/organization/usage', () => {
-  it('reports the plan meter and a portal preview token', async () => {
+  it('reports the plan meter and does not mint a portal JWT', async () => {
     const res = await request(app).get('/api/organization/usage').set(auth());
 
     expect(res.status).toBe(200);
     expect(res.body.planLabel).toBe('Free');
     expect(res.body.vendors.limit).toBe(10);
     expect(typeof res.body.vendors.percent).toBe('number');
-    expect(res.body.portalPreviewToken).toBeTruthy();
+    expect(res.body).not.toHaveProperty('portalPreviewToken');
   });
 });

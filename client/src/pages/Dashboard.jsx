@@ -4,6 +4,8 @@ import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { Button, Card, Dot, Eyebrow } from '../components/ui';
+import { attentionHeadline } from '../utils/copy';
+import { canImport } from '../constants/roles';
 
 const DATE_LINE = { weekday: 'long', month: 'long', day: 'numeric' };
 
@@ -153,11 +155,11 @@ export default function Dashboard() {
           </span>
           <h1 className="text-[28px] font-extrabold tracking-[-0.03em] text-navy">
             {greeting()}, {user?.firstName}.{' '}
-            {needsYou === 0 ? 'Nothing needs you.' : `${needsYou} thing${needsYou === 1 ? '' : 's'} need you.`}
+            {attentionHeadline(needsYou)}
           </h1>
         </div>
         <div className="flex gap-2">
-          <Button as={Link} to="/import">Import vendors</Button>
+          {canImport(user?.role) && <Button as={Link} to="/import">Import vendors</Button>}
           <Button as={Link} to="/vendors" variant="amber">Request COI</Button>
         </div>
       </div>

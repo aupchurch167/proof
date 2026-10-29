@@ -2,6 +2,7 @@ const express = require('express');
 const prisma = require('../lib/prisma');
 const { PDFDocument } = require('pdf-lib');
 const { authenticateVerified: authenticate } = require('../middleware/auth');
+const { countVendorCompliance } = require('../services/compliance');
 const { downloadFile } = require('../services/storage');
 const { buildTimeline } = require('../services/coverageTimeline');
 const { COVERAGE_LINES } = require('../services/coverage');
@@ -17,20 +18,7 @@ const router = express.Router();
 // GET /api/reports/compliance
 router.get('/compliance', authenticate, async (req, res) => {
   try {
-    const vendors = await prisma.vendor.findMany({
-      where: { orgId: req.user.orgId, deletedAt: null },
-    });
-
-    const summary = {
-      total: vendors.length,
-      compliant: vendors.filter(v => v.coiStatus === 'COMPLIANT').length,
-      nonCompliant: vendors.filter(v => v.coiStatus === 'NON_COMPLIANT').length,
-      expiringSoon: vendors.filter(v => v.coiStatus === 'EXPIRING_SOON').length,
-      expired: vendors.filter(v => v.coiStatus === 'EXPIRED').length,
-      pending: vendors.filter(v => v.coiStatus === 'PENDING').length,
-      noCoi: vendors.filter(v => v.coiStatus === 'NO_COI').length,
-    };
-
+    const summary = await countVendorCompliance(prisma, req.user.orgId);
     res.json(summary);
   } catch (err) {
     res.status(500).json({ error: 'Failed to get compliance summary' });

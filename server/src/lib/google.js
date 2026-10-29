@@ -29,7 +29,7 @@ async function verifyGoogleIdToken(idToken) {
 
   return {
     googleId: payload.sub,
-    email: payload.email.toLowerCase(),
+    email: payload.email.trim().toLowerCase(),
     firstName: payload.given_name || '',
     lastName: payload.family_name || '',
   };

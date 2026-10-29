@@ -1,9 +1,12 @@
 const core = require('../lib/core');
 const { emitCoiUpdated } = require('./webhookDispatcher');
+const { coverageFor, coverageReason, coverageFailureReasons } = require('./coverage');
+const { mergeApprovedCois } = require('./effectiveCoverage');
 const {
   evaluateCompliance,
   isExpiredDate,
   isExpiringSoon,
+  holderDetailReason,
   DEFAULT_EXPIRING_WINDOW_DAYS,
 } = require('./complianceRules');
 
@@ -46,6 +49,102 @@ function statusWithoutSettings(coi, now) {
   return 'COMPLIANT';
 }
 
+// One reading of a vendor's certificates. The list badge, coverage chips,
+// dashboard counts, and the stored coiStatus all go through this so a stale
+// Vendor.coiStatus cannot disagree with the lines on screen.
+function assessVendorCompliance({ cois, settings, orgName, now = new Date() } = {}) {
+  const rows = (cois || []).filter((coi) => coi && !coi.deletedAt);
+  const pending = rows.some((coi) => coi.status === 'PENDING_REVIEW');
+  const merged = mergeApprovedCois(rows);
+  const coverages = coverageFor(merged, settings, { now });
+
+  let status;
+  let evaluated = null;
+  if (!merged) {
+    status = pending ? 'PENDING' : 'NO_COI';
+  } else if (!settings) {
+    status = statusWithoutSettings(merged, now);
+  } else {
+    evaluated = evaluateCompliance(coiPayload(merged), settings, orgName, { now });
+    status = evaluated.status;
+  }
+
+  const nextExpiration = coverages
+    .filter((line) => line.expiresAt && line.verdict !== 'skipped')
+    .map((line) => line.expiresAt)
+    .sort()[0] || null;
+
+  const holder = holderDetailReason(evaluated);
+  const failures = coverageFailureReasons(coverages);
+  const reasons = [];
+  if (holder) reasons.push(holder);
+  if (failures.length) reasons.push(...failures);
+  else if (!holder) {
+    const soon = coverageReason(coverages);
+    if (soon) reasons.push(soon);
+  }
+
+  return {
+    status,
+    coverages,
+    merged,
+    evaluated,
+    nextExpiration,
+    statusReason: reasons.length ? reasons.join(' · ') : null,
+    pending,
+  };
+}
+
+const STATUS_COUNT_KEY = {
+  COMPLIANT: 'compliant',
+  NON_COMPLIANT: 'nonCompliant',
+  EXPIRING_SOON: 'expiringSoon',
+  EXPIRED: 'expired',
+  PENDING: 'pending',
+  NO_COI: 'noCoi',
+};
+
+async function countVendorCompliance(prisma, orgId, now = new Date()) {
+  const [org, vendors] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { name: true, settings: true },
+    }),
+    prisma.vendor.findMany({
+      where: { orgId, deletedAt: null },
+      select: {
+        cois: {
+          where: { deletedAt: null },
+          orderBy: { submittedAt: 'desc' },
+        },
+      },
+    }),
+  ]);
+
+  const summary = {
+    total: vendors.length,
+    compliant: 0,
+    nonCompliant: 0,
+    expiringSoon: 0,
+    expired: 0,
+    pending: 0,
+    noCoi: 0,
+  };
+
+  for (const vendor of vendors) {
+    const assessed = assessVendorCompliance({
+      cois: vendor.cois,
+      settings: org?.settings,
+      orgName: org?.name,
+      now,
+    });
+    const key = STATUS_COUNT_KEY[assessed.status];
+    if (key) summary[key] += 1;
+  }
+
+  return summary;
+}
+
 async function updateVendorStatus(prisma, vendorId, orgId, { now = new Date() } = {}) {
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -53,24 +152,18 @@ async function updateVendorStatus(prisma, vendorId, orgId, { now = new Date() } 
   });
   const settings = org?.settings;
 
-  // Get the latest approved COI
-  const latestCoi = await prisma.coi.findFirst({
-    where: { vendorId, status: 'APPROVED', deletedAt: null },
+  const cois = await prisma.coi.findMany({
+    where: { vendorId, deletedAt: null },
     orderBy: { submittedAt: 'desc' },
   });
-
-  let status;
-  if (!latestCoi) {
-    // No approved COI: pending if one is under review, otherwise none on file.
-    const pendingCoi = await prisma.coi.findFirst({
-      where: { vendorId, status: 'PENDING_REVIEW', deletedAt: null },
-    });
-    status = pendingCoi ? 'PENDING' : 'NO_COI';
-  } else if (!settings) {
-    status = statusWithoutSettings(latestCoi, now);
-  } else {
-    status = evaluateCompliance(coiPayload(latestCoi), settings, org?.name, { now }).status;
-  }
+  const assessed = assessVendorCompliance({
+    cois,
+    settings,
+    orgName: org?.name,
+    now,
+  });
+  const status = assessed.status;
+  const latestCoi = assessed.merged;
 
   const prev = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { coiStatus: true } });
   const updated = await prisma.vendor.update({
@@ -107,4 +200,10 @@ async function mirrorComplianceStatusToCore(coreId, coiStatus, vendor) {
   }
 }
 
-module.exports = { checkCompliance, updateVendorStatus, evaluateCompliance };
+module.exports = {
+  checkCompliance,
+  updateVendorStatus,
+  evaluateCompliance,
+  assessVendorCompliance,
+  countVendorCompliance,
+};

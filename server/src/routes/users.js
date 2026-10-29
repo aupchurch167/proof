@@ -6,6 +6,7 @@ const { sendInviteEmail } = require('../services/email');
 const { logAudit } = require('../services/audit');
 const { hashToken } = require('../lib/apiTokens');
 const { revokeAllForUser } = require('../lib/sessions');
+const { normalizeEmail, emailFieldError, findUserByEmail } = require('../utils/emailAddress');
 
 const router = express.Router();
 
@@ -23,8 +24,9 @@ function serializeUser(user) {
   };
 }
 
-// GET /api/users — ADMIN only
-router.get('/', authenticate, authorize('ADMIN'), async (req, res) => {
+// GET /api/users — anyone in the org can see the team. Invite tokens stay off
+// this payload. Inviting, role changes, and removal stay admin-only.
+router.get('/', authenticate, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
       where: { orgId: req.user.orgId },
@@ -43,16 +45,17 @@ router.get('/', authenticate, authorize('ADMIN'), async (req, res) => {
 // POST /api/users/invite — ADMIN only, sends email invite
 router.post('/invite', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
-    const { email, role } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
+    const emailError = emailFieldError(req.body?.email);
+    if (emailError) {
+      return res.status(400).json({ error: emailError });
     }
+    const email = normalizeEmail(req.body.email);
+    const { role } = req.body;
 
     const validRoles = ['ADMIN', 'MEMBER'];
     const assignRole = validRoles.includes(role) ? role : 'MEMBER';
 
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const existing = await findUserByEmail(prisma, email);
     if (existing) {
       return res.status(409).json({ error: 'Email already registered' });
     }

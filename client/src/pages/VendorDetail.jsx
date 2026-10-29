@@ -10,6 +10,8 @@ import EmailTagInput from '../components/EmailTagInput';
 import ReplyList from '../components/ReplyList';
 import { CANONICAL_TRADES } from '../constants/trades';
 import { vendorStatus, coiStatus, VERDICT } from '../constants/status';
+import { VENDOR_NAME_MAX, vendorNameError } from '../constants/limits';
+import { canDeleteVendors, canEditVendors } from '../constants/roles';
 import { Button, Card, Dot, StatusPill, Eyebrow, EmptyState } from '../components/ui';
 
 const money = (dollars) => (dollars == null ? null : `$${dollars.toLocaleString()}`);
@@ -107,6 +109,11 @@ export default function VendorDetail() {
   useEffect(() => { load(); }, [id]);
 
   const save = async () => {
+    const nameError = vendorNameError(form.name);
+    if (nameError) {
+      toast.error(nameError);
+      return;
+    }
     try {
       await api.put(`/vendors/${id}`, form);
       setEditing(false);
@@ -160,8 +167,8 @@ export default function VendorDetail() {
   if (!vendor) return <div className="p-9 text-[13px] text-muted">Vendor not found.</div>;
 
   const status = vendorStatus(vendor.coiStatus);
-  const canManage = ['ADMIN', 'MEMBER', 'REVIEWER'].includes(user?.role);
-  const canDelete = ['ADMIN', 'MEMBER'].includes(user?.role);
+  const canManage = canEditVendors(user?.role);
+  const canDelete = canDeleteVendors(user?.role);
 
   // The primary action names the specific gap when there is one — "Request
   // workers' comp" beats a generic "Request COI" when that's what's missing.
@@ -178,7 +185,7 @@ export default function VendorDetail() {
       <div className="flex justify-between items-start gap-4 flex-wrap">
         <div className="flex flex-col gap-1.5 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-[28px] font-extrabold tracking-[-0.03em] text-navy">{vendor.name}</h1>
+            <h1 className="text-[28px] font-extrabold tracking-[-0.03em] text-navy break-words min-w-0 max-w-full">{vendor.name}</h1>
             <StatusPill tone={status.tone} className="!text-xs !px-2.5 !py-1">
               {status.label}
             </StatusPill>
@@ -214,6 +221,7 @@ export default function VendorDetail() {
                 <label className="block text-[13px] font-semibold text-ink-2 mb-1">{label}</label>
                 <input
                   value={form[key] || ''}
+                  maxLength={key === 'name' ? VENDOR_NAME_MAX : undefined}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-control border border-line-strong text-[13px] focus:outline-none focus:border-navy"
                 />
@@ -338,7 +346,7 @@ export default function VendorDetail() {
               <div key={a.id} className="grid grid-cols-[8px_minmax(0,1fr)] gap-3 px-5 py-3 border-b border-line-divider last:border-0">
                 <Dot tone={a.tone} className="mt-1" />
                 <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[13px] text-ink leading-[1.4]">{a.detail}</span>
+                  <span className="text-[13px] text-ink leading-[1.4] break-words">{a.detail}</span>
                   <span className="text-[11px] text-faint">
                     {new Date(a.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {a.by}
                   </span>

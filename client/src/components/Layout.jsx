@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsage } from '../contexts/UsageContext';
 import { api } from '../utils/api';
+import { canImport } from '../constants/roles';
 import EmailVerificationBanner from './EmailVerificationBanner';
 
 // Badge counts come from the compliance summary so the sidebar always agrees
@@ -10,7 +11,7 @@ import EmailVerificationBanner from './EmailVerificationBanner';
 // queue waiting on someone here.
 const NAV = [
   { path: '/', label: 'Dashboard' },
-  { path: '/vendors', label: 'Vendors', badge: 'gaps' },
+  { path: '/vendors', label: 'Vendors', badge: 'gaps', badgeLabel: 'need attention' },
   { path: '/cois', label: 'Review queue', badge: 'review' },
   { path: '/requirements', label: 'Requirements' },
   { path: '/reminders', label: 'Reminders' },
@@ -67,6 +68,8 @@ export default function Layout({ children }) {
   const isActive = (path) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
+  const nav = NAV.filter((item) => item.path !== '/import' || canImport(user?.role));
+
   return (
     <div className="min-h-screen flex bg-canvas">
       {sidebarOpen && (
@@ -93,7 +96,7 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="px-3 py-1.5 flex flex-col gap-0.5 flex-1 overflow-y-auto">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const active = isActive(item.path);
             const badge = item.badge ? counts[item.badge] : 0;
             return (
@@ -108,14 +111,20 @@ export default function Layout({ children }) {
               >
                 <span className="flex-1 text-left">{item.label}</span>
                 {badge > 0 && (
-                  <span className="text-[11px] font-bold bg-amber text-white px-[7px] py-px rounded-pill">{badge}</span>
+                  <span
+                    className="text-[11px] font-bold bg-amber text-white px-[7px] py-px rounded-pill"
+                    title={`${badge} ${item.badgeLabel || ''}`.trim()}
+                    aria-label={`${badge} ${item.badgeLabel || item.label}`}
+                  >
+                    {badge}
+                  </span>
                 )}
               </Link>
             );
           })}
-          {usage?.portalPreviewToken && (
+          {user?.role === 'ADMIN' && (
             <a
-              href={`/portal/${usage.portalPreviewToken}`}
+              href="/portal/preview"
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 px-3 py-[9px] rounded-control text-sm font-medium
