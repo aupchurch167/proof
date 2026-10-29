@@ -17,7 +17,15 @@ const { validate } = require('../utils/validation');
 const { generateUploadToken } = require('../utils/tokens');
 const { isVendorEmailConflict } = require('../lib/prismaErrors');
 const { isPlaceholderEmail, placeholderReason } = require('../utils/email');
-const { logAudit } = require('../services/audit');
+const { logAudit, changedFieldNames } = require('../services/audit');
+
+const VENDOR_AUDIT_FIELDS = ['name', 'contactName', 'email', 'phone', 'address', 'trade', 'additionalEmails', 'notes'];
+
+function blankToNull(value) {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+}
 const core = require('../lib/core');
 const { isValidTrade, CANONICAL_TRADES } = require('../constants/trades');
 
@@ -132,8 +140,8 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
       name,
       contactName,
       email,
-      phone,
-      address,
+      phone: blankToNull(phone),
+      address: blankToNull(address),
       trade: trade || null,
       additionalEmails: Array.isArray(additionalEmails) ? additionalEmails : [],
     });
@@ -146,7 +154,7 @@ router.post('/', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), enforce
     if (!created.ok) return res.status(created.status).json(created.body);
     const updated = created.vendor;
 
-    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'create', entity: 'vendor', entityId: updated.id, details: { name, email }, ipAddress: req.ip });
+    await logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'create', entity: 'vendor', entityId: updated.id, details: { name, email }, ipAddress: req.ip });
 
     mirrorCreateToCore(updated);
 
@@ -297,12 +305,25 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), valid
         ...(name && { name }),
         ...(contactName !== undefined && { contactName }),
         ...(email && { email }),
-        ...(phone !== undefined && { phone }),
-        ...(address !== undefined && { address }),
+        ...(phone !== undefined && { phone: blankToNull(phone) }),
+        ...(address !== undefined && { address: blankToNull(address) }),
         ...(trade !== undefined && { trade: trade || null }),
         ...(additionalEmails !== undefined && { additionalEmails: Array.isArray(additionalEmails) ? additionalEmails : [] }),
       },
     });
+
+    const changed = changedFieldNames(vendor, updated, VENDOR_AUDIT_FIELDS);
+    if (changed.length) {
+      await logAudit({
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        action: 'update',
+        entity: 'vendor',
+        entityId: updated.id,
+        details: { name: updated.name, changed: changed.join(', ') },
+        ipAddress: req.ip,
+      });
+    }
 
     mirrorUpdateToCore(updated);
 
@@ -339,17 +360,29 @@ router.delete('/bulk', authenticate, authorize('ADMIN'), async (req, res) => {
       return res.status(400).json({ error: 'ids must be a non-empty array' });
     }
 
-    // Capture coreIds before soft-delete so we can mirror to Core after.
-    const linked = await prisma.vendor.findMany({
-      where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null, coreId: { not: null } },
-      select: { coreId: true },
+    // Capture names and coreIds before soft-delete so the audit row and the
+    // Core mirror still know who was removed.
+    const doomed = await prisma.vendor.findMany({
+      where: { id: { in: ids }, orgId: req.user.orgId, deletedAt: null },
+      select: { id: true, name: true, coreId: true },
     });
 
     const { count } = await prisma.$transaction((tx) => (
       softDeleteVendorsAndCois(tx, { ids, orgId: req.user.orgId })
     ));
 
-    for (const v of linked) mirrorDeleteToCore(v.coreId);
+    for (const v of doomed) {
+      if (v.coreId) mirrorDeleteToCore(v.coreId);
+      await logAudit({
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        action: 'delete',
+        entity: 'vendor',
+        entityId: v.id,
+        details: { name: v.name },
+        ipAddress: req.ip,
+      });
+    }
 
     res.json({ message: `${count} vendor(s) deleted` });
   } catch (err) {
@@ -375,7 +408,15 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
 
     mirrorDeleteToCore(vendor.coreId);
 
-    logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'delete', entity: 'vendor', entityId: req.params.id, ipAddress: req.ip });
+    await logAudit({
+      orgId: req.user.orgId,
+      userId: req.user.id,
+      action: 'delete',
+      entity: 'vendor',
+      entityId: vendor.id,
+      details: { name: vendor.name },
+      ipAddress: req.ip,
+    });
     res.json({ message: 'Vendor deleted' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete vendor' });
@@ -457,6 +498,16 @@ router.post('/:id/coi/upload', authenticate, authorize('ADMIN', 'MEMBER', 'REVIE
     }
 
     const coi = await prisma.coi.create({ data: coiData });
+
+    await logAudit({
+      orgId: req.user.orgId,
+      userId: req.user.id,
+      action: 'create',
+      entity: 'coi',
+      entityId: coi.id,
+      details: { vendorName: vendor.name, name: vendor.name },
+      ipAddress: req.ip,
+    });
 
     // Auto-add agent email to vendor's additional emails
     if (extractedData?.agentEmail) {
@@ -601,7 +652,7 @@ router.post(
         updated.masterAgreementPath ? getSignedUrl(updated.masterAgreementPath).catch(() => null) : null,
       ]);
 
-      logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'update', entity: 'vendor', entityId: updated.id, details: { uploaded: Object.keys(data) }, ipAddress: req.ip });
+      await logAudit({ orgId: req.user.orgId, userId: req.user.id, action: 'update', entity: 'vendor', entityId: updated.id, details: { name: updated.name, changed: Object.keys(data).join(', ') }, ipAddress: req.ip });
       res.json({ ...updated, w9Url, masterAgreementUrl });
     } catch (err) {
       console.error('Document upload error:', err);

@@ -56,6 +56,7 @@ async function main() {
       email: 'billing@acmeplumbing.com',
       phone: '555-0101',
       address: '456 Oak St, Austin, TX 78702',
+      trade: 'Plumbing',
     },
   });
 
@@ -67,6 +68,7 @@ async function main() {
       email: 'insurance@sparkelectric.com',
       phone: '555-0202',
       address: '789 Elm Ave, Austin, TX 78703',
+      trade: 'Electrical',
     },
   });
 
@@ -78,6 +80,7 @@ async function main() {
       email: 'bob@foundationfirst.com',
       phone: '555-0303',
       address: '321 Pine Rd, Austin, TX 78704',
+      trade: 'Concrete',
     },
   });
 

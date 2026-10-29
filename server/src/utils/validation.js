@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const { emailFieldError } = require('./emailAddress');
+const { phoneFieldError, addressFieldError } = require('./vendorContact');
 
 const PRIVILEGED_BODY_KEYS = ['plan', 'role', 'orgId'];
 const VENDOR_NAME_MAX = 200;
@@ -27,6 +28,13 @@ function optionalAccountEmail() {
     if (val == null || String(val).trim() === '') return;
     const message = emailFieldError(val);
     if (message && message !== 'Email is required') ctx.addIssue({ code: 'custom', message });
+  });
+}
+
+function contactField(check, { required = false } = {}) {
+  return z.union([z.string(), z.null()]).optional().superRefine((val, ctx) => {
+    const message = check(val, { required });
+    if (message) ctx.addIssue({ code: 'custom', message });
   });
 }
 
@@ -76,8 +84,8 @@ const schemas = {
     name: vendorName,
     email: accountEmail(),
     contactName: z.string().optional(),
-    phone: z.string().optional(),
-    address: z.string().optional(),
+    phone: contactField(phoneFieldError),
+    address: contactField(addressFieldError),
     trade: z.string().optional(),
     additionalEmails: z.array(accountEmail()).optional(),
   }),
@@ -86,8 +94,8 @@ const schemas = {
     name: vendorName.optional(),
     contactName: z.string().optional().nullable(),
     email: optionalAccountEmail().optional(),
-    phone: z.string().optional().nullable(),
-    address: z.string().optional().nullable(),
+    phone: contactField(phoneFieldError),
+    address: contactField(addressFieldError),
     trade: z.string().optional().nullable(),
     additionalEmails: z.array(accountEmail()).optional(),
     notes: z.string().optional().nullable(),
@@ -122,8 +130,8 @@ const schemas = {
   applyVendor: z.object({
     name: vendorName,
     email: accountEmail(),
-    phone: z.string().min(1, 'Phone is required'),
-    address: z.string().min(1, 'Address is required'),
+    phone: contactField(phoneFieldError, { required: true }),
+    address: contactField(addressFieldError, { required: true }),
     contactName: z.string().optional(),
     trade: z.string().optional(),
     notes: z.string().optional(),

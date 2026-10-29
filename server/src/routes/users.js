@@ -57,7 +57,7 @@ router.post('/invite', authenticate, authorize('ADMIN'), async (req, res) => {
 
     const existing = await findUserByEmail(prisma, email);
     if (existing) {
-      return res.status(409).json({ error: 'Email already registered' });
+      return res.status(409).json({ error: 'That email already has an account or a pending invite' });
     }
 
     const rawToken = crypto.randomBytes(32).toString('hex');

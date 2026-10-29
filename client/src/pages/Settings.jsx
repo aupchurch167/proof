@@ -1,21 +1,37 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useUsage } from '../contexts/UsageContext';
 import { Button, Card, PageTitle } from '../components/ui';
 import { ORG_NAME_MAX, companyNameError } from '../constants/limits';
+import Users from './Users';
+import Integrations from './Integrations';
 
-const TABS = ['Company', 'Team', 'Plan & billing', 'Vendor portal', 'Profile'];
+const TAB_KEYS = {
+  Company: 'company',
+  Team: 'team',
+  Integrations: 'integrations',
+  'Plan & billing': 'plan',
+  'Vendor portal': 'portal',
+  Profile: 'profile',
+};
 
-function Field({ label, hint, children, className = '' }) {
+function tabFromParam(param, isAdmin) {
+  const match = Object.entries(TAB_KEYS).find(([, key]) => key === param);
+  const name = match ? match[0] : 'Company';
+  if (name === 'Integrations' && !isAdmin) return 'Company';
+  return name;
+}
+
+function Field({ id, label, hint, children, className = '' }) {
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
-      <span className="text-xs font-semibold text-ink-2">
+      <label htmlFor={id} className="text-xs font-semibold text-ink-2">
         {label}
         {hint && <span className="text-faint font-normal"> ({hint})</span>}
-      </span>
+      </label>
       {children}
     </div>
   );
@@ -44,7 +60,7 @@ export default function Settings() {
   const toast = useToast();
   const { usage } = useUsage();
 
-  const [tab, setTab] = useState('Company');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [org, setOrg] = useState(null);
   const [orgForm, setOrgForm] = useState({ name: '', email: '', phone: '', address: '', additionalInsuredNote: '' });
@@ -55,6 +71,16 @@ export default function Settings() {
   const [orgError, setOrgError] = useState('');
 
   const isAdmin = user?.role === 'ADMIN';
+  const tabs = ['Company', 'Team', ...(isAdmin ? ['Integrations'] : []), 'Plan & billing', 'Vendor portal', 'Profile'];
+  const tab = tabFromParam(searchParams.get('tab'), isAdmin);
+
+  const selectTab = (name) => {
+    const key = TAB_KEYS[name];
+    const next = new URLSearchParams(searchParams);
+    if (!key || key === 'company') next.delete('tab');
+    else next.set('tab', key);
+    setSearchParams(next, { replace: true });
+  };
   const applyUrl = org?.slug ? `${window.location.origin}/apply/${org.slug}` : null;
   const emailChanging = profileForm.email && user?.email && profileForm.email !== user.email;
 
@@ -143,10 +169,11 @@ export default function Settings() {
       <PageTitle>Settings</PageTitle>
 
       <div className="flex gap-1 border-b border-line overflow-x-auto">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            type="button"
+            onClick={() => selectTab(t)}
             className={`px-3.5 py-2.5 text-[13px] whitespace-nowrap border-b-2 -mb-px transition-colors duration-150
               ${tab === t ? 'font-bold text-navy border-amber' : 'font-semibold text-muted border-transparent hover:text-navy'}`}
           >
@@ -161,8 +188,9 @@ export default function Settings() {
             <Card className="p-[22px] flex flex-col gap-4">
               <span className="text-[15px] font-bold text-navy">Company</span>
               <div className="grid sm:grid-cols-2 gap-3.5">
-                <Field label="Legal name">
+                <Field id="settings-legal-name" label="Legal name">
                   <input
+                    id="settings-legal-name"
                     value={orgForm.name}
                     maxLength={ORG_NAME_MAX}
                     onChange={(e) => { setOrgForm({ ...orgForm, name: e.target.value }); setOrgError(''); }}
@@ -170,16 +198,17 @@ export default function Settings() {
                     className={input}
                     disabled={!isAdmin}
                   />
-                  {orgError && <p className="text-bad-text text-xs mt-1">{orgError}</p>}
+                  {orgError && <p id="settings-legal-name-error" className="text-bad-text text-xs mt-1">{orgError}</p>}
                 </Field>
-                <Field label="Notification email">
-                  <input value={orgForm.email} onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })} className={input} disabled={!isAdmin} />
+                <Field id="settings-notification-email" label="Notification email">
+                  <input id="settings-notification-email" value={orgForm.email} onChange={(e) => setOrgForm({ ...orgForm, email: e.target.value })} className={input} disabled={!isAdmin} />
                 </Field>
-                <Field label="Address" hint="appears as certificate holder" className="sm:col-span-2">
-                  <input value={orgForm.address} onChange={(e) => setOrgForm({ ...orgForm, address: e.target.value })} className={input} disabled={!isAdmin} />
+                <Field id="settings-address" label="Address" hint="appears as certificate holder" className="sm:col-span-2">
+                  <input id="settings-address" value={orgForm.address} onChange={(e) => setOrgForm({ ...orgForm, address: e.target.value })} className={input} disabled={!isAdmin} />
                 </Field>
-                <Field label="Note shown to vendors on the upload page" className="sm:col-span-2">
+                <Field id="settings-vendor-note" label="Note shown to vendors on the upload page" className="sm:col-span-2">
                   <textarea
+                    id="settings-vendor-note"
                     rows={3}
                     value={orgForm.additionalInsuredNote}
                     onChange={(e) => setOrgForm({ ...orgForm, additionalInsuredNote: e.target.value })}
@@ -202,28 +231,9 @@ export default function Settings() {
             </Card>
           )}
 
-          {tab === 'Team' && (
-            <Card className="p-[22px] flex flex-col gap-3.5">
-              <span className="text-[15px] font-bold text-navy">Team · {team.length}</span>
-              {team.length === 0 && (
-                <p className="text-[13px] text-muted">No teammates to show.</p>
-              )}
-              {team.map((m) => {
-                const name = `${m.firstName || ''} ${m.lastName || ''}`.trim();
-                return (
-                  <div key={m.id} className="flex justify-between items-center gap-3 text-[13px] py-1.5 border-b border-line-divider last:border-0">
-                    <span className="text-ink min-w-0 break-words">{name || m.email}</span>
-                    <span className="text-muted capitalize flex-none">{(m.role || '').toLowerCase()}</span>
-                  </div>
-                );
-              })}
-              {isAdmin && (
-                <Button as={Link} to="/settings/users" variant="secondary" className="!border-dashed justify-center">
-                  + Invite teammate
-                </Button>
-              )}
-            </Card>
-          )}
+          {tab === 'Team' && <Users />}
+
+          {tab === 'Integrations' && isAdmin && <Integrations />}
 
           {tab === 'Plan & billing' && (
             <Card className="p-[22px] flex flex-col gap-3">
@@ -239,7 +249,7 @@ export default function Settings() {
                 in the database; contact us and we'll invoice and move you over.
               </p>
               {isAdmin && (
-                <Button as={Link} to="/settings/integrations" className="self-start">
+                <Button type="button" onClick={() => selectTab('Integrations')} className="self-start">
                   API keys & webhooks →
                 </Button>
               )}
@@ -284,18 +294,19 @@ export default function Settings() {
               <Card className="p-[22px] flex flex-col gap-4">
                 <span className="text-[15px] font-bold text-navy">Your profile</span>
                 <div className="grid sm:grid-cols-2 gap-3.5">
-                  <Field label="First name">
-                    <input value={profileForm.firstName} onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })} className={input} />
+                  <Field id="settings-first-name" label="First name">
+                    <input id="settings-first-name" value={profileForm.firstName} onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })} className={input} />
                   </Field>
-                  <Field label="Last name">
-                    <input value={profileForm.lastName} onChange={(e) => setProfileForm({ ...profileForm, lastName: e.target.value })} className={input} />
+                  <Field id="settings-last-name" label="Last name">
+                    <input id="settings-last-name" value={profileForm.lastName} onChange={(e) => setProfileForm({ ...profileForm, lastName: e.target.value })} className={input} />
                   </Field>
-                  <Field label="Email" className="sm:col-span-2">
-                    <input value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} className={input} />
+                  <Field id="settings-profile-email" label="Email" className="sm:col-span-2">
+                    <input id="settings-profile-email" value={profileForm.email} onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} className={input} />
                   </Field>
                   {emailChanging && (
-                    <Field label="Current password" hint="required to change email" className="sm:col-span-2">
+                    <Field id="settings-profile-current-password" label="Current password" hint="required to change email" className="sm:col-span-2">
                       <input
+                        id="settings-profile-current-password"
                         type="password"
                         value={profileForm.currentPassword}
                         onChange={(e) => setProfileForm({ ...profileForm, currentPassword: e.target.value })}
@@ -314,14 +325,14 @@ export default function Settings() {
               <Card className="p-[22px] flex flex-col gap-4">
                 <span className="text-[15px] font-bold text-navy">Change password</span>
                 <div className="grid sm:grid-cols-2 gap-3.5">
-                  <Field label="Current password" className="sm:col-span-2">
-                    <input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} className={input} />
+                  <Field id="settings-current-password" label="Current password" className="sm:col-span-2">
+                    <input id="settings-current-password" type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} className={input} />
                   </Field>
-                  <Field label="New password">
-                    <input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} className={input} />
+                  <Field id="settings-new-password" label="New password">
+                    <input id="settings-new-password" type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} className={input} />
                   </Field>
-                  <Field label="Confirm new password">
-                    <input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} className={input} />
+                  <Field id="settings-confirm-password" label="Confirm new password">
+                    <input id="settings-confirm-password" type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} className={input} />
                   </Field>
                 </div>
                 <div className="flex justify-end">
@@ -369,13 +380,14 @@ export default function Settings() {
               </div>
             ))}
             {isAdmin && (
-              <Link
-                to="/settings/users"
+              <button
+                type="button"
+                onClick={() => selectTab('Team')}
                 className="mt-1 py-2 text-center text-[13px] font-semibold text-navy border border-dashed border-line-strong
                   rounded-control hover:border-navy transition-colors duration-150"
               >
-                + Invite teammate
-              </Link>
+                Manage team
+              </button>
             )}
           </Card>
         </div>

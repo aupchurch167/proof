@@ -6,7 +6,7 @@ const { getSignedUrl, deleteFile, downloadFile } = require('../services/storage'
 const { extractCoiData } = require('../services/coiExtractor');
 const { isExtractLimitError } = require('../lib/extractErrors');
 const { z } = require('zod');
-const { logAudit } = require('../services/audit');
+const { logAudit, changedFieldNames } = require('../services/audit');
 
 // Map an AI extraction result onto the COI's editable columns. Shared by the
 // re-analyze route and mirrors the mapping used on first upload.
@@ -195,6 +195,22 @@ router.put('/:id', authenticate, authorize('ADMIN', 'MEMBER', 'REVIEWER'), async
       data,
       include: { vendor: true },
     });
+
+    const changed = changedFieldNames(coi, updated, allowedFields);
+    if (changed.length) {
+      await logAudit({
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        action: 'update',
+        entity: 'coi',
+        entityId: updated.id,
+        details: {
+          vendorName: updated.vendor?.name || null,
+          changed: changed.join(', '),
+        },
+        ipAddress: req.ip,
+      });
+    }
 
     res.json(updated);
   } catch (err) {

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { api } from '../utils/api';
 import { emailFieldError, normalizeEmail } from '../utils/emailCheck';
+import { Button, Card } from '../components/ui';
 
 const roleLabels = { ADMIN: 'Admin', MEMBER: 'Member', REVIEWER: 'Reviewer', VIEWER: 'Viewer' };
 const roleColors = { ADMIN: 'bg-info-bg text-info-text', MEMBER: 'bg-info-bg text-info-text', REVIEWER: 'bg-ok-bg text-ok-text', VIEWER: 'bg-warm text-ink' };
@@ -15,9 +15,10 @@ export default function Users() {
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'MEMBER' });
-  const [inviteMsg, setInviteMsg] = useState('');
+  const [inviteNotice, setInviteNotice] = useState(null);
   const [emailError, setEmailError] = useState('');
   const [inviting, setInviting] = useState(false);
+  const isAdmin = currentUser?.role === 'ADMIN';
 
   const fetchUsers = () => {
     api.get('/users')
@@ -37,15 +38,15 @@ export default function Users() {
     }
     setEmailError('');
     setInviting(true);
-    setInviteMsg('');
+    setInviteNotice(null);
     try {
       await api.post('/users/invite', { ...inviteForm, email: normalizeEmail(inviteForm.email) });
-      setInviteMsg('Invitation sent!');
+      setInviteNotice({ tone: 'ok', text: 'Invitation sent' });
       setInviteForm({ email: '', role: 'MEMBER' });
       setShowInvite(false);
       fetchUsers();
     } catch (err) {
-      setInviteMsg('Error: ' + err.message);
+      setInviteNotice({ tone: 'bad', text: err.message || "Couldn't send the invitation" });
     } finally {
       setInviting(false);
     }
@@ -70,79 +71,70 @@ export default function Users() {
     }
   };
 
-  if (loading) return <div className="text-center py-12 text-muted">Loading...</div>;
+  if (loading) return <div className="text-[13px] text-muted">Loading…</div>;
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Settings</h1>
-
-      <div className="flex border-b mb-6">
-        <Link to="/settings"
-          className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted hover:text-ink-2 hover:border-line-strong">
-          General
-        </Link>
-        <Link to="/settings/users"
-          className="px-4 py-2.5 text-sm font-medium border-b-2 border-amber text-navy">
-          Users
-        </Link>
-        <Link to="/settings/integrations"
-          className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted hover:text-ink-2 hover:border-line-strong">
-          Integrations
-        </Link>
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-between items-center gap-3">
+        <span className="text-[15px] font-bold text-navy">Team · {users.length}</span>
+        {isAdmin && (
+          <Button type="button" variant="amber" onClick={() => { setShowInvite((open) => !open); setInviteNotice(null); }}>
+            Invite teammate
+          </Button>
+        )}
       </div>
 
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-lg font-semibold">User Management</h2>
-        <button onClick={() => setShowInvite(!showInvite)}
-          className="bg-amber text-white px-4 py-2 rounded-control hover:bg-amber-hover text-sm font-medium">
-          Invite User
-        </button>
-      </div>
-
-      {inviteMsg && (
-        <div className={`px-4 py-3 rounded-control mb-4 text-sm ${inviteMsg.startsWith('Error') ? 'bg-bad-bg text-bad-text' : 'bg-ok-bg text-ok-text'}`}>
-          {inviteMsg}
+      {inviteNotice && (
+        <div className={`px-4 py-3 rounded-control text-sm ${inviteNotice.tone === 'bad' ? 'bg-bad-bg text-bad-text' : 'bg-ok-bg text-ok-text'}`}>
+          {inviteNotice.text}
         </div>
       )}
 
-      {showInvite && (
-        <form onSubmit={handleInvite} className="bg-white rounded-card border p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">Invite a New User</h2>
-          <p className="text-sm text-muted mb-4">An email will be sent with a link to join your organization.</p>
-          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+      {isAdmin && showInvite && (
+        <form onSubmit={handleInvite} className="bg-white rounded-card border border-line p-[22px] flex flex-col gap-4">
+          <div>
+            <span className="text-[15px] font-bold text-navy">Invite a teammate</span>
+            <p className="text-[13px] text-muted mt-1">An email will be sent with a link to join your organization.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1">
+              <label htmlFor="settings-invite-email" className="block text-xs font-semibold text-ink-2 mb-1">Email</label>
               <input
+                id="settings-invite-email"
                 type="email"
-                placeholder="Email address"
+                placeholder="name@company.com"
                 value={inviteForm.email}
                 onChange={(e) => { setInviteForm({ ...inviteForm, email: e.target.value }); setEmailError(''); }}
                 onInvalid={(e) => { e.preventDefault(); setEmailError(emailFieldError(inviteForm.email)); }}
                 aria-invalid={emailError ? 'true' : undefined}
-                className="w-full px-3 py-2.5 border rounded-control text-base sm:text-sm"
+                aria-describedby={emailError ? 'settings-invite-email-error' : undefined}
+                className="w-full px-3 py-2.5 border border-line-strong rounded-control text-base sm:text-sm"
                 required
               />
-              {emailError && <p className="text-bad-text text-xs mt-1">{emailError}</p>}
+              {emailError && <p id="settings-invite-email-error" className="text-bad-text text-xs mt-1">{emailError}</p>}
             </div>
-            <select
-              value={inviteForm.role}
-              onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}
-              className="px-3 py-2.5 border rounded-control text-base sm:text-sm w-full sm:w-auto">
-              <option value="MEMBER">Member</option>
-              <option value="ADMIN">Admin</option>
-            </select>
+            <div>
+              <label htmlFor="settings-invite-role" className="block text-xs font-semibold text-ink-2 mb-1">Role</label>
+              <select
+                id="settings-invite-role"
+                value={inviteForm.role}
+                onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}
+                className="px-3 py-2.5 border border-line-strong rounded-control text-base sm:text-sm w-full sm:w-auto">
+                <option value="MEMBER">Member</option>
+                <option value="ADMIN">Admin</option>
+              </select>
+            </div>
           </div>
           <div className="flex gap-2">
-            <button type="submit" disabled={inviting}
-              className="bg-amber text-white px-4 py-2.5 rounded-control hover:bg-amber-hover disabled:opacity-50 text-sm">
-              {inviting ? 'Sending...' : 'Send Invitation'}
-            </button>
-            <button type="button" onClick={() => setShowInvite(false)}
-              className="px-4 py-2.5 rounded-control border text-sm">Cancel</button>
+            <Button type="submit" variant="amber" disabled={inviting}>
+              {inviting ? 'Sending…' : 'Send invitation'}
+            </Button>
+            <Button type="button" onClick={() => setShowInvite(false)}>Cancel</Button>
           </div>
         </form>
       )}
 
-      <div className="bg-white rounded-card border overflow-hidden">
+      <Card className="overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-card-alt border-b">
@@ -169,9 +161,9 @@ export default function Users() {
                     {isPending && <p className="text-xs text-yellow-600">Invite pending</p>}
                   </td>
                   <td className="px-6 py-4">
-                    {u.id === currentUser.id ? (
+                    {u.id === currentUser.id || !isAdmin ? (
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${roleColors[u.role] || roleColors.MEMBER}`}>
-                        {roleLabels[u.role] || u.role} (you)
+                        {roleLabels[u.role] || u.role}{u.id === currentUser.id ? ' (you)' : ''}
                       </span>
                     ) : (
                       <select
@@ -188,7 +180,7 @@ export default function Users() {
                     {new Date(u.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    {u.id !== currentUser.id && (
+                    {isAdmin && u.id !== currentUser.id && (
                       <button
                         onClick={() => handleRemove(u.id, displayName)}
                         className="text-bad-text hover:underline text-sm">
@@ -201,7 +193,7 @@ export default function Users() {
             })}
           </tbody>
         </table>
-      </div>
+      </Card>
     </div>
   );
 }

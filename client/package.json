@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/utils/emailCheck.test.js"
+    "test": "node --test src/utils/*.test.js"
   },
   "dependencies": {
     "@sentry/react": "^10.75.0",

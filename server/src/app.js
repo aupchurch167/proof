@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { loginLimiters } = require('./middleware/loginRateLimit');
 const morgan = require('morgan');
 const path = require('path');
 
@@ -94,13 +95,28 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// Rate limiting
+// Rate limiting.
+// Login has its own failure-only limiters (per account+IP, per account, and
+// per IP). The other auth routes stay on a tight per-IP cap that counts every
+// request, so signup and password-reset spam stay blocked. Google sign-in
+// ignores successes so a person can use the button repeatedly; failed Google
+// attempts still stop at 10 per IP per 15 minutes.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
+});
+
+const googleLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many requests, please try again later' },
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
 const generalLimiter = rateLimit({
@@ -129,9 +145,11 @@ const apiV1Limiter = rateLimit({
   message: { error: { code: 'rate_limited', message: 'Too many requests, please try again later', details: {} } },
 });
 
-app.use('/api/auth/login', authLimiter);
+for (const limiter of loginLimiters) {
+  app.use('/api/auth/login', limiter);
+}
 app.use('/api/auth/signup', authLimiter);
-app.use('/api/auth/google', authLimiter);
+app.use('/api/auth/google', googleLimiter);
 app.use('/api/auth/accept-invite', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);

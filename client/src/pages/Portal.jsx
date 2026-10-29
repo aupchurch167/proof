@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { API_BASE } from '../utils/api';
+import { addressFieldError, phoneFieldError } from '../utils/vendorContact';
 
 function pdfFileError(file) {
   if (!file) return 'Choose a PDF certificate';
@@ -60,6 +61,7 @@ export default function Portal({ preview = false }) {
   const [dragging, setDragging] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
   const [form, setForm] = useState({});
+  const [fieldErrors, setFieldErrors] = useState({});
 
   useEffect(() => {
     fetch(portalBase, { headers: authHeaders() })
@@ -101,6 +103,12 @@ export default function Portal({ preview = false }) {
 
   const saveInfo = async (e) => {
     e.preventDefault();
+    const nextErrors = {
+      phone: phoneFieldError(form.phone) || '',
+      address: addressFieldError(form.address) || '',
+    };
+    setFieldErrors(nextErrors);
+    if (nextErrors.phone || nextErrors.address) return;
     try {
       const res = await fetch(`${portalBase}/info`, {
         method: 'PUT',
@@ -284,12 +292,23 @@ export default function Portal({ preview = false }) {
             <span className="text-sm font-bold text-navy">Update your contact details</span>
             {[['name', 'Company name'], ['contactName', 'Contact name'], ['email', 'Email'], ['phone', 'Phone'], ['address', 'Address']].map(([key, label]) => (
               <div key={key} className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-ink-2">{label}</label>
+                <label htmlFor={`portal-${key}`} className="text-xs font-semibold text-ink-2">{label}</label>
                 <input
+                  id={`portal-${key}`}
                   value={form[key] || ''}
-                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  aria-invalid={fieldErrors[key] ? 'true' : undefined}
+                  aria-describedby={fieldErrors[key] ? `portal-${key}-error` : undefined}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm({ ...form, [key]: value });
+                    if (key === 'phone' || key === 'address') {
+                      const check = key === 'phone' ? phoneFieldError : addressFieldError;
+                      setFieldErrors((prev) => ({ ...prev, [key]: prev[key] ? (check(value) || '') : prev[key] }));
+                    }
+                  }}
                   className="px-3 py-2 rounded-control border border-line-strong text-[13px] focus:outline-none focus:border-navy"
                 />
+                {fieldErrors[key] && <p id={`portal-${key}-error`} className="text-bad-text text-xs">{fieldErrors[key]}</p>}
               </div>
             ))}
             <div className="flex gap-2">

@@ -1,9 +1,69 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { Button, Card, Chip, Dot, PageTitle, Toggle } from '../components/ui';
+import { formatWholeDollars, parseDayCount, parseWholeDollars } from '../utils/money';
+
+function LimitInput({ dollars, disabled, error, onError, onCommit }) {
+  const [text, setText] = useState('');
+  const [focused, setFocused] = useState(false);
+  const errorRef = useRef(error || '');
+
+  useEffect(() => {
+    errorRef.current = error || '';
+  }, [error]);
+
+  useEffect(() => {
+    if (focused || errorRef.current) return;
+    setText(dollars == null ? '' : formatWholeDollars(dollars));
+  }, [dollars, focused, error]);
+
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <input
+        type="text"
+        inputMode="numeric"
+        disabled={disabled}
+        aria-invalid={error ? 'true' : undefined}
+        value={text}
+        onFocus={() => {
+          setFocused(true);
+          if (!errorRef.current && dollars != null) setText(String(dollars));
+        }}
+        onBlur={() => {
+          setFocused(false);
+          if (!errorRef.current && dollars != null) setText(formatWholeDollars(dollars));
+        }}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setText(raw);
+          if (disabled) return;
+          const parsed = parseWholeDollars(raw);
+          if (!parsed.ok) {
+            errorRef.current = parsed.error;
+            onError(parsed.error);
+            return;
+          }
+          if (parsed.empty || parsed.dollars <= 0) {
+            const message = 'Enter a minimum limit above zero';
+            errorRef.current = message;
+            onError(message);
+            onCommit(parsed.empty ? null : parsed.dollars);
+            return;
+          }
+          errorRef.current = '';
+          onError('');
+          onCommit(parsed.dollars);
+        }}
+        className={`px-2.5 py-[7px] rounded-[7px] border text-[13px] focus:outline-none focus:border-navy
+          ${disabled ? 'border-line-divider bg-card-alt text-faint' : 'border-line-strong bg-white text-ink'}`}
+      />
+      {error && !disabled && <p className="text-bad-text text-[11px] leading-snug">{error}</p>}
+    </div>
+  );
+}
 
 const PERIOD_MODES = ['Policy year', 'Fiscal year', 'Rolling 12 months', 'Custom'];
 
@@ -38,6 +98,10 @@ export default function Requirements() {
   const [saving, setSaving] = useState(false);
   const [impact, setImpact] = useState(null);
   const [periodStatus, setPeriodStatus] = useState(null);
+  const [daysText, setDaysText] = useState('');
+  const [daysError, setDaysError] = useState('');
+  const [limitErrors, setLimitErrors] = useState({});
+  const savingRef = useRef(false);
 
   const isAdmin = user?.role === 'ADMIN';
 
@@ -47,6 +111,9 @@ export default function Requirements() {
       setData(d);
       setTemplate(structuredClone(d.templates[0]));
       setPeriod({ ...d.coveragePeriod });
+      setDaysText(String(d.templates[0]?.expiringWindowDays ?? 0));
+      setDaysError('');
+      setLimitErrors({});
     } catch (err) {
       toast.error("Couldn't load your requirements");
     } finally {
@@ -93,18 +160,26 @@ export default function Requirements() {
   };
 
   const save = async () => {
+    // A second click before the button disables would fire the request twice
+    // and show the success toast twice.
+    if (savingRef.current) return;
+    if (daysError || Object.values(limitErrors).some(Boolean)) return;
+    savingRef.current = true;
     setSaving(true);
     try {
-      await api.put(`/requirements/${template.id}`, {
+      const saved = await api.put(`/requirements/${template.id}`, {
         coverages: template.coverages.map((c) => ({ key: c.key, required: c.required, minLimit: c.minLimit })),
         requireHolderMatch: template.requireHolderMatch,
         expiringWindowDays: template.expiringWindowDays,
       });
+      setTemplate(structuredClone(saved));
+      setData((prev) => (prev ? { ...prev, templates: [saved] } : prev));
+      setDaysText(String(saved.expiringWindowDays ?? 0));
       toast.success('Template saved — every vendor re-checked');
-      load();
     } catch (err) {
       toast.error(err.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -193,19 +268,17 @@ export default function Requirements() {
                 checked={c.required}
                 disabled={!isAdmin}
                 label={`${c.label} required`}
-                onChange={(next) => setCoverage(c.key, { required: next, minLimit: c.minLimit || 1000000 })}
-              />
-              <input
-                type="text"
-                inputMode="numeric"
-                disabled={!c.required || !isAdmin}
-                value={c.minLimit == null ? '' : `$${Number(c.minLimit).toLocaleString()}`}
-                onChange={(e) => {
-                  const digits = e.target.value.replace(/[^0-9]/g, '');
-                  setCoverage(c.key, { minLimit: digits ? Number(digits) : null });
+                onChange={(next) => {
+                  setCoverage(c.key, { required: next, minLimit: c.minLimit || 1000000 });
+                  if (!next) setLimitErrors((prev) => ({ ...prev, [c.key]: '' }));
                 }}
-                className={`px-2.5 py-[7px] rounded-[7px] border text-[13px] focus:outline-none focus:border-navy
-                  ${c.required ? 'border-line-strong bg-white text-ink' : 'border-line-divider bg-card-alt text-faint'}`}
+              />
+              <LimitInput
+                dollars={c.minLimit}
+                disabled={!c.required || !isAdmin}
+                error={limitErrors[c.key] || ''}
+                onError={(message) => setLimitErrors((prev) => ({ ...prev, [c.key]: message }))}
+                onCommit={(minLimit) => setCoverage(c.key, { minLimit })}
               />
               <span className="text-xs text-muted text-right">{c.required ? 'USD' : ''}</span>
             </div>
@@ -233,7 +306,12 @@ export default function Requirements() {
                 checked={template.expiringWindowDays > 0}
                 disabled={!isAdmin}
                 label="Treat coverage as expiring"
-                onChange={(v) => setTemplate({ ...template, expiringWindowDays: v ? 30 : 0 })}
+                onChange={(v) => {
+                  const days = v ? 30 : 0;
+                  setDaysText(String(days));
+                  setDaysError('');
+                  setTemplate({ ...template, expiringWindowDays: days });
+                }}
               />
               <span className="text-ink flex flex-col gap-0.5">
                 <span>
@@ -242,15 +320,27 @@ export default function Requirements() {
                     type="text"
                     inputMode="numeric"
                     disabled={!isAdmin}
-                    value={template.expiringWindowDays}
-                    onChange={(e) => setTemplate({ ...template, expiringWindowDays: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 })}
-                    className="w-12 px-1.5 py-0.5 mx-0.5 text-center rounded-chip border border-line-strong text-[13px] font-bold focus:outline-none focus:border-navy"
+                    aria-invalid={daysError ? 'true' : undefined}
+                    value={daysText}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setDaysText(raw);
+                      const parsed = parseDayCount(raw);
+                      if (!parsed.ok) {
+                        setDaysError(parsed.error);
+                        return;
+                      }
+                      setDaysError('');
+                      setTemplate({ ...template, expiringWindowDays: parsed.days });
+                    }}
+                    className="w-14 px-1.5 py-0.5 mx-0.5 text-center rounded-chip border border-line-strong text-[13px] font-bold focus:outline-none focus:border-navy"
                   />{' '}
                   days as "Expiring"
                 </span>
                 <span className="text-xs text-muted">
                   Enforced on the Expiring badge, coverage chips, the dashboard, API coverage status, and the weekly summary. 0 turns Expiring off; a date already past is still Expired. Reminder emails still use Reminder settings.
                 </span>
+                {daysError && <span className="text-bad-text text-xs">{daysError}</span>}
               </span>
             </label>
           </div>
@@ -341,7 +431,7 @@ export default function Requirements() {
                   (impact.newlyFailing > 0 ? ` ${impact.newlyFailing} would become non-compliant.` : ' None would become non-compliant.')
                 : 'Changing limits re-checks every vendor on save.'}
             </span>
-            <Button variant="amber" onClick={save} disabled={saving || !isAdmin}>
+            <Button type="button" variant="amber" onClick={save} disabled={saving || !isAdmin || Boolean(daysError) || Object.values(limitErrors).some(Boolean)}>
               {saving ? 'Saving…' : 'Save template'}
             </Button>
           </div>

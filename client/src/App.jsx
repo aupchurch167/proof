@@ -12,8 +12,7 @@ import Reminders from './pages/Reminders';
 import Audit from './pages/Audit';
 import CoiDetail from './pages/CoiDetail';
 import Settings from './pages/Settings';
-import Users from './pages/Users';
-import Integrations from './pages/Integrations';
+import NotFound from './pages/NotFound';
 
 import Portal from './pages/Portal';
 import Apply from './pages/Apply';
@@ -70,10 +69,11 @@ export default function App() {
                 <Route path="/audit" element={<Audit />} />
                 <Route path="/replies" element={<Replies />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="/settings/users" element={<AdminRoute><Users /></AdminRoute>} />
-                <Route path="/settings/integrations" element={<AdminRoute><Integrations /></AdminRoute>} />
+                <Route path="/settings/users" element={<Navigate to="/settings?tab=team" replace />} />
+                <Route path="/settings/integrations" element={<AdminRoute><Navigate to="/settings?tab=integrations" replace /></AdminRoute>} />
 
                 <Route path="/import" element={<Import />} />
+                <Route path="*" element={<NotFound />} />
               </Routes>
             </Layout>
           </PrivateRoute>

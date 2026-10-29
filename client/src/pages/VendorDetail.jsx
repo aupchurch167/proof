@@ -11,6 +11,7 @@ import ReplyList from '../components/ReplyList';
 import { CANONICAL_TRADES } from '../constants/trades';
 import { vendorStatus, coiStatus, VERDICT } from '../constants/status';
 import { VENDOR_NAME_MAX, vendorNameError } from '../constants/limits';
+import { addressFieldError, phoneFieldError } from '../utils/vendorContact';
 import { canDeleteVendors, canEditVendors } from '../constants/roles';
 import { Button, Card, Dot, StatusPill, Eyebrow, EmptyState } from '../components/ui';
 
@@ -82,6 +83,7 @@ export default function VendorDetail() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
+  const [fieldErrors, setFieldErrors] = useState({});
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -110,10 +112,16 @@ export default function VendorDetail() {
 
   const save = async () => {
     const nameError = vendorNameError(form.name);
+    const nextErrors = {
+      phone: phoneFieldError(form.phone) || '',
+      address: addressFieldError(form.address) || '',
+    };
+    setFieldErrors(nextErrors);
     if (nameError) {
       toast.error(nameError);
       return;
     }
+    if (nextErrors.phone || nextErrors.address) return;
     try {
       await api.put(`/vendors/${id}`, form);
       setEditing(false);
@@ -218,13 +226,26 @@ export default function VendorDetail() {
               ['phone', 'Phone'], ['address', 'Address'],
             ].map(([key, label]) => (
               <div key={key}>
-                <label className="block text-[13px] font-semibold text-ink-2 mb-1">{label}</label>
+                <label htmlFor={`vendor-${key}`} className="block text-[13px] font-semibold text-ink-2 mb-1">{label}</label>
                 <input
+                  id={`vendor-${key}`}
                   value={form[key] || ''}
                   maxLength={key === 'name' ? VENDOR_NAME_MAX : undefined}
-                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  aria-invalid={fieldErrors[key] ? 'true' : undefined}
+                  aria-describedby={fieldErrors[key] ? `vendor-${key}-error` : undefined}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm({ ...form, [key]: value });
+                    if (key === 'phone' || key === 'address') {
+                      const check = key === 'phone' ? phoneFieldError : addressFieldError;
+                      setFieldErrors((prev) => ({ ...prev, [key]: prev[key] ? (check(value) || '') : prev[key] }));
+                    }
+                  }}
                   className="w-full px-3 py-2.5 rounded-control border border-line-strong text-[13px] focus:outline-none focus:border-navy"
                 />
+                {fieldErrors[key] && (
+                  <p id={`vendor-${key}-error`} className="text-bad-text text-xs mt-1">{fieldErrors[key]}</p>
+                )}
               </div>
             ))}
             <div>
